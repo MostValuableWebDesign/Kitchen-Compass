@@ -35,7 +35,7 @@ function NativeTabLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="plan">
         <NativeTabs.Trigger.Icon sf={{ default: 'calendar', selected: 'calendar' }} />
-        <NativeTabs.Trigger.Label>Meal Plan</NativeTabs.Label>
+        <NativeTabs.Trigger.Label>Meal Plan</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -124,8 +124,5 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
   return <ClassicTabLayout />;
 }

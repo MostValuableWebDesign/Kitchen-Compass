@@ -1,6 +1,6 @@
-# [Project name]
+# Kitchen Compass
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and cooking with the ingredients already at home.
 
 ## Run & Operate
 
@@ -22,23 +22,35 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/kitchen-compass/app/` — Expo Router screens for Today, My Kitchen, Scan, Recipes, Meal Plan, recipe detail, and cooking mode.
+- `artifacts/kitchen-compass/context/KitchenContext.tsx` — AsyncStorage-backed inventory, preferences, and meal-plan state.
+- `artifacts/kitchen-compass/data/recipes.ts` — curated recipe content and cooking instructions used by the first build.
+- `artifacts/kitchen-compass/constants/colors.ts` — Kitchen Compass light and dark semantic theme tokens.
+- `artifacts/kitchen-compass/assets/images/` — app icon and generated recipe visuals.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first mobile build is frontend-only and uses AsyncStorage so the core workflow works offline.
+- Camera and photo-library access use Expo ImagePicker's native entry points; every captured photo pauses at a review screen.
+- Photo recognition is intentionally not represented as working until a vision service is configured; uncertain manually confirmed photo entries are labeled.
+- Planned meals reserve conceptually but do not deduct inventory; cooking mode applies a single used status when a meal is marked cooked.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Today shows the current day's meals, use-soon ingredients, and quick recipe inspiration.
+- My Kitchen supports searchable storage locations, quantity-unknown labels, running-low toggles, and removal.
+- Scan supports real camera capture, photo-library selection, and manual ingredient entry with confirmation.
+- Recipes include inventory-aware status, nutrition estimates, health-score explanations, ingredients, and detailed cooking mode with timers.
+- Meal Plan supports seven days of breakfast, lunch, and dinner slots with persistent swaps.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The product should be warm, welcoming, food-focused, and readable with generous touch targets.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Native camera and persistence behavior still need physical-iPhone verification through Expo Go or a development build.
+- The Expo workflow can log a missing React Native DevTools `libglib-2.0.so.0` message while Metro still runs normally.
 
 ## Pointers
 

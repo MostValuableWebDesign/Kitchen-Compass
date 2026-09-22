@@ -94,8 +94,6 @@ export function IngredientRow({ ingredient, onPress, onDelete }: { ingredient: I
   );
 }
 
-export const uiStyles = styles;
-
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 18 },
   eyebrow: { fontSize: 12, fontFamily: 'Inter_700Bold', letterSpacing: 1.2, marginBottom: 5 },
