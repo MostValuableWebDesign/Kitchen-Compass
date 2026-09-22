@@ -6,6 +6,10 @@ import {
   buildReservations,
   deductInventory,
   ingredientIdentitiesMatch,
+  ingredientRowsMatch,
+  confirmedDateStatus,
+  normalizeConfirmedDate,
+  parseQuantityText,
   recipeMatchesPreferences,
   recipeReadiness,
   scaleNutrition,
@@ -51,6 +55,29 @@ test('allergy conflicts exclude recipes and incomplete information is never safe
 test('ingredient matching uses normalized identities, not broad substrings', () => {
   assert.equal(ingredientIdentitiesMatch('eggs', { name: 'egg carton', status: 'fresh', confidence: 'confirmed' }), false);
   assert.equal(ingredientIdentitiesMatch('eggs', { name: 'eggs', status: 'fresh', confidence: 'confirmed' }), true);
+});
+
+test('unsupported quantities remain unknown while supported quantities are normalized', () => {
+  assert.deepEqual(parseQuantityText('2 eggs'), { quantityValue: 2, unit: 'egg', quantityKnown: true });
+  assert.equal(parseQuantityText('1 bag').quantityKnown, false);
+  assert.equal(parseQuantityText('a handful').quantityKnown, false);
+  assert.equal(parseQuantityText('1 handful').quantityKnown, true);
+});
+
+test('duplicate protection matches name and location, allowing separate rows by location', () => {
+  const refrigeratorEggs = { name: 'Eggs', location: 'Refrigerator' };
+  assert.equal(ingredientRowsMatch(refrigeratorEggs, { name: 'eggs', location: 'Refrigerator' }), true);
+  assert.equal(ingredientRowsMatch(refrigeratorEggs, { name: 'eggs', location: 'Pantry' }), false);
+});
+
+test('date warnings use only valid user-confirmed dates and never infer a warning', () => {
+  const now = Date.UTC(2026, 8, 22, 12);
+  assert.equal(normalizeConfirmedDate('2026-09-25'), '2026-09-25');
+  assert.equal(normalizeConfirmedDate('2026-02-30'), undefined);
+  assert.equal(confirmedDateStatus(undefined, now), null);
+  assert.equal(confirmedDateStatus('2026-09-30', now), null);
+  assert.equal(confirmedDateStatus('2026-09-25', now), 'soon');
+  assert.equal(confirmedDateStatus('2026-09-21', now), 'expired');
 });
 
 test('one-serving Green Egg Toast scales to two servings', () => {

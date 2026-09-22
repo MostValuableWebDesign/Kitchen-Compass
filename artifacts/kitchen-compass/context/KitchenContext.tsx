@@ -3,9 +3,11 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useSta
 import { Alert } from 'react-native';
 import {
   buildReservations,
-  canonicalUnit,
   applyCookingTransaction,
+  ingredientRowsMatch,
   normalizeIngredientName,
+  normalizeConfirmedDate,
+  parseQuantityText,
   type Deduction,
   type ReservationRecord,
 } from '@/lib/kitchenLogic';
@@ -27,6 +29,8 @@ export interface Ingredient {
   status: 'fresh' | 'low' | 'used';
   confidence?: 'confirmed' | 'uncertain';
   expires?: string;
+  dateConfirmed?: boolean;
+  dateKind?: 'expiration' | 'best-before';
   photoUri?: string;
   source?: 'manual' | 'scan' | 'purchase';
   sourceScanId?: string;
@@ -133,19 +137,14 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function parseQuantity(quantity?: string) {
-  if (!quantity?.trim()) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
-  const match = quantity.trim().match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/);
-  if (!match) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
-  return { quantityValue: Number(match[1]), unit: canonicalUnit(match[2]), quantityKnown: Boolean(match[2]) };
-}
-
 function normalizeIngredient(ingredient: Ingredient) {
-  const parsed = parseQuantity(ingredient.quantity);
+  const parsed = parseQuantityText(ingredient.quantity);
+  const confirmedDate = ingredient.dateConfirmed ? normalizeConfirmedDate(ingredient.expires) : undefined;
   return {
     ...ingredient,
     normalizedName: normalizeIngredientName(ingredient.name),
-    ...(ingredient.quantity === undefined ? {} : parsed),
+    ...parsed,
+    ...(confirmedDate ? { expires: confirmedDate, dateConfirmed: true } : { expires: undefined, dateConfirmed: false }),
   };
 }
 
@@ -248,7 +247,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     addIngredient: (ingredient) => {
       setIngredients((current) => {
         const incoming = normalizeIngredient({ ...ingredient, id: createId() });
-        const existingIndex = current.findIndex((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === incoming.normalizedName && item.location === ingredient.location);
+        const existingIndex = current.findIndex((item) => ingredientRowsMatch(item, incoming));
         if (existingIndex < 0) return [...current, incoming];
         const existing = current[existingIndex];
         const sameUnit = existing.quantityKnown && incoming.quantityKnown && existing.unit === incoming.unit;
@@ -268,7 +267,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     },
     addPurchasedItems: (rows) => {
       rows.filter((row) => row.confirmed && row.name.trim()).forEach((row) => {
-        const parsed = parseQuantity(row.quantity);
+        const parsed = parseQuantityText(row.quantity);
         if (!parsed.quantityKnown) return;
         setIngredients((current) => [...current, normalizeIngredient({
           id: createId(),

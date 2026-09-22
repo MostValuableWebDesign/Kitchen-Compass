@@ -161,6 +161,7 @@ test("provider failures and malformed model output stay unavailable and sanitize
     const payload = await response.json() as { error: { code: string; message: string } };
     assert.equal(payload.error.code, "SCAN_UNAVAILABLE");
     assert.equal(payload.error.message.includes("upstream"), false);
+    assert.equal(payload.error.message.includes("not changed"), true);
   } finally {
     globalThis.fetch = original;
   }
@@ -214,6 +215,44 @@ test("successful scans are validated and identify existing inventory matches", a
     const payload = await response.json() as { suggestions: Array<{ existingInventoryMatch?: string; quantityKnown: boolean }> };
     assert.equal(payload.suggestions[0]?.existingInventoryMatch, "egg");
     assert.equal(payload.suggestions[0]?.quantityKnown, true);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("multi-photo scans preserve source photos and deduplicate the same ingredient globally", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              suggestions: [
+                { sourcePhotoId: "photo-1", normalizedName: "eggs", displayName: "Eggs", storageLocation: "Refrigerator", quantity: 2, unit: "egg", confidence: 0.98, uncertaintyReasons: [] },
+                { sourcePhotoId: "photo-2", normalizedName: "eggs", displayName: "Eggs carton", storageLocation: "Refrigerator", quantity: 1, unit: "egg", confidence: 0.96, uncertaintyReasons: [] },
+                { sourcePhotoId: "photo-2", normalizedName: "spinach", displayName: "Spinach", storageLocation: "Refrigerator", quantity: null, unit: null, confidence: 0.9, uncertaintyReasons: ["Quantity not visible"] },
+              ],
+              warnings: [],
+            }),
+          },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await request({
+      photos: [
+        { id: "photo-1", mimeType: "image/jpeg", base64: "aGVsbG8=" },
+        { id: "photo-2", mimeType: "image/jpeg", base64: "d29ybGQ=" },
+      ],
+      existingIngredients: [],
+    }, await issueAccess());
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { suggestions: Array<{ normalizedName: string; sourcePhotoId: string; quantityKnown: boolean }> };
+    assert.deepEqual(payload.suggestions.map((suggestion) => [suggestion.normalizedName, suggestion.sourcePhotoId]), [['egg', 'photo-1'], ['spinach', 'photo-2']]);
+    assert.equal(payload.suggestions[1]?.quantityKnown, false);
   } finally {
     globalThis.fetch = original;
   }
