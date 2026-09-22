@@ -23,7 +23,7 @@ export const defaultPreferences: Preferences = {
   allergies: [],
   dietaryRestrictions: [],
   dislikes: [],
-  cuisines: ['Mediterranean'],
+  cuisines: [],
   skill: 'Comfortable',
   cookTime: 45,
   equipment: ['Stovetop', 'Oven'],
