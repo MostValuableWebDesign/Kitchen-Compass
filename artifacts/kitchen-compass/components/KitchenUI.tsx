@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import type { Ingredient } from '@/context/KitchenContext';
 import type { Recipe } from '@/data/recipes';
+import { confirmedDateStatus } from '@/lib/kitchenLogic';
 
 export function AppHeader({ eyebrow, title, action, onAction }: { eyebrow?: string; title: string; action?: string; onAction?: () => void }) {
   const colors = useColors();
@@ -77,6 +78,10 @@ export function RecipeCard({ recipe, hasIngredients, statusText, onPress }: { re
 export function IngredientRow({ ingredient, onPress, onDelete }: { ingredient: Ingredient; onPress?: () => void; onDelete?: () => void }) {
   const colors = useColors();
   const locationIcon = ingredient.location === 'Refrigerator' ? 'thermometer' : ingredient.location === 'Freezer' ? 'cloud-snow' : 'archive';
+  const dateStatus = ingredient.dateConfirmed ? confirmedDateStatus(ingredient.expires) : null;
+  const quantityLabel = ingredient.quantityKnown && ingredient.quantityValue !== undefined && ingredient.unit
+    ? `${ingredient.quantityValue} ${ingredient.unit}`
+    : 'Quantity unknown';
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.ingredientRow, { borderBottomColor: colors.border }, pressed && styles.pressed]}>
       <View style={[styles.ingredientIcon, { backgroundColor: ingredient.status === 'low' ? colors.accent : colors.secondary }]}>
@@ -87,7 +92,8 @@ export function IngredientRow({ ingredient, onPress, onDelete }: { ingredient: I
           <Text style={[styles.ingredientName, { color: colors.foreground }]}>{ingredient.name}</Text>
           {ingredient.confidence === 'uncertain' ? <Text style={[styles.uncertain, { color: colors.accentForeground }]}>Uncertain</Text> : null}
         </View>
-        <Text style={[styles.ingredientMeta, { color: colors.mutedForeground }]}>{ingredient.quantity ? `${ingredient.quantity}${ingredient.unit ? ` ${ingredient.unit}` : ''}` : 'Quantity unknown'} · {ingredient.location}</Text>
+        <Text style={[styles.ingredientMeta, { color: colors.mutedForeground }]}>{quantityLabel} · {ingredient.location}</Text>
+        {dateStatus ? <Text style={[styles.dateWarning, { color: colors.destructive }]}>{dateStatus === 'expired' ? 'Confirmed date has passed' : `${ingredient.dateKind === 'best-before' ? 'Best before' : 'Expires'} soon`}</Text> : null}
       </View>
       {onDelete ? <Pressable testID={`delete-${ingredient.id}`} onPress={onDelete} hitSlop={10}><Feather name="trash-2" size={17} color={colors.mutedForeground} /></Pressable> : <Feather name="chevron-right" size={17} color={colors.mutedForeground} />}
     </Pressable>
@@ -122,5 +128,6 @@ const styles = StyleSheet.create({
   ingredientName: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginBottom: 3 },
   ingredientMeta: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   uncertain: { fontSize: 10, fontFamily: 'Inter_700Bold', backgroundColor: '#f1c872', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  dateWarning: { fontSize: 11, fontFamily: 'Inter_600SemiBold', marginTop: 4 },
   pressed: { opacity: 0.72 },
 });

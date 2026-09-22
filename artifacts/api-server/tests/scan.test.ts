@@ -15,7 +15,29 @@ if (!address || typeof address === "string") throw new Error("Test server did no
 const baseUrl = `http://127.0.0.1:${address.port}/api`;
 const originalFetch = globalThis.fetch;
 
-beforeEach(() => resetScanRateLimiter());
+async function clearPersistentTestQuotas() {
+  if (!process.env.DATABASE_URL) return;
+  const { pool } = await import("@workspace/db");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS kitchen_scan_quota (
+      bucket_key TEXT PRIMARY KEY,
+      window_started_at TIMESTAMPTZ NOT NULL,
+      request_count INTEGER NOT NULL
+    )
+  `);
+  await pool.query(`
+    DELETE FROM kitchen_scan_quota
+    WHERE bucket_key LIKE 'issue:%'
+       OR bucket_key LIKE 'ip:%'
+       OR bucket_key LIKE 'token:%'
+       OR bucket_key LIKE 'test:%'
+  `);
+}
+
+beforeEach(async () => {
+  resetScanRateLimiter();
+  await clearPersistentTestQuotas();
+});
 after(() => server.close());
 
 async function issueAccess() {
@@ -25,13 +47,14 @@ async function issueAccess() {
   return payload.accessToken;
 }
 
-async function request(body: unknown, accessToken?: string, installationId?: string) {
+async function request(body: unknown, accessToken?: string, installationId?: string, forwardedFor?: string) {
   return originalFetch(`${baseUrl}/scan/analyze`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
       ...(installationId ? { "x-kitchen-installation": installationId } : {}),
+      ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -62,6 +85,16 @@ test("changing the installation header alone does not reset the access quota", a
   const response = await request({ photos: [] }, accessToken, "test-installation-changed");
   assert.equal(response.status, 429);
   assert.equal(response.headers.get("retry-after"), "30");
+});
+
+test("spoofed forwarded IP headers cannot reset scan quotas", async () => {
+  const accessToken = await issueAccess();
+  for (let index = 0; index < 5; index += 1) {
+    const response = await request({ photos: [] }, accessToken, `scan-installation-${index}`, `198.51.100.${index + 1}`);
+    assert.equal(response.status, 400);
+  }
+  const response = await request({ photos: [] }, accessToken, "scan-installation-final", "203.0.113.99");
+  assert.equal(response.status, 429);
 });
 
 test("spoofed forwarded IP headers cannot reset access-token quotas", async () => {
@@ -128,6 +161,7 @@ test("provider failures and malformed model output stay unavailable and sanitize
     const payload = await response.json() as { error: { code: string; message: string } };
     assert.equal(payload.error.code, "SCAN_UNAVAILABLE");
     assert.equal(payload.error.message.includes("upstream"), false);
+    assert.equal(payload.error.message.includes("not changed"), true);
   } finally {
     globalThis.fetch = original;
   }
@@ -181,6 +215,44 @@ test("successful scans are validated and identify existing inventory matches", a
     const payload = await response.json() as { suggestions: Array<{ existingInventoryMatch?: string; quantityKnown: boolean }> };
     assert.equal(payload.suggestions[0]?.existingInventoryMatch, "egg");
     assert.equal(payload.suggestions[0]?.quantityKnown, true);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("multi-photo scans preserve source photos and deduplicate the same ingredient globally", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              suggestions: [
+                { sourcePhotoId: "photo-1", normalizedName: "eggs", displayName: "Eggs", storageLocation: "Refrigerator", quantity: 2, unit: "egg", confidence: 0.98, uncertaintyReasons: [] },
+                { sourcePhotoId: "photo-2", normalizedName: "eggs", displayName: "Eggs carton", storageLocation: "Refrigerator", quantity: 1, unit: "egg", confidence: 0.96, uncertaintyReasons: [] },
+                { sourcePhotoId: "photo-2", normalizedName: "spinach", displayName: "Spinach", storageLocation: "Refrigerator", quantity: null, unit: null, confidence: 0.9, uncertaintyReasons: ["Quantity not visible"] },
+              ],
+              warnings: [],
+            }),
+          },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await request({
+      photos: [
+        { id: "photo-1", mimeType: "image/jpeg", base64: "aGVsbG8=" },
+        { id: "photo-2", mimeType: "image/jpeg", base64: "d29ybGQ=" },
+      ],
+      existingIngredients: [],
+    }, await issueAccess());
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { suggestions: Array<{ normalizedName: string; sourcePhotoId: string; quantityKnown: boolean }> };
+    assert.deepEqual(payload.suggestions.map((suggestion) => [suggestion.normalizedName, suggestion.sourcePhotoId]), [['egg', 'photo-1'], ['spinach', 'photo-2']]);
+    assert.equal(payload.suggestions[1]?.quantityKnown, false);
   } finally {
     globalThis.fetch = original;
   }

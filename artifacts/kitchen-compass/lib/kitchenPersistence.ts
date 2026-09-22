@@ -6,7 +6,7 @@ import type {
   Preferences,
   ShoppingListState,
 } from '@/context/KitchenContext';
-import { canonicalUnit, normalizeIngredientName, type ReservationRecord } from '@/lib/kitchenLogic';
+import { normalizeConfirmedDate, normalizeIngredientName, parseQuantityText, type ReservationRecord } from '@/lib/kitchenLogic';
 
 export type PersistedKitchenState = {
   ingredients: Ingredient[];
@@ -37,36 +37,33 @@ type LegacyState = {
   plan?: unknown;
 };
 
-function parseQuantity(quantity?: string) {
-  if (!quantity?.trim()) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
-  const match = quantity.trim().match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/);
-  if (!match || !match[2]) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
-  return { quantityValue: Number(match[1]), unit: canonicalUnit(match[2]), quantityKnown: true };
-}
-
 function normalizeStoredIngredient(value: unknown, index: number): Ingredient {
   if (!value || typeof value !== 'object') throw new Error(`Saved ingredient ${index + 1} is invalid.`);
   const item = value as Partial<Ingredient>;
   if (typeof item.name !== 'string' || !item.name.trim()) throw new Error(`Saved ingredient ${index + 1} has no name.`);
-  const parsed = parseQuantity(item.quantity);
-  const quantityKnown = item.quantityKnown === true
-    && typeof item.quantityValue === 'number'
-    && Number.isFinite(item.quantityValue)
-    && typeof item.unit === 'string'
-    && Boolean(canonicalUnit(item.unit));
+  const parsed = parseQuantityText(item.quantity);
+  const quantityKnown = parsed.quantityKnown || (
+    item.quantityKnown === true
+      && typeof item.quantityValue === 'number'
+      && Number.isFinite(item.quantityValue)
+      && typeof item.unit === 'string'
+      && parseQuantityText(`${item.quantityValue} ${item.unit}`).quantityKnown
+  );
+  const confirmedDate = item.dateConfirmed === true ? normalizeConfirmedDate(item.expires) : undefined;
   return {
     id: typeof item.id === 'string' && item.id ? item.id : `migrated-ingredient-${index + 1}`,
     name: item.name,
     normalizedName: normalizeIngredientName(item.name),
     location: item.location === 'Freezer' || item.location === 'Pantry' ? item.location : 'Refrigerator',
     ...(quantityKnown
-      ? { quantity: item.quantity ?? `${item.quantityValue} ${item.unit}`, quantityValue: item.quantityValue, unit: canonicalUnit(item.unit), quantityKnown: true }
-      : item.quantity !== undefined
-        ? parsed
-        : { quantityKnown: false }),
+      ? parsed.quantityKnown
+        ? { quantity: item.quantity, quantityValue: parsed.quantityValue, unit: parsed.unit, quantityKnown: true }
+        : parseQuantityText(`${item.quantityValue} ${item.unit}`)
+      : { quantity: item.quantity, quantityKnown: false }),
     status: item.status === 'low' || item.status === 'used' ? item.status : 'fresh',
     confidence: item.confidence === 'uncertain' ? 'uncertain' : 'confirmed',
-    ...(typeof item.expires === 'string' ? { expires: item.expires } : {}),
+    ...(confirmedDate ? { expires: confirmedDate, dateConfirmed: true } : {}),
+    ...(item.dateKind === 'best-before' ? { dateKind: 'best-before' as const } : { dateKind: 'expiration' as const }),
     ...(typeof item.photoUri === 'string' ? { photoUri: item.photoUri } : {}),
     ...(item.source === 'scan' || item.source === 'purchase' || item.source === 'manual' ? { source: item.source } : {}),
     ...(typeof item.sourceScanId === 'string' ? { sourceScanId: item.sourceScanId } : {}),

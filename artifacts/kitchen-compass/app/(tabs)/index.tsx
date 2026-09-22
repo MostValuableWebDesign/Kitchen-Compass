@@ -7,8 +7,7 @@ import { AppHeader, Chip, RecipeCard, SectionTitle } from '@/components/KitchenU
 import { useKitchen } from '@/context/KitchenContext';
 import { recipes } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
-import { recipeReadiness } from '@/lib/kitchenLogic';
-import { recipeMatchesPreferences } from '@/lib/kitchenLogic';
+import { confirmedDateStatus, recipeReadiness, recipeMatchesPreferences } from '@/lib/kitchenLogic';
 
 export default function TodayScreen() {
   const colors = useColors();
@@ -18,7 +17,7 @@ export default function TodayScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
-  const useSoon = ingredients.filter((item) => item.expires || item.status === 'low').slice(0, 3);
+  const useSoon = ingredients.filter((item) => (item.dateConfirmed && confirmedDateStatus(item.expires)) || item.status === 'low').slice(0, 3);
   const hasIngredient = (recipeId: string) => {
     const recipe = recipes.find((item) => item.id === recipeId);
     return !!recipe && recipeMatchesPreferences(recipe, preferences) && recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations).ready;

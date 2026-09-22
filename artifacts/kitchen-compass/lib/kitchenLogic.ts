@@ -43,6 +43,8 @@ export type RecipePreferenceInput = {
   nutrition: string[];
 };
 
+export type ConfirmedDateStatus = 'expired' | 'soon' | null;
+
 const aliases: Record<string, string> = {
   eggs: 'egg',
   'chicken breast': 'chicken',
@@ -96,6 +98,53 @@ function unitConversion(unit?: string): UnitConversion | null {
     default:
       return null;
   }
+}
+
+export function isSupportedQuantityUnit(unit?: string) {
+  return unitConversion(unit) !== null;
+}
+
+export function parseQuantityText(quantity?: string) {
+  if (!quantity?.trim()) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
+  const match = quantity.trim().match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?$/);
+  if (!match || !match[2]) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
+  const unit = canonicalUnit(match[2]);
+  if (!isSupportedQuantityUnit(unit)) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
+  return { quantityValue: Number(match[1]), unit, quantityKnown: true };
+}
+
+export function normalizeConfirmedDate(value?: string) {
+  const date = value?.trim();
+  if (!date) return undefined;
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return undefined;
+  return date;
+}
+
+export function confirmedDateStatus(value?: string, now = Date.now(), soonDays = 3): ConfirmedDateStatus {
+  const normalized = normalizeConfirmedDate(value);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split('-').map(Number);
+  const target = Date.UTC(year, month - 1, day);
+  const today = new Date(now);
+  const todayStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const difference = Math.floor((target - todayStart) / 86_400_000);
+  if (difference < 0) return 'expired';
+  return difference <= soonDays ? 'soon' : null;
+}
+
+export function ingredientRowsMatch(
+  existing: { name: string; normalizedName?: string; location: string },
+  incoming: { name: string; normalizedName?: string; location: string },
+) {
+  return (existing.normalizedName ?? normalizeIngredientName(existing.name)) === (incoming.normalizedName ?? normalizeIngredientName(incoming.name))
+    && existing.location === incoming.location;
 }
 
 export function convertQuantity(quantity: number, fromUnit?: string, toUnit?: string) {

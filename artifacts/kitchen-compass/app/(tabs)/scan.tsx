@@ -17,9 +17,11 @@ export default function ScanScreen() {
   const router = useRouter();
   const { addIngredient, ingredients, updateIngredient } = useKitchen();
   const [photoUris, setPhotoUris] = useState<string[]>([]);
+  const [pendingCameraAssets, setPendingCameraAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [scanId, setScanId] = useState<string | null>(null);
   const [scanDecisions, setScanDecisions] = useState<Record<string, 'same' | 'additional' | 'correction'>>({});
+  const [correctionTargets, setCorrectionTargets] = useState<Record<string, string>>({});
   const [recognitionState, setRecognitionState] = useState<'idle' | 'analyzing' | 'ready' | 'unavailable'>('idle');
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [name, setName] = useState('');
@@ -33,6 +35,7 @@ export default function ScanScreen() {
     setSuggestions([]);
     setScanId(null);
     setScanDecisions({});
+    setCorrectionTargets({});
     setName('');
     setMode('review');
     setRecognitionState('analyzing');
@@ -72,7 +75,12 @@ export default function ScanScreen() {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.8, allowsEditing: false });
-    if (!result.canceled && result.assets[0]?.uri) void reviewPhotos(result.assets);
+    if (!result.canceled && result.assets[0]?.uri) {
+      setPendingCameraAssets((current) => [...current, result.assets[0]]);
+    }
+  };
+  const analyzeCameraSession = () => {
+    if (pendingCameraAssets.length) void reviewPhotos(pendingCameraAssets);
   };
   const pickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -92,9 +100,11 @@ export default function ScanScreen() {
   const resetScan = () => {
     setMode('choose');
     setPhotoUris([]);
+    setPendingCameraAssets([]);
     setSuggestions([]);
     setScanId(null);
     setScanDecisions({});
+    setCorrectionTargets({});
     setRecognitionState('idle');
     setRecognitionMessage('');
     setName('');
@@ -105,6 +115,15 @@ export default function ScanScreen() {
       Alert.alert('Review an ingredient first', 'Confirm at least one recognized item or add an ingredient manually.');
       return;
     }
+    const unresolvedCorrection = suggestions.find((suggestion) => {
+      const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+      const matches = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
+      return decision === 'correction' && matches.length > 1 && !correctionTargets[suggestion.suggestionId];
+    });
+    if (unresolvedCorrection) {
+      Alert.alert('Choose the exact row', `Select which ${unresolvedCorrection.displayName} row to correct before saving.`);
+      return;
+    }
     const reviewedAt = new Date().toISOString();
     suggestions.forEach((suggestion) => {
       const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
@@ -113,7 +132,10 @@ export default function ScanScreen() {
         ? `${suggestion.quantity} ${suggestion.unit ?? ''}`.trim()
         : undefined;
       if (decision === 'correction') {
-        const existing = ingredients.find((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
+        const matches = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
+        const existing = matches.length === 1
+          ? matches[0]
+          : matches.find((item) => item.id === correctionTargets[suggestion.suggestionId]);
         if (!existing) return;
         updateIngredient(existing.id, {
           name: suggestion.displayName.trim(),
@@ -134,7 +156,7 @@ export default function ScanScreen() {
         location: suggestion.storageLocation,
         status: 'fresh',
         confidence: 'confirmed',
-        photoUri: photoUris[0],
+        photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0],
         source: 'scan',
         sourceScanId: scanId ?? undefined,
         sourcePhotoId: suggestion.sourcePhotoId,
@@ -160,6 +182,16 @@ export default function ScanScreen() {
             <Pressable testID="take-photo" onPress={takePhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             <Pressable testID="manual-entry" onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Enter a confirmed ingredient</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+             {pendingCameraAssets.length ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
+               <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Camera session · {pendingCameraAssets.length} photo{pendingCameraAssets.length === 1 ? '' : 's'}</Text>
+               <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Add another photo or analyze this group together.</Text>
+               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{pendingCameraAssets.map((asset, index) => <Image key={`${asset.uri}-${index}`} source={{ uri: asset.uri }} style={styles.sessionThumbnail} />)}</ScrollView>
+               <View style={styles.sessionActions}>
+                 <Pressable onPress={takePhoto} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.secondary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Take another</Text></Pressable>
+                 <Pressable onPress={analyzeCameraSession} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Analyze photos</Text></Pressable>
+               </View>
+             </View> : null}
+             <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Photos are sent securely to the server for recognition. Nothing is saved to your kitchen until you review, edit, remove, and confirm each suggestion.</Text></View>
           </>
         ) : (
@@ -168,14 +200,29 @@ export default function ScanScreen() {
             <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
             {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
              {recognitionState === 'unavailable' ? <View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View> : null}
-            {suggestions.map((suggestion) => <View key={suggestion.suggestionId} style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.suggestionHeader}><Text style={[styles.suggestionLabel, { color: colors.mutedForeground }]}>REVIEW SUGGESTION</Text><Pressable accessibilityLabel={`Remove ${suggestion.displayName}`} onPress={() => removeSuggestion(suggestion.suggestionId)}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable></View>
-              <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
-              <View style={styles.quantityRow}><TextInput value={suggestion.quantityKnown && suggestion.quantity !== undefined ? String(suggestion.quantity) : ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { quantity: value ? Number(value) : undefined, quantityKnown: Boolean(value) && Number.isFinite(Number(value)) })} keyboardType="decimal-pad" placeholder="Qty" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /><TextInput value={suggestion.unit ?? ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { unit: value, quantityKnown: Boolean(value.trim()) && suggestion.quantity !== undefined })} placeholder="unit (optional)" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /></View>
-              <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={suggestion.storageLocation === item} onPress={() => updateSuggestion(suggestion.suggestionId, { storageLocation: item })} />)}</View>
-              <Text style={[styles.confidenceText, { color: colors.mutedForeground }]}>{Math.round(suggestion.confidence * 100)}% confidence · {suggestion.quantityKnown ? 'quantity supported by photo' : 'quantity check needed'}</Text>
-               {suggestion.existingInventoryMatch ? <View style={[styles.duplicateBox, { backgroundColor: colors.secondary }]}><Text style={[styles.duplicateTitle, { color: colors.secondaryForeground }]}>Matches existing kitchen stock</Text><Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch).map((item) => item.name).join(', ') || suggestion.existingInventoryMatch}</Text><View style={styles.chips}><Chip label="Same item" selected={(scanDecisions[suggestion.suggestionId] ?? 'same') === 'same'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'same' }))} /><Chip label="Additional stock" selected={scanDecisions[suggestion.suggestionId] === 'additional'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'additional' }))} /><Chip label="Correct existing" selected={scanDecisions[suggestion.suggestionId] === 'correction'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'correction' }))} /></View><Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{(scanDecisions[suggestion.suggestionId] ?? 'same') === 'same' ? 'Default: this photo does not change stock.' : (scanDecisions[suggestion.suggestionId] === 'additional' ? 'The confirmed quantity will be added as new stock.' : 'The reviewed name, location, and supported quantity will replace this row.')}</Text></View> : null}
-            </View>)}
+             {suggestions.map((suggestion) => {
+               const matchingRows = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
+               const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+               const sourcePhotoIndex = Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1;
+               const sourcePhotoUri = photoUris[sourcePhotoIndex];
+               return <View key={suggestion.suggestionId} style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                 <View style={styles.suggestionHeader}><Text style={[styles.suggestionLabel, { color: colors.mutedForeground }]}>REVIEW SUGGESTION</Text><Pressable accessibilityLabel={`Remove ${suggestion.displayName}`} onPress={() => removeSuggestion(suggestion.suggestionId)}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable></View>
+                 {sourcePhotoUri ? <View style={styles.sourcePhotoRow}><Image source={{ uri: sourcePhotoUri }} style={styles.sourceThumbnail} /><Text style={[styles.sourcePhotoLabel, { color: colors.mutedForeground }]}>From photo {sourcePhotoIndex + 1}</Text></View> : null}
+                 <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
+                 <View style={styles.quantityRow}><TextInput value={suggestion.quantityKnown && suggestion.quantity !== undefined ? String(suggestion.quantity) : ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { quantity: value ? Number(value) : undefined, quantityKnown: Boolean(value) && Number.isFinite(Number(value)) })} keyboardType="decimal-pad" placeholder="Qty" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /><TextInput value={suggestion.unit ?? ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { unit: value, quantityKnown: Boolean(value.trim()) && suggestion.quantity !== undefined })} placeholder="unit (optional)" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /></View>
+                 <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={suggestion.storageLocation === item} onPress={() => updateSuggestion(suggestion.suggestionId, { storageLocation: item })} />)}</View>
+                 <Text style={[styles.confidenceText, { color: colors.mutedForeground }]}>{Math.round(suggestion.confidence * 100)}% confidence · {suggestion.quantityKnown ? 'quantity supported by photo' : 'quantity unknown until confirmed'}</Text>
+                 {suggestion.existingInventoryMatch ? <View style={[styles.duplicateBox, { backgroundColor: colors.secondary }]}>
+                   <Text style={[styles.duplicateTitle, { color: colors.secondaryForeground }]}>Matches existing kitchen stock</Text>
+                   {matchingRows.length ? matchingRows.map((item) => <Pressable key={item.id} onPress={() => decision === 'correction' ? setCorrectionTargets((current) => ({ ...current, [suggestion.suggestionId]: item.id })) : undefined} style={[styles.matchRow, { borderColor: colors.border, backgroundColor: correctionTargets[suggestion.suggestionId] === item.id ? colors.primary : colors.background }]}>
+                     <Ionicons name={correctionTargets[suggestion.suggestionId] === item.id ? 'radio-button-on' : 'radio-button-off'} size={17} color={correctionTargets[suggestion.suggestionId] === item.id ? colors.primaryForeground : colors.mutedForeground} />
+                     <Text style={[styles.matchText, { color: correctionTargets[suggestion.suggestionId] === item.id ? colors.primaryForeground : colors.foreground }]}>{item.name} · {item.location}</Text>
+                   </Pressable>) : <Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{suggestion.existingInventoryMatch}</Text>}
+                   <View style={styles.chips}><Chip label="Same item" selected={decision === 'same'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'same' }))} /><Chip label="Additional stock" selected={decision === 'additional'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'additional' }))} /><Chip label="Correct existing" selected={decision === 'correction'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'correction' }))} /></View>
+                   <Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{decision === 'same' ? 'Default: this photo does not change stock.' : decision === 'additional' ? 'The confirmed quantity will be added as new stock.' : matchingRows.length > 1 ? 'Select the exact row above before saving this correction.' : 'The reviewed name, location, and supported quantity will replace this row.'}</Text>
+                 </View> : null}
+               </View>;
+             })}
             <Text style={[styles.label, { color: colors.foreground }]}>Ingredient name</Text>
             <TextInput autoFocus value={name} onChangeText={setName} placeholder="e.g. spinach" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Quantity <Text style={{ fontFamily: 'Inter_400Regular', color: colors.mutedForeground }}>(optional)</Text></Text>
@@ -205,6 +252,15 @@ const styles = StyleSheet.create({
   actionIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   actionTitle: { fontSize: 15, fontFamily: 'Inter_700Bold', marginBottom: 4 },
   actionBody: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  cameraSession: { borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 4, marginBottom: 12 },
+  cameraSessionTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  cameraSessionBody: { fontSize: 12, lineHeight: 17, marginTop: 4 },
+  sessionThumbnail: { width: 72, height: 72, borderRadius: 12 },
+  sessionActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  sessionButton: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  sessionButtonText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  barcodeNote: { flexDirection: 'row', gap: 9, borderRadius: 15, padding: 13, marginTop: 4 },
+  barcodeText: { flex: 1, fontSize: 11, lineHeight: 16 },
   privacyNote: { flexDirection: 'row', gap: 9, borderRadius: 15, padding: 14, marginTop: 14 },
   privacyText: { flex: 1, fontSize: 11, lineHeight: 16 },
   photoStrip: { gap: 10, marginBottom: 18 },
@@ -223,6 +279,9 @@ const styles = StyleSheet.create({
   suggestionCard: { borderWidth: 1, borderRadius: 18, padding: 14, marginBottom: 12 },
   suggestionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   suggestionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  sourcePhotoRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 },
+  sourceThumbnail: { width: 42, height: 42, borderRadius: 9 },
+  sourcePhotoLabel: { fontSize: 11, fontFamily: 'Inter_500Medium' },
   quantityRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
   quantityInput: { flex: 1 },
   unitInput: { flex: 2 },
@@ -230,6 +289,8 @@ const styles = StyleSheet.create({
   duplicateBox: { borderRadius: 14, padding: 11, marginTop: 11, gap: 6 },
   duplicateTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   duplicateBody: { fontSize: 11, lineHeight: 16 },
+  matchRow: { minHeight: 38, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  matchText: { flex: 1, fontSize: 11, fontFamily: 'Inter_500Medium' },
   saveButton: { height: 53, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginTop: 26 },
   saveText: { fontSize: 15, fontFamily: 'Inter_700Bold' },
   pressed: { opacity: 0.72 },
