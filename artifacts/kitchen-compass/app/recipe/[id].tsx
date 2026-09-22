@@ -8,7 +8,7 @@ import { useKitchen } from '@/context/KitchenContext';
 import { getRecipe } from '@/data/recipes';
 import { scaledIngredient, scaledNutrition } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
-import { ingredientIdentitiesMatch, recipeReadiness } from '@/lib/kitchenLogic';
+import { ingredientIdentitiesMatch, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
 
 export default function RecipeDetailScreen() {
   const colors = useColors();
@@ -16,10 +16,12 @@ export default function RecipeDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const recipe = getRecipe(id);
-  const { ingredients, preferences } = useKitchen();
+  const { ingredients, preferences, reservations, plan } = useKitchen();
   const required = recipe.ingredients.filter((item) => item.required !== false);
   const have = (name: string) => ingredients.some((item) => ingredientIdentitiesMatch(name, item));
-  const safety = recipeReadiness(recipe, ingredients, preferences.allergies);
+  const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
+  const eligible = recipeMatchesPreferences(recipe, preferences);
+  const plannedMeal = plan.find((meal) => meal.recipeId === recipe.id);
   const nutrition = scaledNutrition(recipe, preferences.servings);
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -34,8 +36,10 @@ export default function RecipeDetailScreen() {
           <Text style={[styles.section, { color: colors.foreground }]}>Estimated nutrition</Text>
            <View style={[styles.nutrition, { backgroundColor: colors.card, borderColor: colors.border }]}>{[['Calories', `${nutrition.calories}`], ['Protein', `${nutrition.protein}g`], ['Carbs', `${nutrition.carbs}g`], ['Fat', `${nutrition.fat}g`], ['Fiber', `${nutrition.fiber}g`], ['Sodium', `${nutrition.sodium}mg`]].map(([label, value]) => <View key={label} style={styles.nutritionItem}><Text style={[styles.nutritionValue, { color: colors.foreground }]}>{value}</Text><Text style={[styles.nutritionLabel, { color: colors.mutedForeground }]}>{label}</Text></View>)}<Text style={[styles.nutritionNote, { color: colors.mutedForeground }]}>Estimated recipe total for {preferences.servings} servings · {recipe.nutritionSource}</Text></View>
           <Text style={[styles.section, { color: colors.foreground }]}>Equipment</Text><View style={styles.chips}>{recipe.equipment.map((item) => <Chip key={item} label={item} />)}</View>
-           <Pressable disabled={!safety.ready} testID="start-cooking" onPress={() => router.push(`/cook/${recipe.id}`)} style={({ pressed }) => [styles.cookButton, { backgroundColor: safety.ready ? colors.primary : colors.muted }, pressed && styles.pressed]}><Ionicons name="flame-outline" size={21} color={safety.ready ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.cookText, { color: safety.ready ? colors.primaryForeground : colors.mutedForeground }]}>{safety.allergenConflict ? 'Excluded for allergy' : safety.allergenIncomplete ? 'Allergen review needed' : 'Start cooking'}</Text></Pressable>
-          {required.length > 0 && !required.every((item) => have(item.name)) ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Some required ingredients are missing. The app will not call this recipe ready to cook until they’re confirmed in My Kitchen.</Text> : null}
+            <Pressable disabled={!safety.ready || !eligible || !plannedMeal} testID="start-cooking" onPress={() => plannedMeal && router.push(`/cook/${recipe.id}?plannedMealId=${plannedMeal.id}`)} style={({ pressed }) => [styles.cookButton, { backgroundColor: safety.ready && eligible && plannedMeal ? colors.primary : colors.muted }, pressed && styles.pressed]}><Ionicons name="flame-outline" size={21} color={safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.cookText, { color: safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground }]}>{safety.allergenConflict ? 'Excluded for allergy' : safety.allergenIncomplete ? 'Allergen review needed' : !eligible ? 'Excluded by preferences' : !plannedMeal ? 'Plan this meal first' : 'Start cooking'}</Text></Pressable>
+           {safety.missingIngredients.length ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Missing: {safety.missingIngredients.join(', ')}.</Text> : null}
+           {safety.insufficientIngredients.length ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Not enough: {safety.insufficientIngredients.join(', ')}.</Text> : null}
+           {safety.quantityCheckIngredients.length ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Quantity check needed: {safety.quantityCheckIngredients.join(', ')}.</Text> : null}
         </View>
       </ScrollView>
     </View>

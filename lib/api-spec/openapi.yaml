@@ -31,6 +31,14 @@ paths:
       operationId: analyzeIngredientPhotos
       tags: [scan]
       summary: Analyze kitchen photos for reviewable ingredient suggestions
+      parameters:
+        - in: header
+          name: X-Kitchen-Installation
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
       requestBody:
         required: true
         content:
@@ -46,6 +54,12 @@ paths:
                 $ref: "#/components/schemas/ScanAnalysisResponse"
         "400":
           description: Invalid scan request
+        "401":
+          description: Missing or invalid installation identity
+        "413":
+          description: Request or decoded photo payload is too large
+        "429":
+          description: Installation rate limit exceeded
         "503":
           description: AI analysis is unavailable
 components:
@@ -94,6 +108,23 @@ components:
           items:
             $ref: "#/components/schemas/ExistingIngredient"
       required: [photos]
+    ScanError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, INVALID_REQUEST, PAYLOAD_TOO_LARGE, RATE_LIMITED, SCAN_UNAVAILABLE]
+            message:
+              type: string
+            requestId:
+              type: string
+            retryable:
+              type: boolean
+          required: [code, message, requestId, retryable]
+      required: [error]
     IngredientSuggestion:
       type: object
       properties:

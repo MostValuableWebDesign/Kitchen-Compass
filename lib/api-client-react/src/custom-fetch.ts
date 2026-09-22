@@ -7,6 +7,7 @@ export type ErrorType<T = unknown> = ApiError<T>;
 export type BodyType<T> = T;
 
 export type AuthTokenGetter = () => Promise<string | null> | string | null;
+export type InstallationIdGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
@@ -17,6 +18,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _installationIdGetter: InstallationIdGetter | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -42,6 +44,10 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+export function setInstallationIdGetter(getter: InstallationIdGetter | null): void {
+  _installationIdGetter = getter;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -356,6 +362,11 @@ export async function customFetch<T = unknown>(
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
+  }
+
+  if (_installationIdGetter && !headers.has("x-kitchen-installation")) {
+    const installationId = await _installationIdGetter();
+    if (installationId) headers.set("x-kitchen-installation", installationId);
   }
 
   const requestInfo = { method, url: resolveUrl(input) };

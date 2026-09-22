@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -15,11 +16,24 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { KitchenProvider } from '@/context/KitchenContext';
-import { setBaseUrl } from '@workspace/api-client-react';
+import { setBaseUrl, setInstallationIdGetter } from '@workspace/api-client-react';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 setBaseUrl(process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : null);
+const INSTALLATION_KEY = 'kitchen-compass-installation-id-v1';
+let installationIdPromise: Promise<string> | null = null;
+function getInstallationId() {
+  if (!installationIdPromise) {
+    installationIdPromise = AsyncStorage.getItem(INSTALLATION_KEY).then((stored) => {
+      if (stored) return stored;
+      const created = `kc-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+      return AsyncStorage.setItem(INSTALLATION_KEY, created).then(() => created);
+    });
+  }
+  return installationIdPromise;
+}
+setInstallationIdGetter(getInstallationId);
 
 const queryClient = new QueryClient();
 
