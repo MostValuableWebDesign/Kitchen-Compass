@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import {
   calculateShoppingNeeds,
   applyCookingTransaction,
+  applyLeftoverCookingTransaction,
   buildReservations,
   deductInventory,
   ingredientIdentitiesMatch,
   ingredientRowsMatch,
   confirmedDateStatus,
   consumeLeftover,
+  generatePlanIncrementally,
+  inventoryAfterReservations,
   movePlannedMeals,
   normalizeConfirmedDate,
   parseQuantityText,
@@ -42,6 +45,32 @@ const eggsOnlyRecipe = {
   allergens: ['egg'],
   allergenInfo: 'complete' as const,
   ingredients: [{ name: 'eggs', quantity: 2, unit: 'egg', required: true }],
+};
+
+const eggBreakfastRecipe = {
+  id: 'egg-breakfast',
+  meal: 'Breakfast',
+  servings: 1,
+  cook: 10,
+  equipment: ['Stovetop'],
+  cuisine: 'Modern',
+  difficulty: 'Easy',
+  allergens: ['egg'],
+  allergenInfo: 'complete' as const,
+  ingredients: [{ name: 'eggs', quantity: 1, unit: 'egg', required: true }],
+};
+
+const spinachBreakfastRecipe = {
+  id: 'spinach-breakfast',
+  meal: 'Breakfast',
+  servings: 1,
+  cook: 10,
+  equipment: ['Stovetop'],
+  cuisine: 'Modern',
+  difficulty: 'Easy',
+  allergens: [],
+  allergenInfo: 'complete' as const,
+  ingredients: [{ name: 'spinach', quantity: 1, unit: 'cup', required: true }],
 };
 
 test('uncertain and used inventory cannot make a recipe ready', () => {
@@ -234,6 +263,60 @@ test('weekly demand aggregates meals and does not allocate unknown stock as know
   assert.deepEqual(unknown.find((item) => item.normalizedName === 'egg')?.quantityCheckReasons, ['unknown-inventory']);
 });
 
+test('weekly generation allocates one egg across two meals and labels the known shortage', () => {
+  const preferences = { ...defaultPreferences, equipment: ['Stovetop'], cuisines: [], cookTime: 45 };
+  const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 1, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];
+  const generated = generatePlanIncrementally(
+    [],
+    ['Monday', 'Tuesday'],
+    ['Breakfast'],
+    [eggBreakfastRecipe],
+    inventory,
+    preferences,
+    1,
+  );
+  assert.equal(generated.length, 2);
+  assert.deepEqual(generated[0]!.shortageReasons, undefined);
+  assert.deepEqual(generated[1]!.shortageReasons, ['eggs: 1 egg short']);
+  assert.equal(generated[1]!.needsConfirmation, undefined);
+  const needs = calculateShoppingNeeds(generated, [eggBreakfastRecipe], inventory, 1);
+  assert.deepEqual(needs.find((item) => item.normalizedName === 'egg'), {
+    id: 'egg',
+    name: 'eggs',
+    normalizedName: 'egg',
+    quantity: 1,
+    unit: 'egg',
+    quantityCheckNeeded: false,
+    quantityCheckReasons: [],
+    category: 'Dairy & eggs',
+  });
+});
+
+test('known shortage stays distinct from unknown quantity confirmation', () => {
+  const recipe = { ...eggBreakfastRecipe, ingredients: [{ name: 'eggs', quantity: 2, unit: 'egg', required: true }] };
+  const known = recipeReadiness(recipe, [{ name: 'eggs', quantityValue: 1, unit: 'egg', quantityKnown: true, status: 'fresh', confidence: 'confirmed' }], [], 1);
+  assert.deepEqual(known.shortageDetails, [{ ingredientName: 'eggs', quantity: 1, unit: 'egg' }]);
+  assert.deepEqual(known.quantityCheckIngredients, []);
+  const unknown = recipeReadiness(recipe, [{ name: 'eggs', quantityKnown: false, status: 'fresh', confidence: 'confirmed' }], [], 1);
+  assert.deepEqual(unknown.shortageDetails, []);
+  assert.deepEqual(unknown.quantityCheckIngredients, ['eggs']);
+  const unknownNeed = calculateShoppingNeeds([{ id: 'meal', recipeId: recipe.id, servings: 1 }], [recipe], [{ name: 'eggs', quantityKnown: false, status: 'fresh', confidence: 'confirmed' }], 1)[0];
+  assert.equal(unknownNeed?.quantityCheckNeeded, true);
+  assert.deepEqual(unknownNeed?.quantityCheckReasons, ['unknown-inventory']);
+});
+
+test('partial regeneration preserves unselected meals and recalculates week shopping needs', () => {
+  const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 0, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];
+  const existing = [
+    { id: 'Monday-Breakfast', day: 'Monday', meal: 'Breakfast' as const, recipeId: 'egg-breakfast', servings: 1 },
+    { id: 'Tuesday-Breakfast', day: 'Tuesday', meal: 'Breakfast' as const, recipeId: 'egg-breakfast', servings: 1 },
+  ];
+  const next = replacePlanSlots(existing, [{ day: 'Monday', meal: 'Breakfast' }], [{ ...existing[0]!, recipeId: 'spinach-breakfast' }]);
+  assert.equal(next.find((item) => item.id === 'Tuesday-Breakfast')?.recipeId, 'egg-breakfast');
+  const needs = calculateShoppingNeeds(next, [eggBreakfastRecipe, spinachBreakfastRecipe], inventory, 1);
+  assert.equal(needs.find((item) => item.normalizedName === 'egg')?.quantity, 1);
+});
+
 test('a planned meal can use its own reservation, while other meals remain unavailable', () => {
   const plan = [{ id: 'monday-breakfast', recipeId: 'eggs-only', servings: 1 }];
   const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 2, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];
@@ -275,6 +358,20 @@ test('moving a meal swaps occupied slots without losing either choice', () => {
   assert.equal(moved.find((item) => item.id === 'monday-dinner')?.meal, 'Lunch');
   assert.equal(moved.find((item) => item.id === 'tuesday-lunch')?.day, 'Monday');
   assert.equal(moved.find((item) => item.id === 'tuesday-lunch')?.meal, 'Dinner');
+});
+
+test('moving and replacing meals keeps reservations tied to the full resulting week', () => {
+  const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 1, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];
+  const plan = [
+    { id: 'monday-breakfast', day: 'Monday', meal: 'Breakfast' as const, recipeId: 'eggs-only', servings: 1 },
+    { id: 'tuesday-breakfast', day: 'Tuesday', meal: 'Breakfast' as const, recipeId: 'eggs-only', servings: 1 },
+  ];
+  const moved = movePlannedMeals(plan, { day: 'Monday', meal: 'Breakfast' }, { day: 'Wednesday', meal: 'Breakfast' });
+  const reservations = buildReservations(moved, [eggsOnlyRecipe], inventory).reservations;
+  assert.equal(reservations.filter((item) => item.quantityKnown).reduce((sum, item) => sum + (item.quantity ?? 0), 0), 1);
+  const replaced = replacePlanSlots(moved, [{ day: 'Wednesday', meal: 'Breakfast' }], [{ ...moved[0]!, day: 'Wednesday', meal: 'Breakfast', recipeId: 'spinach-breakfast' }]);
+  const needs = calculateShoppingNeeds(replaced, [eggsOnlyRecipe, spinachBreakfastRecipe], inventory, 1);
+  assert.equal(needs.find((item) => item.normalizedName === 'egg')?.quantity, 1);
 });
 
 test('partial regeneration replaces selected slots and preserves other saved choices', () => {
@@ -341,14 +438,24 @@ test('reservations allocate exact quantities and warn instead of claiming stock'
     [{ id: 'egg-row', name: 'eggs', status: 'fresh', confidence: 'confirmed', quantityValue: 1, unit: 'egg', quantityKnown: true }],
   );
   assert.equal(over.warnings.length, 1);
-  assert.equal(over.reservations.some((item) => item.quantityKnown === false), true);
+  assert.equal(over.reservations.some((item) => item.quantityKnown === false), false);
+  assert.deepEqual(over.reservations.find((item) => item.shortageQuantity !== undefined)?.shortageQuantity, 3);
 });
 
-test('leftover meals do not reserve or shop for the original raw ingredients', () => {
-  const leftoverPlan = [{ id: 'monday-lunch', recipeId: 'green-egg-toast', servings: 1, leftoverId: 'leftover-1' }];
+test('leftover meals reserve portions across slots without shopping for original raw ingredients', () => {
+  const leftoverPlan = [
+    { id: 'monday-lunch', recipeId: 'green-egg-toast', servings: 1, leftoverId: 'leftover-1' },
+    { id: 'tuesday-lunch', recipeId: 'green-egg-toast', servings: 1, leftoverId: 'leftover-1' },
+    { id: 'wednesday-lunch', recipeId: 'green-egg-toast', servings: 1, leftoverId: 'leftover-1' },
+  ];
   const inventory = [{ id: 'egg-row', name: 'eggs', status: 'fresh' as const, confidence: 'confirmed' as const, quantityValue: 2, unit: 'egg', quantityKnown: true }];
-  assert.deepEqual(buildReservations(leftoverPlan, [greenEggToast], inventory).reservations, []);
+  const leftovers = [{ id: 'leftover-1', portions: 3 }];
+  const reservations = buildReservations(leftoverPlan, [greenEggToast], inventory, leftovers).reservations;
+  assert.equal(reservations.length, 3);
+  assert.equal(reservations.reduce((sum, item) => sum + (item.quantity ?? 0), 0), 3);
   assert.deepEqual(calculateShoppingNeeds(leftoverPlan, [greenEggToast], inventory, 1), []);
+  const cancelled = buildReservations(leftoverPlan.slice(0, 2), [greenEggToast], inventory, leftovers).reservations;
+  assert.equal(cancelled.reduce((sum, item) => sum + (item.quantity ?? 0), 0), 2);
 });
 
 test('leftover consumption supports partial portions and removes the row at zero', () => {
@@ -360,6 +467,18 @@ test('leftover consumption supports partial portions and removes the row at zero
   assert.equal(finished.consumed, true);
   assert.deepEqual(finished.leftovers, []);
   assert.equal(consumeLeftover(starting, 'leftover-1', 4).consumed, false);
+});
+
+test('cooking a leftover consumes only planned portions and remains idempotent', () => {
+  const starting = [{ id: 'leftover-1', portions: 3, recipeId: 'green-egg-toast' }];
+  const first = applyLeftoverCookingTransaction(starting, [], 'cook-leftover', 'leftover-1', 1);
+  assert.equal(first.applied, true);
+  assert.equal(first.leftovers[0]?.portions, 2);
+  const repeated = applyLeftoverCookingTransaction(first.leftovers, first.completedTransactionIds, 'cook-leftover', 'leftover-1', 1);
+  assert.equal(repeated.applied, false);
+  assert.equal(repeated.leftovers[0]?.portions, 2);
+  const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 2, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];
+  assert.deepEqual(applyCookingTransaction(inventory, [], 'cook-leftover', []).inventory, inventory);
 });
 
 test('cooking deductions use exact inventory ids and preserve partial stock', () => {

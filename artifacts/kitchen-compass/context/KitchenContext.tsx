@@ -5,14 +5,16 @@ import { Alert } from 'react-native';
 import {
   buildReservations,
   applyCookingTransaction,
+  applyLeftoverCookingTransaction,
   consumeLeftover,
+  generatePlanIncrementally,
+  inventoryAfterReservations,
   ingredientRowsMatch,
   movePlannedMeals,
   normalizeIngredientName,
   normalizeConfirmedDate,
   parseQuantityText,
   rankPlanRecipes,
-  replacePlanSlots,
   type Deduction,
   type MealSlot,
   type ReservationRecord,
@@ -85,6 +87,7 @@ export interface PlannedMeal {
   leftoverId?: string;
   needsConfirmation?: boolean;
   confirmationReasons?: string[];
+  shortageReasons?: string[];
 }
 
 export interface CompletedMeal {
@@ -292,10 +295,10 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const built = buildReservations(plan, getAvailableRecipes(savedRecipes), ingredients);
+    const built = buildReservations(plan, getAvailableRecipes(savedRecipes), ingredients, leftovers);
     setReservations(built.reservations);
     setReservationWarnings(built.warnings);
-  }, [hydrated, plan, ingredients, savedRecipes]);
+  }, [hydrated, plan, ingredients, leftovers, savedRecipes]);
 
   const value = useMemo<KitchenContextValue>(() => ({
     ingredients,
@@ -396,46 +399,52 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       const version = recipeVersion(recipe);
       return current.includes(version) ? current.filter((item) => item !== version) : [...current, version];
     }),
-     setMeal: (day, meal, recipeId, servings = preferences.servings, selectedRecipeVersion) => setPlan((current) => [
-      ...current.filter((item) => !(item.day === day && item.meal === meal)),
-       { id: `${day}-${meal}`, day, meal, recipeId, ...(selectedRecipeVersion ? { recipeVersion: selectedRecipeVersion } : {}), servings: Math.max(1, servings) },
-    ]),
+     setMeal: (day, meal, recipeId, servings = preferences.servings, selectedRecipeVersion) => setPlan((current) => {
+       const nextServings = Math.max(1, servings);
+       const basePlan = current.filter((item) => !(item.day === day && item.meal === meal));
+       const availableRecipes = getAvailableRecipes(savedRecipes);
+       const selectedRecipe = availableRecipes.find((recipe) => recipe.id === recipeId && (!selectedRecipeVersion || recipeVersion(recipe) === selectedRecipeVersion));
+       const baseReservations = buildReservations(basePlan, availableRecipes, ingredients, leftovers).reservations;
+       const remainingInventory = inventoryAfterReservations(ingredients, baseReservations);
+       const ranked = selectedRecipe
+         ? rankPlanRecipes([selectedRecipe], remainingInventory, preferences, nextServings, basePlan.map((item) => item.recipeId))
+         : [];
+       const assessment = ranked[0];
+       return [
+         ...basePlan,
+         {
+           id: `${day}-${meal}`,
+           day,
+           meal,
+           recipeId,
+           ...(selectedRecipeVersion ? { recipeVersion: selectedRecipeVersion } : {}),
+           servings: nextServings,
+           ...(assessment?.needsConfirmation ? { needsConfirmation: true, confirmationReasons: assessment.confirmationReasons } : {}),
+           ...(assessment?.shortageReasons.length ? { shortageReasons: assessment.shortageReasons } : {}),
+         },
+       ];
+     }),
     removeMeal: (day, meal) => setPlan((current) => current.filter((item) => !(item.day === day && item.meal === meal))),
      generatePlan: (requestedDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], requestedMeals = ['Breakfast', 'Lunch', 'Dinner']) => setPlan((current) => {
-       const next = replacePlanSlots(current, requestedDays.flatMap((day) => requestedMeals.map((meal) => ({ day, meal }))), []);
-       for (const day of requestedDays) {
-         for (const meal of requestedMeals) {
-           const usedRecipeIds = next.map((item) => item.recipeId);
-           const ranked = rankPlanRecipes(
-              getAvailableRecipes(savedRecipes).filter((recipe) => meal === 'Breakfast' ? recipe.meal === 'Breakfast' : recipe.meal !== 'Breakfast'),
-             ingredients,
-             preferences,
-             preferences.servings,
-             usedRecipeIds,
-           );
-           const best = ranked[0];
-           if (!best) continue;
-           next.push({
-             id: `${day}-${meal}`,
-             day,
-             meal,
-             recipeId: best.recipe.id,
-             recipeVersion: recipeVersion(best.recipe),
-             servings: preferences.servings,
-             ...(best.needsConfirmation ? { needsConfirmation: true, confirmationReasons: best.confirmationReasons } : {}),
-           });
-         }
-       }
-       return next;
+        const availableRecipes = getAvailableRecipes(savedRecipes);
+        return generatePlanIncrementally(current, requestedDays, requestedMeals, availableRecipes, ingredients, preferences, preferences.servings, leftovers)
+          .map((meal) => {
+            const recipe = availableRecipes.find((item) => item.id === meal.recipeId);
+            return recipe ? { ...meal, recipeVersion: recipeVersion(recipe) } : meal;
+          });
      }),
      swapMeal: (day, meal) => setPlan((current) => {
        const existing = current.find((item) => item.day === day && item.meal === meal);
+        const basePlan = current.filter((item) => item.id !== existing?.id);
+        const availableRecipes = getAvailableRecipes(savedRecipes);
+        const baseReservations = buildReservations(basePlan, availableRecipes, ingredients, leftovers).reservations;
+        const remainingInventory = inventoryAfterReservations(ingredients, baseReservations);
        const candidates = rankPlanRecipes(
-          getAvailableRecipes(savedRecipes).filter((recipe) => meal === 'Breakfast' ? recipe.meal === 'Breakfast' : recipe.meal !== 'Breakfast'),
-         ingredients,
+           availableRecipes.filter((recipe) => meal === 'Breakfast' ? recipe.meal === 'Breakfast' : recipe.meal !== 'Breakfast'),
+          remainingInventory,
          preferences,
          existing?.servings ?? preferences.servings,
-         current.filter((item) => item.id !== existing?.id).map((item) => item.recipeId),
+          basePlan.map((item) => item.recipeId),
        );
        const next = candidates.find((item) => item.recipe.id !== existing?.recipeId) ?? candidates[0];
        if (!next) return current;
@@ -449,6 +458,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
            recipeVersion: recipeVersion(next.recipe),
            servings: existing?.servings ?? preferences.servings,
            ...(next.needsConfirmation ? { needsConfirmation: true, confirmationReasons: next.confirmationReasons } : {}),
+            ...(next.shortageReasons.length ? { shortageReasons: next.shortageReasons } : {}),
          },
        ];
      }),
@@ -456,10 +466,15 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
      planLeftover: (day, meal, leftoverId, portions = 1) => {
        const leftover = leftovers.find((item) => item.id === leftoverId);
        if (!leftover || portions <= 0 || portions > leftover.portions) return false;
-       setPlan((current) => [
-         ...current.filter((item) => !(item.day === day && item.meal === meal)),
-          { id: `${day}-${meal}`, day, meal, recipeId: leftover.recipeId, ...(leftover.recipeVersion ? { recipeVersion: leftover.recipeVersion } : {}), leftoverId, servings: portions },
-       ]);
+        const targetId = `${day}-${meal}`;
+        const alreadyPlanned = plan
+          .filter((item) => item.leftoverId === leftoverId && item.id !== targetId)
+          .reduce((sum, item) => sum + item.servings, 0);
+        if (alreadyPlanned + portions > leftover.portions) return false;
+        setPlan((current) => [
+          ...current.filter((item) => !(item.day === day && item.meal === meal)),
+          { id: targetId, day, meal, recipeId: leftover.recipeId, ...(leftover.recipeVersion ? { recipeVersion: leftover.recipeVersion } : {}), leftoverId, servings: portions },
+        ]);
        return true;
      },
     setShoppingList: (changes) => setShoppingListState((current) => ({ ...current, ...changes })),
@@ -473,7 +488,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         transactionId: `cook-${plannedMealId}`,
         plannedMealId,
         recipeId: recipe.id,
-        servings: actualServings,
+        servings: planned.leftoverId ? planned.servings : actualServings,
         deductions: mealReservations.flatMap((reservation) => {
           const inventory = ingredients.find((item) => item.id === reservation.inventoryId);
           return inventory && reservation.quantity !== undefined && reservation.unit ? [{ inventoryId: inventory.id, quantity: reservation.quantity, unit: reservation.unit, ingredientName: reservation.ingredientName, inventoryName: inventory.name }] : [];
@@ -487,20 +502,25 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
        const recipe = lookupPlannedRecipe(planItem, savedRecipes);
        if (!recipe || input.recipeId !== planItem.recipeId) return false;
        const plannedLeftover = planItem.leftoverId ? leftovers.find((item) => item.id === planItem.leftoverId) : undefined;
-       if (planItem.leftoverId && (!plannedLeftover || input.servings > plannedLeftover.portions)) return false;
+        const plannedPortions = planItem.leftoverId ? planItem.servings : input.servings;
+        if (planItem.leftoverId && (!plannedLeftover || plannedPortions > plannedLeftover.portions)) return false;
+        const leftoverTransaction = plannedLeftover
+          ? applyLeftoverCookingTransaction(leftovers, completedMeals.map((meal) => meal.transactionId), input.transactionId, plannedLeftover.id, plannedPortions)
+          : undefined;
+        if (plannedLeftover && !leftoverTransaction?.applied) return false;
        const transaction = applyCookingTransaction(
         ingredients.filter((item): item is Ingredient & { id: string } => Boolean(item.id)),
         completedMeals.map((meal) => meal.transactionId),
         input.transactionId,
-        input.deductions,
+         planItem.leftoverId ? [] : input.deductions,
       );
       if (!transaction.applied) return false;
       setIngredients(transaction.inventory);
       setCompletedMeals((current) => current.some((meal) => meal.transactionId === input.transactionId)
         ? current
-        : [...current, { transactionId: input.transactionId, plannedMealId: input.plannedMealId, recipeId: input.recipeId, servings: input.servings, completedAt: new Date().toISOString() }]);
-       if (plannedLeftover) {
-         setLeftovers((current) => consumeLeftover(current, plannedLeftover.id, input.servings).leftovers);
+         : [...current, { transactionId: input.transactionId, plannedMealId: input.plannedMealId, recipeId: input.recipeId, servings: plannedPortions, completedAt: new Date().toISOString() }]);
+        if (leftoverTransaction) {
+          setLeftovers(leftoverTransaction.leftovers);
        } else if (input.leftoverPortions > 0) {
          setLeftovers((current) => [...current, { id: createId(), transactionId: input.transactionId, recipeId: input.recipeId, recipeVersion: recipeVersion(recipe), portions: input.leftoverPortions, preparedAt: new Date().toISOString(), useBy: new Date(Date.now() + 3 * 86_400_000).toISOString(), storageLocation: 'Refrigerator', reheatingInstructions: recipe.reheatingInstructions ?? 'Reheat until steaming hot.' }]);
       }
