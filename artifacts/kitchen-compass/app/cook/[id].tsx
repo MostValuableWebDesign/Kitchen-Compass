@@ -22,6 +22,8 @@ export default function CookScreen() {
   const recipe = getRecipe(id);
   const { plan, preferences, previewCook, completeCook } = useKitchen();
   const resolvedMealId = plannedMealId ?? plan.find((meal) => meal.recipeId === recipe.id)?.id;
+  const plannedMeal = plan.find((meal) => meal.id === resolvedMealId);
+  const isLeftoverMeal = Boolean(plannedMeal?.leftoverId);
   const preview = useMemo(() => resolvedMealId ? previewCook(resolvedMealId) : null, [previewCook, resolvedMealId]);
   const [step, setStep] = useState(0);
   const [timer, setTimer] = useState(0);
@@ -150,11 +152,11 @@ export default function CookScreen() {
       <Modal animationType="slide" transparent visible={confirmOpen} onRequestClose={() => setConfirmOpen(false)}>
         <View style={styles.modalBackdrop}><View style={[styles.confirmSheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 18 }]}>
           <View style={styles.sheetHeader}><Text style={[styles.sheetTitle, { color: colors.foreground }]}>Confirm cooking</Text><Pressable onPress={() => setConfirmOpen(false)}><Feather name="x" size={22} color={colors.foreground} /></Pressable></View>
-          <Text style={[styles.confirmIntro, { color: colors.mutedForeground }]}>Review quantities before saving. Inventory is deducted once, reservations are released, and leftovers are saved.</Text>
+           <Text style={[styles.confirmIntro, { color: colors.mutedForeground }]}>{isLeftoverMeal ? 'Confirm the portions you consumed. The original recipe ingredients will not be deducted again.' : 'Review quantities before saving. Inventory is deducted once, reservations are released, and leftovers are saved.'}</Text>
           <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Servings cooked</Text>
           <TextInput value={servings} onChangeText={setServings} keyboardType="number-pad" style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
           {deductions.map((deduction, index) => <View key={`${deduction.inventoryId}-${index}`} style={styles.deduction}><View style={{ flex: 1 }}><Text style={[styles.itemName, { color: colors.foreground }]}>{deduction.ingredientName}</Text><Text style={[styles.itemMeta, { color: colors.mutedForeground }]}>{deduction.inventoryName}</Text></View><TextInput value={String(deduction.quantity)} onChangeText={(value) => setDeductions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(value) || 0 } : item))} keyboardType="decimal-pad" style={[styles.quantityInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} /><Text style={[styles.unit, { color: colors.mutedForeground }]}>{deduction.unit}</Text></View>)}
-          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Leftover portions</Text><TextInput value={leftoverPortions} onChangeText={setLeftoverPortions} keyboardType="number-pad" style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+           {isLeftoverMeal ? null : <><Text style={[styles.fieldLabel, { color: colors.foreground }]}>Leftover portions</Text><TextInput value={leftoverPortions} onChangeText={setLeftoverPortions} keyboardType="number-pad" style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} /></>}
           <Pressable onPress={confirm} style={[styles.saveButton, { backgroundColor: colors.primary }]}><Text style={[styles.finishText, { color: colors.primaryForeground }]}>Confirm and save</Text></Pressable>
         </View></View>
       </Modal>

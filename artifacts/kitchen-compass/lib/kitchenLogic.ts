@@ -7,6 +7,8 @@ export type InventoryCandidate = {
   quantityValue?: number;
   unit?: string;
   quantityKnown?: boolean;
+  expires?: string;
+  dateConfirmed?: boolean;
 };
 
 export type ReservationRecord = {
@@ -306,12 +308,98 @@ export function recipeMatchesPreferences(
   return true;
 }
 
-type PlannedRecipeInput = { id: string; recipeId: string; servings: number };
+export type PlannedRecipeInput = { id: string; recipeId: string; servings: number; leftoverId?: string };
 type ReservationRecipe = {
   id: string;
   servings: number;
   ingredients: Array<{ name: string; quantity: number; unit: string; required?: boolean }>;
 };
+
+export type MealSlot = { day: string; meal: 'Breakfast' | 'Lunch' | 'Dinner' };
+
+export function movePlannedMeals<T extends MealSlot & { id: string }>(plan: T[], source: MealSlot, target: MealSlot) {
+  if (source.day === target.day && source.meal === target.meal) return plan;
+  const sourceMeal = plan.find((item) => item.day === source.day && item.meal === source.meal);
+  if (!sourceMeal) return plan;
+  const targetMeal = plan.find((item) => item.day === target.day && item.meal === target.meal);
+  return plan.map((item) => {
+    if (item.id === sourceMeal.id) return { ...item, day: target.day, meal: target.meal };
+    if (targetMeal && item.id === targetMeal.id) return { ...item, day: source.day, meal: source.meal };
+    return item;
+  });
+}
+
+export function replacePlanSlots<T extends MealSlot>(plan: T[], slots: MealSlot[], replacements: T[]) {
+  const selected = new Set(slots.map((slot) => `${slot.day}-${slot.meal}`));
+  return [...plan.filter((item) => !selected.has(`${item.day}-${item.meal}`)), ...replacements];
+}
+
+export function consumeLeftover<T extends { id: string; portions: number }>(leftovers: T[], leftoverId: string, portions: number) {
+  if (!Number.isFinite(portions) || portions <= 0) return { consumed: false, leftovers };
+  const target = leftovers.find((item) => item.id === leftoverId);
+  if (!target || target.portions < portions) return { consumed: false, leftovers };
+  const remaining = Number((target.portions - portions).toFixed(2));
+  return {
+    consumed: true,
+    leftovers: remaining > 0
+      ? leftovers.map((item) => item.id === leftoverId ? { ...item, portions: remaining } : item)
+      : leftovers.filter((item) => item.id !== leftoverId),
+  };
+}
+
+type PlanRecipeShape = {
+  id: string;
+  servings: number;
+  meal: string;
+  cook: number;
+  equipment: string[];
+  ingredients: Array<{ name: string; quantity: number; unit: string; required?: boolean }>;
+  allergens: string[];
+  allergenInfo: 'complete' | 'incomplete';
+  cuisine: string;
+  difficulty: string;
+  dietaryTags?: string[];
+  dislikeTags?: string[];
+  nutritionTags?: string[];
+};
+
+export function rankPlanRecipes<T extends PlanRecipeShape>(
+  candidates: T[],
+  inventory: InventoryCandidate[],
+  preferences: RecipePreferenceInput,
+  targetServings: number,
+  usedRecipeIds: string[] = [],
+) {
+  return candidates
+    .filter((recipe) => recipeMatchesPreferences(recipe, preferences))
+    .map((recipe) => {
+      const readiness = recipeReadiness(recipe, inventory, preferences.allergies, targetServings);
+      const soonIngredients = recipe.ingredients.filter((ingredient) => inventory.some((item) =>
+        ingredientIdentitiesMatch(ingredient.name, item)
+        && item.id
+        && item.status !== 'used'
+        && confirmedDateStatus(item.dateConfirmed ? item.expires : undefined) === 'soon',
+      )).length;
+      const required = recipe.ingredients.filter((ingredient) => ingredient.required !== false);
+      const availableIngredients = required.length - readiness.missingIngredients.length - readiness.insufficientIngredients.length;
+      const duplicatePenalty = usedRecipeIds.includes(recipe.id) ? 22 : 0;
+      const score = (readiness.ready ? 80 : 0)
+        + availableIngredients * 12
+        + soonIngredients * 18
+        - readiness.missingIngredients.length * 4
+        - readiness.insufficientIngredients.length * 3
+        - readiness.quantityCheckIngredients.length
+        - duplicatePenalty
+        - recipe.cook / 10;
+      return {
+        recipe,
+        score,
+        needsConfirmation: readiness.quantityCheckIngredients.length > 0,
+        confirmationReasons: readiness.quantityCheckIngredients,
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.recipe.id.localeCompare(b.recipe.id));
+}
 
 export function buildReservations(
   plan: PlannedRecipeInput[],
@@ -321,6 +409,7 @@ export function buildReservations(
   const reservations: ReservationRecord[] = [];
   const warnings: string[] = [];
   for (const planned of plan) {
+    if (planned.leftoverId) continue;
     const recipe = recipes.find((item) => item.id === planned.recipeId);
     if (!recipe) continue;
     for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
@@ -395,6 +484,7 @@ export function calculateShoppingNeeds(
 ) {
   const demand = new Map<string, { name: string; quantity: number; unit: string }>();
   for (const planned of plan) {
+    if (planned.leftoverId) continue;
     const recipe = recipes.find((item) => item.id === planned.recipeId);
     if (!recipe) continue;
     for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
