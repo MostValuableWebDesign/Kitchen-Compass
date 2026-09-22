@@ -14,3 +14,9 @@ Web preview can remain blank when the root layout blocks on the native font-load
 **Why:** The browser can mount the Expo app successfully even when the native font promise never resolves in the preview environment.
 
 **How to apply:** Keep web rendering independent of a pending native font load, then verify the visible route with a screenshot after Metro restarts.
+
+The Expo web bundle can fail even when a native package is declared in the app manifest if the workspace install has not hydrated its symlink. Reinstall at the package workspace level before changing application code.
+
+**Why:** Metro reports the missing module as an app import failure, but the source and lockfile can already contain the dependency.
+
+**How to apply:** Check the package's workspace node_modules link and restart Expo after a targeted workspace install; rebuild stale workspace declaration output if typechecking then reports missing exports.
