@@ -50,6 +50,28 @@ export interface ScanAnalysisRequest {
   existingIngredients?: ExistingIngredient[];
 }
 
+export type ScanErrorErrorCode = typeof ScanErrorErrorCode[keyof typeof ScanErrorErrorCode];
+
+
+export const ScanErrorErrorCode = {
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  INVALID_REQUEST: 'INVALID_REQUEST',
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  RATE_LIMITED: 'RATE_LIMITED',
+  SCAN_UNAVAILABLE: 'SCAN_UNAVAILABLE',
+} as const;
+
+export type ScanErrorError = {
+  code: ScanErrorErrorCode;
+  message: string;
+  requestId: string;
+  retryable: boolean;
+};
+
+export interface ScanError {
+  error: ScanErrorError;
+}
+
 export type IngredientSuggestionStorageLocation = typeof IngredientSuggestionStorageLocation[keyof typeof IngredientSuggestionStorageLocation];
 
 
@@ -82,5 +104,11 @@ export interface ScanAnalysisResponse {
   scanId: string;
   suggestions: IngredientSuggestion[];
   warnings: string[];
+}
+
+export interface ScanAccessResponse {
+  accessToken: string;
+  /** @minimum 1 */
+  expiresInSeconds: number;
 }
 

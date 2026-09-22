@@ -1,1 +1,2 @@
 - [Expo mobile preview](expo-mobile-preview.md) — missing React Native DevTools libglib is an environment warning; Metro and Expo Go can still run normally.
+- [Scan authorization](scan-authorization.md) — paid photo analysis uses server-issued bearer credentials plus shared production quotas, not client headers.

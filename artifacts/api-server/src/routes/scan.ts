@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { decodedBase64Bytes, scanLimits, sendScanError } from "../middleware/scanSecurity";
+import { decodedBase64Bytes, issueScanAccess, scanLimits, sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
 
@@ -82,9 +82,19 @@ function stableSuggestionId(normalizedName: string, sourcePhotoId: string) {
   return `${normalizedName}-${sourcePhotoId}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
 }
 
+const ingredientAliases: Record<string, string> = {
+  eggs: "egg",
+  tomatoes: "tomato",
+  "fresh parsley": "parsley",
+  "chicken breast": "chicken",
+};
+
 function normalizeName(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
+  return ingredientAliases[normalized] ?? normalized;
 }
+
+router.post("/scan/access", issueScanAccess);
 
 router.post("/scan/analyze", async (req, res) => {
   const parsedRequest = scanRequestSchema.safeParse(req.body);

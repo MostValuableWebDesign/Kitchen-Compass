@@ -6,6 +6,7 @@ import { logger } from "./lib/logger";
 import { scanAccess, scanLimits } from "./middleware/scanSecurity";
 
 const app: Express = express();
+app.set("trust proxy", true);
 
 app.use(
   pinoHttp({
@@ -27,7 +28,7 @@ app.use(
   }),
 );
 app.use(cors());
-app.use("/api/scan", scanAccess);
+app.use("/api/scan/analyze", scanAccess);
 app.use(express.json({ limit: `${scanLimits.maxBodyBytes}b` }));
 app.use(express.urlencoded({ extended: true }));
 

@@ -21,6 +21,7 @@ import type {
 
 import type {
   HealthStatus,
+  ScanAccessResponse,
   ScanAnalysisRequest,
   ScanAnalysisResponse
 } from './api.schemas';
@@ -216,5 +217,79 @@ export const useAnalyzeIngredientPhotos = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAnalyzeIngredientPhotosMutationOptions(options));
+    }
+
+export const getIssueScanAccessUrl = () => {
+
+
+
+
+  return `/api/scan/access`
+}
+
+/**
+ * @summary Issue a server-verifiable scan credential
+ */
+export const issueScanAccess = async ( options?: Parameters<typeof customFetch>[1]): Promise<ScanAccessResponse> => {
+
+  return customFetch<ScanAccessResponse>(getIssueScanAccessUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getIssueScanAccessMutationKey = () => ['issueScanAccess'] as const;
+
+export const getIssueScanAccessMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueScanAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof issueScanAccess>>, TError,void, TContext> => {
+
+const mutationKey = getIssueScanAccessMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof issueScanAccess>>, void> = () => {
+
+
+          return  issueScanAccess(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IssueScanAccessMutationResult = NonNullable<Awaited<ReturnType<typeof issueScanAccess>>>
+
+    export type IssueScanAccessMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Issue a server-verifiable scan credential
+ */
+export const useIssueScanAccess = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueScanAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof issueScanAccess>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getIssueScanAccessMutationOptions(options));
     }
 

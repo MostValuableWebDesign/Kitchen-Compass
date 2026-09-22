@@ -1,14 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { Alert } from 'react-native';
 import {
   buildReservations,
   canonicalUnit,
-  deductInventory,
+  applyCookingTransaction,
   normalizeIngredientName,
   type Deduction,
   type ReservationRecord,
 } from '@/lib/kitchenLogic';
 import { recipes } from '@/data/recipes';
+import { defaultPreferences, migrateV1KitchenState, parsePersistedKitchenState, type PersistedKitchenState } from '@/lib/kitchenPersistence';
 
 export type StorageLocation = 'Refrigerator' | 'Freezer' | 'Pantry';
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
@@ -26,6 +28,10 @@ export interface Ingredient {
   confidence?: 'confirmed' | 'uncertain';
   expires?: string;
   photoUri?: string;
+  source?: 'manual' | 'scan' | 'purchase';
+  sourceScanId?: string;
+  sourcePhotoId?: string;
+  reviewedAt?: string;
 }
 
 export interface Preferences {
@@ -97,6 +103,8 @@ interface KitchenContextValue {
   leftovers: Leftover[];
   shoppingList: ShoppingListState;
   hydrated: boolean;
+  storageError: string | null;
+  retryHydration: () => void;
   addIngredient: (ingredient: Omit<Ingredient, 'id'>) => void;
   addPurchasedItems: (rows: PurchaseRow[]) => void;
   updateIngredient: (id: string, changes: Partial<Ingredient>) => void;
@@ -117,19 +125,8 @@ interface KitchenContextValue {
   }) => boolean;
 }
 
-const STORAGE_KEY = 'kitchen-compass-state-v2';
-const defaultPreferences: Preferences = {
-  servings: 2,
-  allergies: [],
-  dietaryRestrictions: [],
-  dislikes: [],
-  cuisines: ['Mediterranean'],
-  skill: 'Comfortable',
-  cookTime: 45,
-  equipment: ['Stovetop', 'Oven'],
-  nutrition: ['More vegetables'],
-};
-
+export const STORAGE_KEY = 'kitchen-compass-state-v2';
+export const LEGACY_STORAGE_KEY = 'kitchen-compass-state-v1';
 const KitchenContext = createContext<KitchenContextValue | null>(null);
 
 function createId() {
@@ -162,34 +159,62 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [leftovers, setLeftovers] = useState<Leftover[]>([]);
   const [shoppingList, setShoppingListState] = useState<ShoppingListState>({ checkedIds: [], manualItems: [] });
   const [hydrated, setHydrated] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((value) => {
-        if (!value) return;
-        const saved = JSON.parse(value) as Partial<{
-          ingredients: Ingredient[];
-          preferences: Preferences;
-          plan: PlannedMeal[];
-          reservations: ReservationRecord[];
-          completedMeals: CompletedMeal[];
-          leftovers: Leftover[];
-          shoppingList: ShoppingListState;
-        }>;
-        setIngredients((saved.ingredients ?? []).map(normalizeIngredient));
-        setPreferencesState({ ...defaultPreferences, ...(saved.preferences ?? {}) });
-        setPlan((saved.plan ?? []).map((meal) => ({ ...meal, servings: meal.servings || saved.preferences?.servings || defaultPreferences.servings })));
-        setReservations(saved.reservations ?? []);
-        setCompletedMeals(saved.completedMeals ?? []);
-        setLeftovers(saved.leftovers ?? []);
-        setShoppingListState(saved.shoppingList ?? { checkedIds: [], manualItems: [] });
-      })
-      .catch(() => undefined)
-      .finally(() => setHydrated(true));
-  }, []);
+    let active = true;
+    setHydrated(false);
+    const load = async () => {
+      try {
+        const v2 = await AsyncStorage.getItem(STORAGE_KEY);
+        let parsed: PersistedKitchenState;
+        if (v2 !== null) {
+          parsed = parsePersistedKitchenState(v2, defaultPreferences);
+        } else {
+          const v1 = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
+          parsed = v1
+            ? migrateV1KitchenState(v1, defaultPreferences)
+            : {
+              ingredients: [],
+              preferences: defaultPreferences,
+              plan: [],
+              reservations: [],
+              completedMeals: [],
+              leftovers: [],
+              shoppingList: { checkedIds: [], manualItems: [] },
+            };
+          // Keep v1 as a recovery copy. The migration is complete only after v2 is written.
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+        if (!active) return;
+        setIngredients(parsed.ingredients.map(normalizeIngredient));
+        setPreferencesState(parsed.preferences);
+        setPlan(parsed.plan);
+        setReservations(parsed.reservations);
+        setCompletedMeals(parsed.completedMeals);
+        setLeftovers(parsed.leftovers);
+        setShoppingListState(parsed.shoppingList);
+        setStorageError(null);
+        setHydrated(true);
+      } catch (error) {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : 'Saved kitchen data could not be loaded.';
+        setStorageError(message);
+        setHydrated(false);
+        Alert.alert(
+          'Kitchen data needs attention',
+          'Your saved kitchen was not replaced. Retry the load, or keep this screen open and try again later.',
+          [{ text: 'Retry', onPress: () => setLoadAttempt((attempt) => attempt + 1) }, { text: 'Keep open', style: 'cancel' }],
+        );
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [loadAttempt]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || storageError) return;
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
       ingredients,
       preferences,
@@ -199,7 +224,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       leftovers,
       shoppingList,
     })).catch(() => undefined);
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList]);
+  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, storageError]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -218,6 +243,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     leftovers,
     shoppingList,
     hydrated,
+    storageError,
+    retryHydration: () => setLoadAttempt((attempt) => attempt + 1),
     addIngredient: (ingredient) => {
       setIngredients((current) => {
         const incoming = normalizeIngredient({ ...ingredient, id: createId() });
@@ -250,6 +277,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
           location: row.location,
           status: 'fresh',
           confidence: 'confirmed',
+           source: 'purchase',
+           reviewedAt: new Date().toISOString(),
         })]);
       });
     },
@@ -284,8 +313,17 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       if (completedMeals.some((meal) => meal.transactionId === input.transactionId)) return false;
       const planItem = plan.find((meal) => meal.id === input.plannedMealId);
       if (!planItem) return false;
-      setIngredients((current) => deductInventory(current.filter((item): item is Ingredient & { id: string } => Boolean(item.id)), input.deductions));
-      setCompletedMeals((current) => [...current, { transactionId: input.transactionId, plannedMealId: input.plannedMealId, recipeId: input.recipeId, servings: input.servings, completedAt: new Date().toISOString() }]);
+      const transaction = applyCookingTransaction(
+        ingredients.filter((item): item is Ingredient & { id: string } => Boolean(item.id)),
+        completedMeals.map((meal) => meal.transactionId),
+        input.transactionId,
+        input.deductions,
+      );
+      if (!transaction.applied) return false;
+      setIngredients(transaction.inventory);
+      setCompletedMeals((current) => current.some((meal) => meal.transactionId === input.transactionId)
+        ? current
+        : [...current, { transactionId: input.transactionId, plannedMealId: input.plannedMealId, recipeId: input.recipeId, servings: input.servings, completedAt: new Date().toISOString() }]);
       if (input.leftoverPortions > 0) {
         const recipe = recipes.find((item) => item.id === input.recipeId);
         setLeftovers((current) => [...current, { id: createId(), transactionId: input.transactionId, recipeId: input.recipeId, portions: input.leftoverPortions, preparedAt: new Date().toISOString(), useBy: new Date(Date.now() + 3 * 86_400_000).toISOString(), storageLocation: 'Refrigerator', reheatingInstructions: recipe?.reheatingInstructions ?? 'Reheat until steaming hot.' }]);
@@ -294,7 +332,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [completedMeals, hydrated, ingredients, leftovers, plan, preferences, reservationWarnings, reservations, shoppingList]);
+  }), [completedMeals, hydrated, ingredients, leftovers, plan, preferences, reservationWarnings, reservations, shoppingList, storageError]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }
