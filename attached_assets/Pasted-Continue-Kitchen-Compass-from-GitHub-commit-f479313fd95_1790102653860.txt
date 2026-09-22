@@ -1,0 +1,72 @@
+Continue Kitchen Compass from GitHub commit f479313fd95aad74b79eec27e17635c85080899e. Fix the five defects below in the existing app. Preserve the current design and working camera, scan-review, recipe, planner, and shopping flows.
+
+1. FIX READINESS FOR A PLANNED MEAL
+
+The current reservation logic makes a planned meal appear impossible to cook. Reproduction: inventory contains exactly 2 confirmed eggs; plan one recipe requiring 2 eggs. The planner reserves both eggs, but recipeReadiness subtracts that meal’s own reservation, reports insufficient eggs, and disables Start cooking.
+
+Update artifacts/kitchen-compass/lib/kitchenLogic.ts and every caller so readiness can evaluate a specific plannedMealId. For that meal, its own valid reservations count as available; reservations belonging to other meals do not. For an unplanned recipe, show availability after all existing reservations.
+
+Pass the specific plannedMealId through the recipe detail and cooking flow. If the same recipe appears on multiple days, select the correct planned occurrence rather than the first matching recipe ID. Do not weaken quantity checks or count uncertain, used-up, or incompatible-unit inventory as available.
+
+2. FIX SHOPPING-LIST ACCOUNTING
+
+The shopping list currently subtracts reserved stock from inventory while counting the full demand for the meals that own those reservations. Reproduction: 2 confirmed eggs in inventory and one planned meal requiring 2 eggs incorrectly produces a shopping need for 2 eggs.
+
+Calculate the whole week’s demand once, subtract total usable physical stock once, and show only the shortage. Reservations should assign stock to meals and identify over-allocation; they must not cause the same stock to be subtracted a second time from the shopping calculation.
+
+Keep separate states for:
+- known shortage, with quantity and unit
+- unknown inventory quantity requiring a check
+- incompatible units requiring a check
+
+Use each planned meal’s saved serving count. Update the planner’s shopping summary to use the same calculation as the shopping screen so they cannot disagree.
+
+3. MIGRATE EXISTING LOCAL DATA
+
+artifacts/kitchen-compass/context/KitchenContext.tsx now reads only kitchen-compass-state-v2. Existing users have inventory, preferences, and plans saved under kitchen-compass-state-v1.
+
+On startup:
+- Read v2 first.
+- If v2 is absent, read v1 and migrate its inventory, preferences, and planned meals into v2.
+- Preserve unknown quantities as unknown; never invent numeric stock.
+- Supply serving counts for older planned meals using the user’s saved serving preference.
+- Rebuild reservations from the migrated plan and inventory.
+- Make migration idempotent.
+- Do not delete v1 until v2 has been written successfully.
+- If parsing or writing fails, preserve the original data and show a recoverable error rather than silently starting with an empty kitchen.
+
+Add a focused migration test using a realistic v1 fixture with inventory, allergies, preferences, and multiple planned meals.
+
+4. PROTECT PAID PHOTO RECOGNITION
+
+The current server treats any caller-supplied x-kitchen-installation string as an authorized identity. A caller can change that string to bypass the five-request rate limit and spend the server’s OpenAI credits.
+
+Replace this with a server-verifiable access mechanism appropriate for the deployed mobile app. Do not treat a self-declared installation ID or a secret embedded in the mobile bundle as authentication. Use server-side quotas that also limit abuse across newly created identities, and use a shared or persistent rate-limit store if Replit deployment can run multiple instances. Keep OPENAI_API_KEY only on the server.
+
+Keep request-size limits, timeouts, bounded model output, and safe error responses. Update the mobile client to obtain and send whatever valid credential the new mechanism requires. Test that changing the installation header alone does not reset access or spending limits. Test unauthorized, oversized, rate-limited, unavailable-provider, malformed-model-response, and successful scan paths.
+
+5. PREVENT REPEATED SCANS FROM INFLATING STOCK
+
+The scan API returns existingInventoryMatch, but the review screen ignores it. When a recognized item matches existing inventory, show the existing row and ask whether the photo represents:
+- the same item already counted, in which case stock does not change;
+- newly acquired additional stock, in which case add the confirmed quantity; or
+- a correction to the existing row, in which case show the proposed change before saving.
+
+Default to “same item already counted” when uncertain. Do not automatically add quantities from a repeated photo. Apply the decision to each suggestion independently. A duplicate within one scan must also be handled without silently increasing stock. Confirmed additions should retain source and review information needed to explain the inventory change.
+
+TEST THE COMPLETE WORKFLOW
+
+Add integration-level tests that use the same inventory and planned meal through reservation, recipe readiness, shopping needs, and cooking:
+
+- With exactly 2 eggs and one planned meal requiring 2 eggs: the meal is ready, Start cooking is enabled, the shopping list shows no egg shortage, and cooking deducts 2 eggs once.
+- With 2 eggs and two such planned meals: only one meal can reserve the eggs; the other shows a shortage, and the shopping list asks for exactly 2 eggs.
+- Swapping or removing a meal releases its reservations and recalculates readiness and shopping needs.
+- Changing serving count recalculates all three consistently.
+- The same recipe planned on two days uses the selected plannedMealId for cooking.
+- Repeated completion cannot deduct inventory twice.
+- Repeatedly scanning the same package does not increase stock unless the user explicitly confirms new stock.
+- A v1 installation retains its inventory and preferences after upgrading.
+
+Run pnpm install --frozen-lockfile, the shared build, mobile and API typechecks, focused unit and integration tests, and the production build. Report exact commands and results. Separately state whether camera capture and live AI scanning were tested on a physical iPhone; do not claim physical-device verification from compilation or simulator tests.
+
+Before finishing, inspect the final diff and give me a concise list of fixes, tests passed, remaining limitations, and any setup I must provide. Do not mark the task complete while any of the five defects remains.
