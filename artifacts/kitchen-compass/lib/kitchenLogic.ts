@@ -15,11 +15,14 @@ export type ReservationRecord = {
   id: string;
   plannedMealId: string;
   inventoryId?: string;
+  leftoverId?: string;
   ingredientName: string;
   normalizedName: string;
   quantity?: number;
   unit?: string;
   quantityKnown: boolean;
+  shortageQuantity?: number;
+  shortageUnit?: string;
 };
 
 import {
@@ -182,6 +185,7 @@ export type RecipeReadinessResult = {
   missingIngredients: string[];
   insufficientIngredients: string[];
   quantityCheckIngredients: string[];
+  shortageDetails: Array<{ ingredientName: string; quantity: number; unit: string }>;
   allergenConflict: boolean;
   allergenIncomplete: boolean;
 };
@@ -211,6 +215,7 @@ export function recipeReadiness(
     missingIngredients: [],
     insufficientIngredients: [],
     quantityCheckIngredients: [],
+    shortageDetails: [],
     allergenConflict: requestedAllergenConflicts(allergenAssessment, allergies),
     allergenIncomplete: recipe.allergenInfo !== 'complete' || hasUnknownAllergenInformation(allergenAssessment),
   };
@@ -219,13 +224,16 @@ export function recipeReadiness(
   for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
     const identity = normalizeIngredientName(ingredient.name);
     const matches = inventory.filter((item) => ingredientIdentitiesMatch(ingredient.name, item));
-    if (!matches.length) {
-      result.missingIngredients.push(ingredient.name);
-      continue;
-    }
     const demand = ingredient.quantity === undefined || !ingredient.unit
       ? undefined
       : scaleQuantity(ingredient.quantity, recipe.servings ?? 1, targetServings);
+    if (!matches.length) {
+      result.missingIngredients.push(ingredient.name);
+      if (demand !== undefined && ingredient.unit) {
+        result.shortageDetails.push({ ingredientName: ingredient.name, quantity: demand, unit: ingredient.unit });
+      }
+      continue;
+    }
     if (demand === undefined) {
       result.quantityCheckIngredients.push(ingredient.name);
       continue;
@@ -254,7 +262,10 @@ export function recipeReadiness(
       }
     }
     if (hasUnknown && available < demand) result.quantityCheckIngredients.push(ingredient.name);
-    else if (available < demand) result.insufficientIngredients.push(ingredient.name);
+    else if (available < demand) {
+      result.insufficientIngredients.push(ingredient.name);
+      result.shortageDetails.push({ ingredientName: ingredient.name, quantity: Number((demand - available).toFixed(2)), unit: ingredient.unit! });
+    }
   }
   result.ready = result.ready
     && !result.missingIngredients.length
@@ -343,6 +354,19 @@ export function consumeLeftover<T extends { id: string; portions: number }>(left
   };
 }
 
+export function applyLeftoverCookingTransaction<T extends { id: string; portions: number }>(
+  leftovers: T[],
+  completedTransactionIds: string[],
+  transactionId: string,
+  leftoverId: string,
+  portions: number,
+) {
+  if (completedTransactionIds.includes(transactionId)) return { applied: false, leftovers, completedTransactionIds };
+  const result = consumeLeftover(leftovers, leftoverId, portions);
+  if (!result.consumed) return { applied: false, leftovers, completedTransactionIds };
+  return { applied: true, leftovers: result.leftovers, completedTransactionIds: [...completedTransactionIds, transactionId] };
+}
+
 type PlanRecipeShape = {
   id: string;
   servings: number;
@@ -392,20 +416,90 @@ export function rankPlanRecipes<T extends PlanRecipeShape>(
         score,
         needsConfirmation: readiness.quantityCheckIngredients.length > 0,
         confirmationReasons: readiness.quantityCheckIngredients,
+        shortageReasons: readiness.shortageDetails.map((shortage) => `${shortage.ingredientName}: ${shortage.quantity} ${shortage.unit} short`),
       };
     })
     .sort((a, b) => b.score - a.score || a.recipe.id.localeCompare(b.recipe.id));
+}
+
+export type GeneratedPlanMeal = MealSlot & PlannedRecipeInput & {
+  needsConfirmation?: boolean;
+  confirmationReasons?: string[];
+  shortageReasons?: string[];
+};
+
+export function generatePlanIncrementally<T extends PlanRecipeShape>(
+  current: GeneratedPlanMeal[],
+  requestedDays: string[],
+  requestedMeals: string[],
+  candidates: T[],
+  inventory: InventoryCandidate[],
+  preferences: RecipePreferenceInput,
+  targetServings: number,
+  leftovers: Array<{ id: string; portions: number }> = [],
+) {
+  const next = replacePlanSlots(current, requestedDays.flatMap((day) => requestedMeals.map((meal) => ({ day, meal: meal as MealSlot['meal'] }))), []);
+  for (const day of requestedDays) {
+    for (const meal of requestedMeals) {
+      const usedRecipeIds = next.map((item) => item.recipeId);
+      const baseReservations = buildReservations(next, candidates, inventory, leftovers).reservations;
+      const remainingInventory = inventoryAfterReservations(inventory, baseReservations);
+      const ranked = rankPlanRecipes(
+        candidates.filter((recipe) => meal === 'Breakfast' ? recipe.meal === 'Breakfast' : recipe.meal !== 'Breakfast'),
+        remainingInventory,
+        preferences,
+        targetServings,
+        usedRecipeIds,
+      );
+      const best = ranked[0];
+      if (!best) continue;
+      next.push({
+        id: `${day}-${meal}`,
+        day,
+        meal: meal as MealSlot['meal'],
+        recipeId: best.recipe.id,
+        servings: targetServings,
+        ...(best.needsConfirmation ? { needsConfirmation: true, confirmationReasons: best.confirmationReasons } : {}),
+        ...(best.shortageReasons.length ? { shortageReasons: best.shortageReasons } : {}),
+      });
+    }
+  }
+  return next;
 }
 
 export function buildReservations(
   plan: PlannedRecipeInput[],
   recipes: ReservationRecipe[],
   inventory: InventoryCandidate[],
+  leftovers: Array<{ id: string; portions: number }> = [],
 ) {
   const reservations: ReservationRecord[] = [];
   const warnings: string[] = [];
+  const leftoverReserved = new Map<string, number>();
   for (const planned of plan) {
-    if (planned.leftoverId) continue;
+    if (planned.leftoverId) {
+      const leftover = leftovers.find((item) => item.id === planned.leftoverId);
+      if (!leftover) continue;
+      const alreadyReserved = leftoverReserved.get(planned.leftoverId) ?? 0;
+      const allocation = Math.min(planned.servings, Math.max(0, leftover.portions - alreadyReserved));
+      if (allocation > 0) {
+        reservations.push({
+          id: `${planned.id}-leftover-${planned.leftoverId}`,
+          plannedMealId: planned.id,
+          leftoverId: planned.leftoverId,
+          ingredientName: 'leftover portions',
+          normalizedName: `leftover-${planned.leftoverId}`,
+          quantity: allocation,
+          unit: 'portion',
+          quantityKnown: true,
+        });
+        leftoverReserved.set(planned.leftoverId, alreadyReserved + allocation);
+      }
+      if (allocation < planned.servings) {
+        warnings.push(`${planned.id}: leftover portions short by ${Number((planned.servings - allocation).toFixed(2))}`);
+      }
+      continue;
+    }
     const recipe = recipes.find((item) => item.id === planned.recipeId && (!planned.recipeVersion || item.recipeVersion === planned.recipeVersion || item.sourceVersion === planned.recipeVersion));
     if (!recipe) continue;
     for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
@@ -442,13 +536,26 @@ export function buildReservations(
           plannedMealId: planned.id,
           ingredientName: ingredient.name,
           normalizedName,
-          quantityKnown: false,
+          ...(hasUnknown ? {} : { quantity: 0, unit: ingredient.unit, shortageQuantity: remaining, shortageUnit: ingredient.unit }),
+          quantityKnown: !hasUnknown,
         });
-        warnings.push(`${planned.id}: ${ingredient.name} ${hasUnknown ? 'needs a quantity check' : 'is overallocated'}`);
+        warnings.push(`${planned.id}: ${ingredient.name} ${hasUnknown ? 'needs a quantity check' : `short by ${Number(remaining.toFixed(2))} ${ingredient.unit}`}`);
       }
     }
   }
   return { reservations, warnings };
+}
+
+export function inventoryAfterReservations<T extends InventoryCandidate>(inventory: T[], reservations: ReservationRecord[]) {
+  return inventory.map((item) => {
+    if (!item.id || item.quantityKnown !== true || item.quantityValue === undefined || !item.unit) return item;
+    const reserved = reservations
+      .filter((reservation) => reservation.inventoryId === item.id && reservation.quantityKnown && reservation.quantity !== undefined && reservation.unit)
+      .reduce((sum, reservation) => sum + (convertQuantity(reservation.quantity!, reservation.unit!, item.unit!) ?? 0), 0);
+    if (reserved <= 0) return item;
+    const remaining = Number(Math.max(0, item.quantityValue - reserved).toFixed(2));
+    return { ...item, quantityValue: remaining, quantity: `${remaining} ${canonicalUnit(item.unit)}` };
+  });
 }
 
 export type ShoppingNeed = {

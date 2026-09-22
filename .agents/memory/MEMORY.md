@@ -4,3 +4,4 @@
 - [Recipe guidance contract](recipe-guidance-contract.md) — curated and discovered recipes share structured step amounts, cues, safety temperatures, and mistake guidance.
 - [Expo notification triggers](expo-notifications-trigger.md) — keep reminder logic injectable and translate daily triggers at the Expo SDK 57 adapter boundary.
 - [Allergen validation](allergen-validation.md) — AI allergen metadata is advisory; deterministic ingredient checks are shared by API filtering and client readiness.
+- [Week-wide plan accounting](weekly-plan-accounting.md) — all planned meals share reservations; known shortages and unknown quantities stay separate.
