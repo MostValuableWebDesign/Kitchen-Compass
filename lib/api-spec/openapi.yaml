@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: scan
     description: Ingredient photo analysis
+  - name: recipes
+    description: Recipe discovery from confirmed kitchen inventory
 paths:
   /healthz:
     get:
@@ -72,6 +74,34 @@ paths:
           description: Access issuance rate limit exceeded
         "503":
           description: Access issuance unavailable
+  /recipes/discover:
+    post:
+      operationId: discoverRecipes
+      tags: [recipes]
+      summary: Discover structured recipes from confirmed kitchen inventory
+      security:
+        - ScanAccess: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecipeDiscoveryRequest"
+      responses:
+        "200":
+          description: Validated recipe candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecipeDiscoveryResponse"
+        "400":
+          description: Invalid discovery request
+        "401":
+          description: Missing or invalid scan credential
+        "429":
+          description: Discovery rate limit exceeded
+        "503":
+          description: Recipe discovery is unavailable or returned no safe recipes
 components:
   securitySchemes:
     ScanAccess:
@@ -202,4 +232,288 @@ components:
           type: integer
           minimum: 1
       required: [accessToken, expiresInSeconds]
+    RecipeDiscoveryInventory:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        location:
+          type: string
+          enum: [Refrigerator, Freezer, Pantry]
+        quantityValue:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+        quantityKnown:
+          type: boolean
+        status:
+          type: string
+          enum: [fresh, low, used]
+        confidence:
+          type: string
+          enum: [confirmed, uncertain]
+      required: [name, location, quantityKnown, status]
+    RecipeDiscoveryPreferences:
+      type: object
+      properties:
+        allergies:
+          type: array
+          items: { type: string }
+        dietaryRestrictions:
+          type: array
+          items: { type: string }
+        dislikes:
+          type: array
+          items: { type: string }
+        cuisines:
+          type: array
+          items: { type: string }
+        skill:
+          type: string
+          enum: [Beginner, Comfortable, Confident]
+        cookTime:
+          type: integer
+          minimum: 1
+        equipment:
+          type: array
+          items: { type: string }
+        nutrition:
+          type: array
+          items: { type: string }
+      required: [allergies, dietaryRestrictions, dislikes, cuisines, skill, cookTime, equipment, nutrition]
+    RecipeDiscoveryFilters:
+      type: object
+      properties:
+        mealType:
+          type: string
+          enum: [Any, Breakfast, Lunch, Dinner]
+        cuisine:
+          type: string
+        maxMinutes:
+          type: integer
+          minimum: 1
+        equipment:
+          type: array
+          items: { type: string }
+        dietaryPreference:
+          type: string
+        minHealthScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required: [mealType]
+    RecipeDiscoveryRequest:
+      type: object
+      properties:
+        inventory:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/RecipeDiscoveryInventory"
+        preferences:
+          $ref: "#/components/schemas/RecipeDiscoveryPreferences"
+        filters:
+          $ref: "#/components/schemas/RecipeDiscoveryFilters"
+        variationSeed:
+          type: string
+          minLength: 1
+          maxLength: 80
+        excludeRecipeVersions:
+          type: array
+          maxItems: 30
+          items: { type: string }
+      required: [inventory, preferences, filters, variationSeed, excludeRecipeVersions]
+    RecipeIngredient:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+        unit:
+          type: string
+          minLength: 1
+        required:
+          type: boolean
+      required: [name, quantity, unit, required]
+    RecipeStep:
+      type: object
+      properties:
+        order:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+        duration:
+          type: integer
+          minimum: 0
+        temperature:
+          type: string
+        ingredients:
+          type: array
+          items: { type: string }
+      required: [order, title, body, ingredients]
+    RecipeNutrition:
+      type: object
+      properties:
+        calories:
+          type: number
+          minimum: 0
+        protein:
+          type: number
+          minimum: 0
+        carbs:
+          type: number
+          minimum: 0
+        fat:
+          type: number
+          minimum: 0
+        fiber:
+          type: number
+          minimum: 0
+        sodium:
+          type: number
+          minimum: 0
+      required: [calories, protein, carbs, fat, fiber, sodium]
+    RecipeSubstitution:
+      type: object
+      properties:
+        from:
+          type: string
+          minLength: 1
+        to:
+          type: string
+          minLength: 1
+        reason:
+          type: string
+          minLength: 1
+        validated:
+          type: boolean
+      required: [from, to, reason, validated]
+    DiscoveredRecipe:
+      type: object
+      properties:
+        id:
+          type: string
+        recipeVersion:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        cuisine:
+          type: string
+        mealType:
+          type: string
+          enum: [Breakfast, Lunch, Dinner]
+        servings:
+          type: integer
+          minimum: 1
+        prepMinutes:
+          type: integer
+          minimum: 0
+        cookMinutes:
+          type: integer
+          minimum: 0
+        difficulty:
+          type: string
+          enum: [Easy, Moderate, Hard]
+        equipment:
+          type: array
+          items: { type: string }
+        healthScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        scoreNote:
+          type: string
+        ingredients:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/RecipeIngredient"
+        nutrition:
+          $ref: "#/components/schemas/RecipeNutrition"
+        nutritionProvenance:
+          type: string
+          enum: [ai-estimate, source-backed]
+        nutritionSource:
+          type: string
+          minLength: 1
+        steps:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/RecipeStep"
+        allergens:
+          type: array
+          items: { type: string }
+        allergenInfo:
+          type: string
+          enum: [complete, incomplete]
+        storageInstructions:
+          type: string
+        reheatingInstructions:
+          type: string
+        dietaryTags:
+          type: array
+          items: { type: string }
+        dislikeTags:
+          type: array
+          items: { type: string }
+        nutritionTags:
+          type: array
+          items: { type: string }
+        substitutions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipeSubstitution"
+      required:
+        - id
+        - recipeVersion
+        - title
+        - description
+        - cuisine
+        - mealType
+        - servings
+        - prepMinutes
+        - cookMinutes
+        - difficulty
+        - equipment
+        - healthScore
+        - scoreNote
+        - ingredients
+        - nutrition
+        - nutritionProvenance
+        - nutritionSource
+        - steps
+        - allergens
+        - allergenInfo
+        - storageInstructions
+        - reheatingInstructions
+        - dietaryTags
+        - dislikeTags
+        - nutritionTags
+        - substitutions
+    RecipeDiscoveryResponse:
+      type: object
+      properties:
+        recipes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiscoveredRecipe"
+        source:
+          type: string
+          enum: [server-ai]
+        warning:
+          type: string
+      required: [recipes, source]
 

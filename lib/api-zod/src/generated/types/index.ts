@@ -6,11 +6,31 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './discoveredRecipe';
+export * from './discoveredRecipeAllergenInfo';
+export * from './discoveredRecipeDifficulty';
+export * from './discoveredRecipeMealType';
+export * from './discoveredRecipeNutritionProvenance';
 export * from './existingIngredient';
 export * from './existingIngredientLocation';
 export * from './healthStatus';
 export * from './ingredientSuggestion';
 export * from './ingredientSuggestionStorageLocation';
+export * from './recipeDiscoveryFilters';
+export * from './recipeDiscoveryFiltersMealType';
+export * from './recipeDiscoveryInventory';
+export * from './recipeDiscoveryInventoryConfidence';
+export * from './recipeDiscoveryInventoryLocation';
+export * from './recipeDiscoveryInventoryStatus';
+export * from './recipeDiscoveryPreferences';
+export * from './recipeDiscoveryPreferencesSkill';
+export * from './recipeDiscoveryRequest';
+export * from './recipeDiscoveryResponse';
+export * from './recipeDiscoveryResponseSource';
+export * from './recipeIngredient';
+export * from './recipeNutrition';
+export * from './recipeStep';
+export * from './recipeSubstitution';
 export * from './scanAccessResponse';
 export * from './scanAnalysisRequest';
 export * from './scanAnalysisResponse';

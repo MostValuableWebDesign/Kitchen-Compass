@@ -46,6 +46,7 @@ app.use(
 );
 app.use(cors());
 app.use("/api/scan/analyze", scanAccess);
+app.use("/api/recipes/discover", scanAccess);
 app.use(express.json({ limit: `${scanLimits.maxBodyBytes}b` }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -67,7 +68,7 @@ app.use((error: unknown, req: express.Request, res: express.Response, next: expr
     });
     return;
   }
-  if (req.path.startsWith("/api/scan") && error instanceof SyntaxError) {
+  if ((req.path.startsWith("/api/scan") || req.path.startsWith("/api/recipes")) && error instanceof SyntaxError) {
     res.status(400).json({
       error: {
         code: "INVALID_REQUEST",
@@ -78,7 +79,7 @@ app.use((error: unknown, req: express.Request, res: express.Response, next: expr
     });
     return;
   }
-  if (req.path.startsWith("/api/scan")) {
+  if (req.path.startsWith("/api/scan") || req.path.startsWith("/api/recipes")) {
     res.status(500).json({
       error: {
         code: "SCAN_UNAVAILABLE",

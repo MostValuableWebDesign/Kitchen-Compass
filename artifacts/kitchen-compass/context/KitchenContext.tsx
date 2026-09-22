@@ -11,8 +11,9 @@ import {
   type Deduction,
   type ReservationRecord,
 } from '@/lib/kitchenLogic';
-import { recipes } from '@/data/recipes';
+import { recipes, type Recipe } from '@/data/recipes';
 import { defaultPreferences, migrateV1KitchenState, parsePersistedKitchenState, type PersistedKitchenState } from '@/lib/kitchenPersistence';
+import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
 
 export type StorageLocation = 'Refrigerator' | 'Freezer' | 'Pantry';
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
@@ -55,6 +56,7 @@ export interface PlannedMeal {
   day: string;
   meal: MealType;
   recipeId: string;
+  recipeVersion?: string;
   servings: number;
 }
 
@@ -106,6 +108,8 @@ interface KitchenContextValue {
   completedMeals: CompletedMeal[];
   leftovers: Leftover[];
   shoppingList: ShoppingListState;
+  savedRecipes: Recipe[];
+  favoriteRecipeVersions: string[];
   hydrated: boolean;
   storageError: string | null;
   retryHydration: () => void;
@@ -115,9 +119,11 @@ interface KitchenContextValue {
   removeIngredient: (id: string) => void;
   toggleLow: (id: string) => void;
   setPreferences: (changes: Partial<Preferences>) => void;
-  setMeal: (day: string, meal: MealType, recipeId: string, servings?: number) => void;
+  setMeal: (day: string, meal: MealType, recipeId: string, servings?: number, recipeVersion?: string) => void;
   removeMeal: (day: string, meal: MealType) => void;
   setShoppingList: (changes: Partial<ShoppingListState>) => void;
+  saveDiscoveredRecipes: (nextRecipes: Recipe[]) => void;
+  toggleFavoriteRecipe: (recipe: Recipe) => void;
   previewCook: (plannedMealId: string, actualServings?: number) => CookPreview | null;
   completeCook: (input: {
     transactionId: string;
@@ -157,6 +163,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [completedMeals, setCompletedMeals] = useState<CompletedMeal[]>([]);
   const [leftovers, setLeftovers] = useState<Leftover[]>([]);
   const [shoppingList, setShoppingListState] = useState<ShoppingListState>({ checkedIds: [], manualItems: [] });
+  const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
+  const [favoriteRecipeVersions, setFavoriteRecipeVersions] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -182,6 +190,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
               completedMeals: [],
               leftovers: [],
               shoppingList: { checkedIds: [], manualItems: [] },
+               savedRecipes: [],
+               favoriteRecipeVersions: [],
             };
           // Keep v1 as a recovery copy. The migration is complete only after v2 is written.
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
@@ -194,6 +204,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setCompletedMeals(parsed.completedMeals);
         setLeftovers(parsed.leftovers);
         setShoppingListState(parsed.shoppingList);
+        setSavedRecipes(parsed.savedRecipes);
+        setFavoriteRecipeVersions(parsed.favoriteRecipeVersions);
         setStorageError(null);
         setHydrated(true);
       } catch (error) {
@@ -222,15 +234,17 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       completedMeals,
       leftovers,
       shoppingList,
+      savedRecipes,
+      favoriteRecipeVersions,
     })).catch(() => undefined);
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, storageError]);
+  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, favoriteRecipeVersions, storageError]);
 
   useEffect(() => {
     if (!hydrated) return;
-    const built = buildReservations(plan, recipes, ingredients);
+    const built = buildReservations(plan, mergeRecipes(recipes, savedRecipes), ingredients);
     setReservations(built.reservations);
     setReservationWarnings(built.warnings);
-  }, [hydrated, plan, ingredients]);
+  }, [hydrated, plan, ingredients, savedRecipes]);
 
   const value = useMemo<KitchenContextValue>(() => ({
     ingredients,
@@ -241,6 +255,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     completedMeals,
     leftovers,
     shoppingList,
+    savedRecipes,
+    favoriteRecipeVersions,
     hydrated,
     storageError,
     retryHydration: () => setLoadAttempt((attempt) => attempt + 1),
@@ -285,16 +301,22 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     removeIngredient: (id) => setIngredients((current) => current.filter((item) => item.id !== id)),
     toggleLow: (id) => setIngredients((current) => current.map((item) => item.id === id ? { ...item, status: item.status === 'low' ? 'fresh' : 'low' } : item)),
     setPreferences: (changes) => setPreferencesState((current) => ({ ...current, ...changes })),
-    setMeal: (day, meal, recipeId, servings = preferences.servings) => setPlan((current) => [
+    saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => mergeRecipes(current, nextRecipes).filter((recipe) => recipe.source === 'server-ai')),
+    toggleFavoriteRecipe: (recipe) => setFavoriteRecipeVersions((current) => {
+      const version = recipeVersion(recipe);
+      return current.includes(version) ? current.filter((item) => item !== version) : [...current, version];
+    }),
+    setMeal: (day, meal, recipeId, servings = preferences.servings, selectedRecipeVersion) => setPlan((current) => [
       ...current.filter((item) => !(item.day === day && item.meal === meal)),
-      { id: `${day}-${meal}`, day, meal, recipeId, servings: Math.max(1, servings) },
+      { id: `${day}-${meal}`, day, meal, recipeId, ...(selectedRecipeVersion ? { recipeVersion: selectedRecipeVersion } : {}), servings: Math.max(1, servings) },
     ]),
     removeMeal: (day, meal) => setPlan((current) => current.filter((item) => !(item.day === day && item.meal === meal))),
     setShoppingList: (changes) => setShoppingListState((current) => ({ ...current, ...changes })),
     previewCook: (plannedMealId, actualServings = plan.find((meal) => meal.id === plannedMealId)?.servings ?? preferences.servings) => {
       const planned = plan.find((meal) => meal.id === plannedMealId);
       if (!planned) return null;
-      const recipe = recipes.find((item) => item.id === planned.recipeId);
+      const recipe = mergeRecipes(recipes, savedRecipes).find((item) => item.id === planned.recipeId
+        && (!planned.recipeVersion || recipeVersion(item) === planned.recipeVersion));
       if (!recipe) return null;
       const mealReservations = reservations.filter((reservation) => reservation.plannedMealId === plannedMealId && reservation.quantityKnown && reservation.inventoryId);
       return {
@@ -324,14 +346,14 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         ? current
         : [...current, { transactionId: input.transactionId, plannedMealId: input.plannedMealId, recipeId: input.recipeId, servings: input.servings, completedAt: new Date().toISOString() }]);
       if (input.leftoverPortions > 0) {
-        const recipe = recipes.find((item) => item.id === input.recipeId);
+        const recipe = mergeRecipes(recipes, savedRecipes).find((item) => item.id === input.recipeId);
         setLeftovers((current) => [...current, { id: createId(), transactionId: input.transactionId, recipeId: input.recipeId, portions: input.leftoverPortions, preparedAt: new Date().toISOString(), useBy: new Date(Date.now() + 3 * 86_400_000).toISOString(), storageLocation: 'Refrigerator', reheatingInstructions: recipe?.reheatingInstructions ?? 'Reheat until steaming hot.' }]);
       }
       setReservations((current) => current.filter((reservation) => reservation.plannedMealId !== input.plannedMealId));
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [completedMeals, hydrated, ingredients, leftovers, plan, preferences, reservationWarnings, reservations, shoppingList, storageError]);
+  }), [completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, plan, preferences, reservationWarnings, reservations, savedRecipes, shoppingList, storageError]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }

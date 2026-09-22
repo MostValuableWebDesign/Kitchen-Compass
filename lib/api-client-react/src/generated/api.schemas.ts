@@ -112,3 +112,234 @@ export interface ScanAccessResponse {
   expiresInSeconds: number;
 }
 
+export type RecipeDiscoveryInventoryLocation = typeof RecipeDiscoveryInventoryLocation[keyof typeof RecipeDiscoveryInventoryLocation];
+
+
+export const RecipeDiscoveryInventoryLocation = {
+  Refrigerator: 'Refrigerator',
+  Freezer: 'Freezer',
+  Pantry: 'Pantry',
+} as const;
+
+export type RecipeDiscoveryInventoryStatus = typeof RecipeDiscoveryInventoryStatus[keyof typeof RecipeDiscoveryInventoryStatus];
+
+
+export const RecipeDiscoveryInventoryStatus = {
+  fresh: 'fresh',
+  low: 'low',
+  used: 'used',
+} as const;
+
+export type RecipeDiscoveryInventoryConfidence = typeof RecipeDiscoveryInventoryConfidence[keyof typeof RecipeDiscoveryInventoryConfidence];
+
+
+export const RecipeDiscoveryInventoryConfidence = {
+  confirmed: 'confirmed',
+  uncertain: 'uncertain',
+} as const;
+
+export interface RecipeDiscoveryInventory {
+  /** @minLength 1 */
+  name: string;
+  location: RecipeDiscoveryInventoryLocation;
+  /** @minimum 0 */
+  quantityValue?: number;
+  unit?: string;
+  quantityKnown: boolean;
+  status: RecipeDiscoveryInventoryStatus;
+  confidence?: RecipeDiscoveryInventoryConfidence;
+}
+
+export type RecipeDiscoveryPreferencesSkill = typeof RecipeDiscoveryPreferencesSkill[keyof typeof RecipeDiscoveryPreferencesSkill];
+
+
+export const RecipeDiscoveryPreferencesSkill = {
+  Beginner: 'Beginner',
+  Comfortable: 'Comfortable',
+  Confident: 'Confident',
+} as const;
+
+export interface RecipeDiscoveryPreferences {
+  allergies: string[];
+  dietaryRestrictions: string[];
+  dislikes: string[];
+  cuisines: string[];
+  skill: RecipeDiscoveryPreferencesSkill;
+  /** @minimum 1 */
+  cookTime: number;
+  equipment: string[];
+  nutrition: string[];
+}
+
+export type RecipeDiscoveryFiltersMealType = typeof RecipeDiscoveryFiltersMealType[keyof typeof RecipeDiscoveryFiltersMealType];
+
+
+export const RecipeDiscoveryFiltersMealType = {
+  Any: 'Any',
+  Breakfast: 'Breakfast',
+  Lunch: 'Lunch',
+  Dinner: 'Dinner',
+} as const;
+
+export interface RecipeDiscoveryFilters {
+  mealType: RecipeDiscoveryFiltersMealType;
+  cuisine?: string;
+  /** @minimum 1 */
+  maxMinutes?: number;
+  equipment?: string[];
+  dietaryPreference?: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  minHealthScore?: number;
+}
+
+export interface RecipeDiscoveryRequest {
+  /** @maxItems 100 */
+  inventory: RecipeDiscoveryInventory[];
+  preferences: RecipeDiscoveryPreferences;
+  filters: RecipeDiscoveryFilters;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  variationSeed: string;
+  /** @maxItems 30 */
+  excludeRecipeVersions: string[];
+}
+
+export interface RecipeIngredient {
+  /** @minLength 1 */
+  name: string;
+  /** @exclusiveMinimum 0 */
+  quantity: number;
+  /** @minLength 1 */
+  unit: string;
+  required: boolean;
+}
+
+export interface RecipeStep {
+  /** @minimum 1 */
+  order: number;
+  /** @minLength 1 */
+  title: string;
+  /** @minLength 1 */
+  body: string;
+  /** @minimum 0 */
+  duration?: number;
+  temperature?: string;
+  ingredients: string[];
+}
+
+export interface RecipeNutrition {
+  /** @minimum 0 */
+  calories: number;
+  /** @minimum 0 */
+  protein: number;
+  /** @minimum 0 */
+  carbs: number;
+  /** @minimum 0 */
+  fat: number;
+  /** @minimum 0 */
+  fiber: number;
+  /** @minimum 0 */
+  sodium: number;
+}
+
+export interface RecipeSubstitution {
+  /** @minLength 1 */
+  from: string;
+  /** @minLength 1 */
+  to: string;
+  /** @minLength 1 */
+  reason: string;
+  validated: boolean;
+}
+
+export type DiscoveredRecipeMealType = typeof DiscoveredRecipeMealType[keyof typeof DiscoveredRecipeMealType];
+
+
+export const DiscoveredRecipeMealType = {
+  Breakfast: 'Breakfast',
+  Lunch: 'Lunch',
+  Dinner: 'Dinner',
+} as const;
+
+export type DiscoveredRecipeDifficulty = typeof DiscoveredRecipeDifficulty[keyof typeof DiscoveredRecipeDifficulty];
+
+
+export const DiscoveredRecipeDifficulty = {
+  Easy: 'Easy',
+  Moderate: 'Moderate',
+  Hard: 'Hard',
+} as const;
+
+export type DiscoveredRecipeNutritionProvenance = typeof DiscoveredRecipeNutritionProvenance[keyof typeof DiscoveredRecipeNutritionProvenance];
+
+
+export const DiscoveredRecipeNutritionProvenance = {
+  'ai-estimate': 'ai-estimate',
+  'source-backed': 'source-backed',
+} as const;
+
+export type DiscoveredRecipeAllergenInfo = typeof DiscoveredRecipeAllergenInfo[keyof typeof DiscoveredRecipeAllergenInfo];
+
+
+export const DiscoveredRecipeAllergenInfo = {
+  complete: 'complete',
+  incomplete: 'incomplete',
+} as const;
+
+export interface DiscoveredRecipe {
+  id: string;
+  recipeVersion: string;
+  title: string;
+  description: string;
+  cuisine: string;
+  mealType: DiscoveredRecipeMealType;
+  /** @minimum 1 */
+  servings: number;
+  /** @minimum 0 */
+  prepMinutes: number;
+  /** @minimum 0 */
+  cookMinutes: number;
+  difficulty: DiscoveredRecipeDifficulty;
+  equipment: string[];
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  healthScore: number;
+  scoreNote: string;
+  /** @minItems 1 */
+  ingredients: RecipeIngredient[];
+  nutrition: RecipeNutrition;
+  nutritionProvenance: DiscoveredRecipeNutritionProvenance;
+  /** @minLength 1 */
+  nutritionSource: string;
+  /** @minItems 1 */
+  steps: RecipeStep[];
+  allergens: string[];
+  allergenInfo: DiscoveredRecipeAllergenInfo;
+  storageInstructions: string;
+  reheatingInstructions: string;
+  dietaryTags: string[];
+  dislikeTags: string[];
+  nutritionTags: string[];
+  substitutions: RecipeSubstitution[];
+}
+
+export type RecipeDiscoveryResponseSource = typeof RecipeDiscoveryResponseSource[keyof typeof RecipeDiscoveryResponseSource];
+
+
+export const RecipeDiscoveryResponseSource = {
+  'server-ai': 'server-ai',
+} as const;
+
+export interface RecipeDiscoveryResponse {
+  recipes: DiscoveredRecipe[];
+  source: RecipeDiscoveryResponseSource;
+  warning?: string;
+}
+

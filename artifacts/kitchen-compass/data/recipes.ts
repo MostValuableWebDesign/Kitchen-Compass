@@ -8,6 +8,13 @@ export interface RecipeIngredient {
   required?: boolean;
 }
 
+export interface RecipeSubstitution {
+  from: string;
+  to: string;
+  reason: string;
+  validated: boolean;
+}
+
 export interface Recipe {
   id: string;
   title: string;
@@ -29,8 +36,12 @@ export interface Recipe {
   allergenInfo: 'complete' | 'incomplete';
   sourceVersion: string;
   nutritionSource: string;
+  nutritionProvenance?: 'ai-estimate' | 'source-backed';
+  recipeVersion?: string;
+  source?: 'curated' | 'server-ai';
   storageInstructions: string;
   reheatingInstructions: string;
+  substitutions?: RecipeSubstitution[];
   dietaryTags?: string[];
   dislikeTags?: string[];
   nutritionTags?: string[];

@@ -8,15 +8,16 @@ import { useKitchen } from '@/context/KitchenContext';
 import { getRecipe } from '@/data/recipes';
 import { scaledIngredient, scaledNutrition } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
-import { ingredientIdentitiesMatch, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
+import { ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
+import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
 
 export default function RecipeDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, plannedMealId: requestedPlannedMealId } = useLocalSearchParams<{ id: string; plannedMealId?: string }>();
-  const recipe = getRecipe(id);
-  const { ingredients, preferences, reservations, plan } = useKitchen();
+  const { ingredients, preferences, reservations, plan, savedRecipes, favoriteRecipeVersions, toggleFavoriteRecipe } = useKitchen();
+  const recipe = mergeRecipes([getRecipe(id)], savedRecipes).find((item) => item.id === id) ?? getRecipe(id);
   const required = recipe.ingredients.filter((item) => item.required !== false);
   const have = (name: string) => ingredients.some((item) => ingredientIdentitiesMatch(name, item));
   const eligible = recipeMatchesPreferences(recipe, preferences);
@@ -32,14 +33,17 @@ export default function RecipeDetailScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 35 }} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>{recipe.image ? <Image source={recipe.image} contentFit="cover" style={styles.heroImage} /> : <View style={[styles.heroImage, { backgroundColor: colors.secondary }]}><Ionicons name="restaurant-outline" size={46} color={colors.primary} /></View>}<Pressable onPress={() => router.back()} style={[styles.backButton, { backgroundColor: colors.background }]}><Feather name="arrow-left" size={20} color={colors.foreground} /></Pressable></View>
         <View style={styles.content}>
-          <View style={styles.detailHeader}><View style={{ flex: 1 }}><Text style={[styles.title, { color: colors.foreground }]}>{recipe.title}</Text><Text style={[styles.description, { color: colors.mutedForeground }]}>{recipe.description}</Text></View><View style={[styles.score, { backgroundColor: colors.secondary }]}><Text style={[styles.scoreNumber, { color: colors.primary }]}>{recipe.score}</Text><Text style={[styles.scoreLabel, { color: colors.primary }]}>score</Text></View></View>
+          <View style={styles.detailHeader}><View style={{ flex: 1 }}><Text style={[styles.title, { color: colors.foreground }]}>{recipe.title}</Text><Text style={[styles.description, { color: colors.mutedForeground }]}>{recipe.description}</Text></View><View style={styles.headerActions}><Pressable testID="favorite-detail" onPress={() => toggleFavoriteRecipe(recipe)} style={[styles.favoriteButton, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name={favoriteRecipeVersions.includes(recipeVersion(recipe)) ? 'heart' : 'heart-outline'} size={21} color={favoriteRecipeVersions.includes(recipeVersion(recipe)) ? colors.destructive : colors.mutedForeground} /></Pressable><View style={[styles.score, { backgroundColor: colors.secondary }]}><Text style={[styles.scoreNumber, { color: colors.primary }]}>{recipe.score}</Text><Text style={[styles.scoreLabel, { color: colors.primary }]}>score</Text></View></View></View>
           <View style={styles.stats}>{[[`${recipe.prep}m`, 'prep'], [`${recipe.cook}m`, 'cook'], [recipe.difficulty, 'level']].map(([value, label]) => <View key={label} style={[styles.stat, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.statValue, { color: colors.foreground }]}>{value}</Text><Text style={[styles.statLabel, { color: colors.mutedForeground }]}>{label}</Text></View>)}</View>
-           <View style={[styles.scoreNote, { backgroundColor: colors.accent }]}><Ionicons name="leaf-outline" size={18} color={colors.accentForeground} /><Text style={[styles.scoreNoteText, { color: colors.accentForeground }]}>{safety.allergenConflict ? 'This recipe conflicts with a saved allergy and is excluded.' : safety.allergenIncomplete ? 'Allergen information incomplete — this recipe is not labeled allergy-safe.' : recipe.scoreNote} This is an app-defined estimate, not medical advice.</Text></View>
+           <View style={[styles.scoreNote, { backgroundColor: colors.accent }]}><Ionicons name="leaf-outline" size={18} color={colors.accentForeground} /><Text style={[styles.scoreNoteText, { color: colors.accentForeground }]}>{safety.allergenConflict ? 'This recipe conflicts with a saved allergy and is excluded.' : safety.allergenIncomplete ? 'Allergen information incomplete — this recipe is not labeled allergy-safe.' : `${recipeAvailabilityLabel(safety)} · ${recipe.scoreNote}`} This is an app-defined estimate, not medical advice.</Text></View>
            <Text style={[styles.section, { color: colors.foreground }]}>Ingredients · {servingTarget} servings</Text>
             <View style={[styles.ingredientsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{recipe.ingredients.map((item) => { const scaled = scaledIngredient(recipe, item, servingTarget); return <View key={item.name} style={styles.ingredientLine}><Ionicons name={item.required === false ? 'ellipse-outline' : have(item.name) ? 'checkmark-circle' : 'alert-circle-outline'} size={18} color={item.required === false ? colors.mutedForeground : have(item.name) ? colors.primary : colors.destructive} /><Text style={[styles.ingredientText, { color: colors.foreground }]}><Text style={{ fontFamily: 'Inter_700Bold' }}>{scaled.quantity} {scaled.unit}</Text> {item.name}{item.required === false ? ' · optional' : ''}</Text><Text style={[styles.haveText, { color: item.required === false ? colors.mutedForeground : have(item.name) ? colors.primary : colors.destructive }]}>{item.required === false ? '' : have(item.name) ? 'have' : 'missing'}</Text></View>; })}</View>
-          <Text style={[styles.section, { color: colors.foreground }]}>Estimated nutrition</Text>
-            <View style={[styles.nutrition, { backgroundColor: colors.card, borderColor: colors.border }]}>{[['Calories', `${nutrition.calories}`], ['Protein', `${nutrition.protein}g`], ['Carbs', `${nutrition.carbs}g`], ['Fat', `${nutrition.fat}g`], ['Fiber', `${nutrition.fiber}g`], ['Sodium', `${nutrition.sodium}mg`]].map(([label, value]) => <View key={label} style={styles.nutritionItem}><Text style={[styles.nutritionValue, { color: colors.foreground }]}>{value}</Text><Text style={[styles.nutritionLabel, { color: colors.mutedForeground }]}>{label}</Text></View>)}<Text style={[styles.nutritionNote, { color: colors.mutedForeground }]}>Estimated recipe total for {servingTarget} servings · {recipe.nutritionSource}</Text></View>
+           <Text style={[styles.section, { color: colors.foreground }]}>Estimated nutrition</Text>
+             <View style={[styles.nutrition, { backgroundColor: colors.card, borderColor: colors.border }]}>{[['Calories', `${nutrition.calories}`], ['Protein', `${nutrition.protein}g`], ['Carbs', `${nutrition.carbs}g`], ['Fat', `${nutrition.fat}g`], ['Fiber', `${nutrition.fiber}g`], ['Sodium', `${nutrition.sodium}mg`]].map(([label, value]) => <View key={label} style={styles.nutritionItem}><Text style={[styles.nutritionValue, { color: colors.foreground }]}>{value}</Text><Text style={[styles.nutritionLabel, { color: colors.mutedForeground }]}>{label}</Text></View>)}<Text style={[styles.nutritionNote, { color: colors.mutedForeground }]}>{recipe.nutritionProvenance === 'source-backed' ? 'Source-backed nutrition. ' : 'AI estimate; verify labels for your ingredients. '}Recipe total for {servingTarget} servings · {recipe.nutritionSource}</Text></View>
            <Text style={[styles.section, { color: colors.foreground }]}>Equipment</Text><View style={styles.chips}>{recipe.equipment.map((item) => <Chip key={item} label={item} />)}</View>
+            {recipe.substitutions?.length ? <><Text style={[styles.section, { color: colors.foreground }]}>Validated substitutions</Text><View style={[styles.substitutionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{recipe.substitutions.filter((item) => item.validated).map((item) => <View key={`${item.from}-${item.to}`} style={styles.substitutionLine}><Ionicons name="swap-horizontal-outline" size={17} color={colors.primary} /><Text style={[styles.substitutionText, { color: colors.foreground }]}><Text style={{ fontFamily: 'Inter_700Bold' }}>{item.from} → {item.to}</Text>{` · ${item.reason}`}</Text></View>)}</View></> : null}
+            <Text style={[styles.section, { color: colors.foreground }]}>Method</Text><View style={[styles.stepsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{recipe.steps.map((step, index) => <View key={`${step.title}-${index}`} style={styles.stepLine}><View style={[styles.stepNumber, { backgroundColor: colors.secondary }]}><Text style={[styles.stepNumberText, { color: colors.primary }]}>{index + 1}</Text></View><View style={{ flex: 1 }}><Text style={[styles.stepTitle, { color: colors.foreground }]}>{step.title}</Text><Text style={[styles.stepBody, { color: colors.mutedForeground }]}>{step.body}</Text></View></View>)}</View>
+            <Text style={[styles.versionNote, { color: colors.mutedForeground }]}>Recipe version {recipeVersion(recipe)} · {recipe.source === 'server-ai' ? 'server-validated discovery' : 'curated example'}</Text>
            {plannedOccurrences.length ? <View style={[styles.occurrenceCard, { backgroundColor: colors.secondary }]}><Text style={[styles.occurrenceTitle, { color: colors.secondaryForeground }]}>Choose the planned meal to cook</Text><View style={styles.chips}>{plannedOccurrences.map((meal) => <Chip key={meal.id} label={`${meal.day} · ${meal.meal}`} selected={plannedMeal?.id === meal.id} onPress={() => router.setParams({ plannedMealId: meal.id })} />)}</View><Text style={[styles.occurrenceNote, { color: colors.secondaryForeground }]}>{plannedOccurrences.length > 1 && !plannedMeal ? 'This recipe is planned more than once. Select the exact occurrence before cooking.' : 'This selection controls which reservation is used and deducted.'}</Text></View> : null}
             <Pressable disabled={!safety.ready || !eligible || !plannedMeal} testID="start-cooking" onPress={() => plannedMeal && router.push(`/cook/${recipe.id}?plannedMealId=${plannedMeal.id}`)} style={({ pressed }) => [styles.cookButton, { backgroundColor: safety.ready && eligible && plannedMeal ? colors.primary : colors.muted }, pressed && styles.pressed]}><Ionicons name="flame-outline" size={21} color={safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.cookText, { color: safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground }]}>{safety.allergenConflict ? 'Excluded for allergy' : safety.allergenIncomplete ? 'Allergen review needed' : !eligible ? 'Excluded by preferences' : !plannedMeal ? 'Plan this meal first' : 'Start cooking'}</Text></Pressable>
            {safety.missingIngredients.length ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Missing: {safety.missingIngredients.join(', ')}.</Text> : null}
@@ -58,6 +62,8 @@ const styles = StyleSheet.create({
   backButton: { position: 'absolute', top: 56, left: 18, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 20, paddingTop: 22 },
   detailHeader: { flexDirection: 'row', gap: 15 },
+  headerActions: { alignItems: 'center', gap: 8 },
+  favoriteButton: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 30, lineHeight: 35, fontFamily: 'Inter_700Bold', letterSpacing: -0.6 },
   description: { fontSize: 13, lineHeight: 19, marginTop: 8 },
   score: { width: 57, height: 57, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
@@ -80,6 +86,16 @@ const styles = StyleSheet.create({
   nutritionLabel: { fontSize: 10, marginTop: 2 },
   nutritionNote: { width: '100%', fontSize: 10, lineHeight: 15, marginTop: 8 },
   chips: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  substitutionCard: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 11 },
+  substitutionLine: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  substitutionText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  stepsCard: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 16 },
+  stepLine: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  stepNumber: { width: 27, height: 27, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  stepNumberText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  stepTitle: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 3 },
+  stepBody: { fontSize: 12, lineHeight: 18 },
+  versionNote: { fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
   occurrenceCard: { borderRadius: 16, padding: 13, marginTop: 24 },
   occurrenceTitle: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 9 },
   occurrenceNote: { fontSize: 11, lineHeight: 16, marginTop: 9 },

@@ -11,6 +11,7 @@ import {
   normalizeConfirmedDate,
   parseQuantityText,
   recipeMatchesPreferences,
+  recipeAvailabilityLabel,
   recipeReadiness,
   scaleNutrition,
   scaleQuantity,
@@ -50,6 +51,15 @@ test('allergy conflicts exclude recipes and incomplete information is never safe
   assert.equal(recipeReadiness(recipe, [], ['eggs']).allergenConflict, true);
   assert.equal(recipeReadiness({ ...recipe, allergens: [], allergenInfo: 'incomplete' }, [], []).allergenIncomplete, true);
   assert.equal(recipeReadiness({ ...recipe, allergens: [], allergenInfo: 'incomplete' }, [], []).ready, false);
+});
+
+test('readiness labels distinguish safe, missing, insufficient, and unknown quantities', () => {
+  const base = { servings: 1, allergens: [], allergenInfo: 'complete' as const, ingredients: [{ name: 'eggs', quantity: 2, unit: 'egg', required: true }] };
+  assert.equal(recipeAvailabilityLabel(recipeReadiness(base, [{ name: 'eggs', status: 'fresh', confidence: 'confirmed', quantityValue: 2, unit: 'egg', quantityKnown: true }], [])), 'Ready to cook');
+  assert.equal(recipeAvailabilityLabel(recipeReadiness(base, [{ name: 'eggs', status: 'fresh', confidence: 'confirmed', quantityValue: 1, unit: 'egg', quantityKnown: true }], [])), 'Not enough quantity');
+  assert.equal(recipeAvailabilityLabel(recipeReadiness(base, [{ name: 'eggs', status: 'fresh', confidence: 'confirmed', quantityKnown: false }], [])), 'Check quantities');
+  assert.equal(recipeAvailabilityLabel(recipeReadiness(base, [], [])), 'Almost ready');
+  assert.equal(recipeAvailabilityLabel(recipeReadiness({ ...base, allergens: ['egg'] }, [], ['egg'])), 'Not safe');
 });
 
 test('ingredient matching uses normalized identities, not broad substrings', () => {
