@@ -1,8 +1,8 @@
 import { Feather } from '@expo/vector-icons';
-import { useDiscoverRecipes, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
+import { findExternalRecipes, useDiscoverRecipes, type ExternalRecipe, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
@@ -41,6 +41,9 @@ export default function RecipesScreen() {
   const [dietaryPreference, setDietaryPreference] = useState<string>();
   const [minHealthScore, setMinHealthScore] = useState<number>();
   const [variation, setVariation] = useState(0);
+  const [externalRecipes, setExternalRecipes] = useState<ExternalRecipe[]>([]);
+  const [externalBusy, setExternalBusy] = useState(false);
+  const [externalMessage, setExternalMessage] = useState('');
 
   const discovery = useDiscoverRecipes();
   const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
@@ -68,6 +71,23 @@ export default function RecipesScreen() {
     discovery.mutate({ data: request }, {
       onSuccess: (result) => saveDiscoveredRecipes(result.recipes.map(mapDiscoveredRecipe)),
     });
+  };
+
+  const findPublished = async () => {
+    const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
+    if (!confirmed.length) { setExternalMessage('Add at least one confirmed ingredient first.'); return; }
+    setExternalBusy(true);
+    setExternalMessage('');
+    setExternalRecipes([]);
+    try {
+      const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies);
+      setExternalRecipes(result.recipes);
+      setExternalMessage(result.recipes.length ? result.safetyNotice : 'No published recipes matched these ingredients. Try confirming more items.');
+    } catch {
+      setExternalMessage('Published recipes are unavailable. Check the connection and TheMealDB setup; saved recipes remain available.');
+    } finally {
+      setExternalBusy(false);
+    }
   };
 
   const recipeUsesSoonIngredient = (recipe: (typeof availableRecipes)[number]) => recipe.ingredients.some((ingredient) => ingredients.some((item) =>
@@ -126,6 +146,9 @@ export default function RecipesScreen() {
           </Pressable>
         </View>
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discovery.isError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discovery.isError ? 'wifi-off' : 'info'} size={16} color={discovery.isError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
+        <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Source recipes open on their original site.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={() => void findPublished()} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
+        {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
+        {externalRecipes.map((item) => <Pressable key={item.id} onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}<View style={{ flex: 1 }}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching ingredients · {item.missingIngredients.length} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></View></Pressable>)}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}
@@ -181,4 +204,7 @@ const styles = StyleSheet.create({
   emptyBody: { fontSize: 13, marginTop: 7, textAlign: 'center', lineHeight: 19 },
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.6 },
+  externalCard: { borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 10 },
+  externalImage: { width: 64, height: 64, borderRadius: 10 },
+  externalTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
 });

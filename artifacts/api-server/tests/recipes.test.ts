@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
+import { makeStrictRecipeSchema } from "../src/routes/recipes";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "recipe-test-session-secret";
@@ -107,6 +108,18 @@ test("recipe discovery returns only strict, versioned, server-validated recipes"
   const original = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     if (String(input).includes("api.openai.com")) {
+      const request = JSON.parse(String(init?.body)) as { response_format: { json_schema: { schema: Record<string, unknown> } } };
+      const checkObjects = (node: Record<string, unknown>) => {
+        if (node.type === "object") {
+          const properties = node.properties as Record<string, Record<string, unknown>>;
+          assert.deepEqual(node.required, Object.keys(properties));
+          assert.equal(node.additionalProperties, false);
+          Object.values(properties).forEach(checkObjects);
+        }
+        if (node.type === "array") checkObjects(node.items as Record<string, unknown>);
+        if (Array.isArray(node.anyOf)) (node.anyOf as Record<string, unknown>[]).forEach(checkObjects);
+      };
+      checkObjects(request.response_format.json_schema.schema);
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [validModelRecipe()] }) } }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -135,6 +148,12 @@ test("recipe discovery returns only strict, versioned, server-validated recipes"
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("strict schema encodes optional fields as nullable and keeps nested fields required", () => {
+  const schema = makeStrictRecipeSchema({ type: "object", properties: { optional: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } }, required: [] });
+  assert.deepEqual(schema.required, ["optional"]);
+  assert.deepEqual((schema.properties as Record<string, { anyOf: unknown[] }>).optional.anyOf[1], { type: "null" });
 });
 
 test("recipe discovery never returns an allergy-conflicting candidate", async () => {

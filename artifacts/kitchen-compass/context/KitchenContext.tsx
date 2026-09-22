@@ -25,6 +25,7 @@ import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
 import { defaultReminderSettings, syncDailyReminder, type ReminderScheduler, type ReminderSettings } from '@/lib/reminders';
 import { SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
+import { deleteScanPhoto, deleteScanPhotos } from '@/lib/scanPhotos';
 
 const reminderScheduler: ReminderScheduler = {
   getPermissionsAsync: Notifications.getPermissionsAsync,
@@ -353,8 +354,15 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         })]);
       });
     },
-    updateIngredient: (id, changes) => setIngredients((current) => current.map((item) => item.id === id ? normalizeIngredient({ ...item, ...changes }) : item)),
-    removeIngredient: (id) => setIngredients((current) => current.filter((item) => item.id !== id)),
+    updateIngredient: (id, changes) => setIngredients((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      if ('photoUri' in changes && changes.photoUri !== item.photoUri) deleteScanPhoto(item.photoUri);
+      return normalizeIngredient({ ...item, ...changes });
+    })),
+    removeIngredient: (id) => setIngredients((current) => {
+      deleteScanPhoto(current.find((item) => item.id === id)?.photoUri);
+      return current.filter((item) => item.id !== id);
+    }),
     toggleLow: (id) => setIngredients((current) => current.map((item) => item.id === id ? { ...item, status: item.status === 'low' ? 'fresh' : 'low' } : item)),
     setPreferences: (changes) => setPreferencesState((current) => ({ ...current, ...changes })),
     completeOnboarding: (changes) => {
@@ -377,9 +385,13 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setReminders({ ...next, enabled: result.enabled });
       return true;
     },
-    clearSavedScanPhotos: () => setIngredients((current) => current.map((item) => item.photoUri ? { ...item, photoUri: undefined } : item)),
+    clearSavedScanPhotos: () => setIngredients((current) => {
+      deleteScanPhotos(current.map((item) => item.photoUri));
+      return current.map((item) => item.photoUri ? { ...item, photoUri: undefined } : item);
+    }),
     eraseAllData: async () => {
       await syncDailyReminder({ ...defaultReminderSettings, enabled: false }, reminderScheduler, false);
+      deleteScanPhotos(ingredients.map((item) => item.photoUri));
       await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_STORAGE_KEY, SCAN_ACCESS_TOKEN_STORAGE_KEY]);
       setIngredients([]);
       setPreferencesState(defaultPreferences);

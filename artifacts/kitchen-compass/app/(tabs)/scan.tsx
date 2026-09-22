@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { File } from 'expo-file-system';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -10,6 +10,7 @@ import { Chip, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { normalizeIngredientName } from '@/lib/kitchenLogic';
+import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 
 export default function ScanScreen() {
   const colors = useColors();
@@ -32,7 +33,7 @@ export default function ScanScreen() {
 
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
   const reviewPhotos = async (assets: ImagePicker.ImagePickerAsset[]) => {
-    setPhotoUris(assets.map((asset) => asset.uri));
+    setPhotoUris([]);
     setSuggestions([]);
     setScanId(null);
     setScanDecisions({});
@@ -42,11 +43,19 @@ export default function ScanScreen() {
     setRecognitionState('analyzing');
     setRecognitionMessage('');
     try {
-      const photos = await Promise.all(assets.map(async (asset, index) => ({
+      const normalized = await Promise.all(assets.map(async (asset) => {
+        const context = ImageManipulator.manipulate(asset.uri);
+        if (asset.width > 1600) context.resize({ width: 1600, height: null });
+        const rendered = await context.renderAsync();
+        return rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.75, base64: true });
+      }));
+      if (normalized.some((photo) => !photo.base64)) throw new Error('An image could not be encoded for recognition.');
+      setPhotoUris(normalized.map((photo) => photo.uri));
+      const photos = normalized.map((photo, index) => ({
         id: `photo-${index + 1}`,
-        mimeType: (asset.mimeType === 'image/png' || asset.mimeType === 'image/webp' ? asset.mimeType : 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp',
-        base64: await new File(asset.uri).base64(),
-      })));
+        mimeType: 'image/jpeg' as const,
+        base64: photo.base64 ?? '',
+      }));
       const result = await analyzeIngredientPhotos({
         photos,
         existingIngredients: ingredients.map((item) => ({ name: item.name, location: item.location })),
@@ -89,7 +98,7 @@ export default function ScanScreen() {
       Alert.alert('Photo access needed', permission.canAskAgain ? 'Allow photo access to choose a kitchen image.' : 'Photo access is off for Kitchen Compass. You can enable it in Settings.', permission.canAskAgain ? [{ text: 'Not now', style: 'cancel' }] : [{ text: 'Open Settings', onPress: openSettings }, { text: 'Cancel', style: 'cancel' }]);
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: 8 });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: 8, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
     if (!result.canceled && result.assets.length) void reviewPhotos(result.assets);
   };
   const updateSuggestion = (suggestionId: string, changes: Partial<IngredientSuggestion>) => {
@@ -127,18 +136,34 @@ export default function ScanScreen() {
       return;
     }
     const reviewedAt = new Date().toISOString();
-    suggestions.forEach((suggestion) => {
+    const retainedPhotos = new Map<string, string>();
+    if (keepPhotos) {
+      try {
+        for (const suggestion of suggestions) {
+          const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+          if (decision === 'same') continue;
+          const sourceUri = photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0];
+          if (sourceUri) retainedPhotos.set(suggestion.suggestionId, saveScanPhoto(sourceUri));
+        }
+      } catch {
+        deleteScanPhotos([...retainedPhotos.values()]);
+        Alert.alert('Photo could not be kept', 'Nothing was saved. Try again without keeping photos.');
+        return;
+      }
+    }
+    for (const suggestion of suggestions) {
       const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
-      if (decision === 'same') return;
+      if (decision === 'same') continue;
       const quantityText = suggestion.quantityKnown && suggestion.quantity !== undefined
         ? `${suggestion.quantity} ${suggestion.unit ?? ''}`.trim()
         : undefined;
+      const savedPhotoUri = retainedPhotos.get(suggestion.suggestionId);
       if (decision === 'correction') {
         const matches = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
         const existing = matches.length === 1
           ? matches[0]
           : matches.find((item) => item.id === correctionTargets[suggestion.suggestionId]);
-        if (!existing) return;
+        if (!existing) continue;
         updateIngredient(existing.id, {
           name: suggestion.displayName.trim(),
           ...(quantityText ? { quantity: quantityText } : {}),
@@ -148,10 +173,10 @@ export default function ScanScreen() {
           source: 'scan',
           sourceScanId: scanId ?? undefined,
           sourcePhotoId: suggestion.sourcePhotoId,
-           ...(keepPhotos ? { photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0] } : {}),
+          ...(savedPhotoUri ? { photoUri: savedPhotoUri } : {}),
           reviewedAt,
         });
-        return;
+        continue;
       }
       addIngredient({
         name: suggestion.displayName.trim(),
@@ -159,13 +184,13 @@ export default function ScanScreen() {
         location: suggestion.storageLocation,
         status: 'fresh',
         confidence: 'confirmed',
-        ...(keepPhotos ? { photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0] } : {}),
+        ...(savedPhotoUri ? { photoUri: savedPhotoUri } : {}),
         source: 'scan',
         sourceScanId: scanId ?? undefined,
         sourcePhotoId: suggestion.sourcePhotoId,
         reviewedAt,
       });
-    });
+    }
     if (name.trim()) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
     Alert.alert('Added to My Kitchen', 'Every saved suggestion was reviewed on this screen. Quantities were not inferred when the photo could not support them.', [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
   };
@@ -195,7 +220,7 @@ export default function ScanScreen() {
                </View>
              </View> : null}
              <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
-              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photo is sent to the Kitchen Compass server and an external AI service. It is not saved to your kitchen unless you confirm a suggestion.</Text></View>
+              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photo is sent to the Kitchen Compass server and an external AI service. Ingredients are added only after your review; keeping a photo copy is optional.</Text></View>
           </>
         ) : (
           <>
@@ -232,7 +257,7 @@ export default function ScanScreen() {
             <TextInput value={quantity} onChangeText={setQuantity} placeholder="e.g. 1 bag" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
-             {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep original scan photos on this device</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
+                 {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
             <Pressable testID="save-ingredient" onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
           </>
         )}
