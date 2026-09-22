@@ -46,7 +46,7 @@ export function Chip({ label, selected, onPress, icon }: { label: string; select
   );
 }
 
-export function RecipeCard({ recipe, hasIngredients, onPress }: { recipe: Recipe; hasIngredients?: boolean; onPress: () => void }) {
+export function RecipeCard({ recipe, hasIngredients, statusText, onPress }: { recipe: Recipe; hasIngredients?: boolean; statusText?: string; onPress: () => void }) {
   const colors = useColors();
   return (
     <Pressable testID={`recipe-${recipe.id}`} onPress={onPress} style={({ pressed }) => [styles.recipeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
@@ -65,7 +65,7 @@ export function RecipeCard({ recipe, hasIngredients, onPress }: { recipe: Recipe
         <View style={styles.recipeFooter}>
           <View style={[styles.statusPill, { backgroundColor: hasIngredients ? colors.secondary : colors.muted }]}>
             <View style={[styles.statusDot, { backgroundColor: hasIngredients ? colors.primary : colors.mutedForeground }]} />
-            <Text style={[styles.statusText, { color: hasIngredients ? colors.primary : colors.mutedForeground }]}>{hasIngredients ? 'Ready with your kitchen' : 'Check ingredients'}</Text>
+            <Text style={[styles.statusText, { color: hasIngredients ? colors.primary : colors.mutedForeground }]}>{statusText ?? (hasIngredients ? 'Ready with your kitchen' : 'Check ingredients')}</Text>
           </View>
           <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
         </View>

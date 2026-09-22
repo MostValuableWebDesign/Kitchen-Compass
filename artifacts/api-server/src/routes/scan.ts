@@ -1,7 +1,39 @@
 import { Router, type IRouter } from "express";
-import { ScanAnalysisRequest, ScanAnalysisResponse } from "@workspace/api-zod";
+import { z } from "zod";
 
 const router: IRouter = Router();
+
+const scanRequestSchema = z.object({
+  photos: z.array(z.object({
+    id: z.string().min(1),
+    mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+    base64: z.string().min(1),
+  })).min(1).max(8),
+  existingIngredients: z.array(z.object({
+    name: z.string().min(1),
+    location: z.enum(["Refrigerator", "Freezer", "Pantry"]),
+  })).optional().default([]),
+});
+
+const suggestionSchema = z.object({
+  suggestionId: z.string(),
+  normalizedName: z.string(),
+  displayName: z.string(),
+  storageLocation: z.enum(["Refrigerator", "Freezer", "Pantry"]),
+  quantity: z.number().min(0).optional(),
+  unit: z.string().optional(),
+  quantityKnown: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  uncertaintyReasons: z.array(z.string()),
+  sourcePhotoId: z.string(),
+  existingInventoryMatch: z.string().optional(),
+});
+
+const scanResponseSchema = z.object({
+  scanId: z.string(),
+  suggestions: z.array(suggestionSchema),
+  warnings: z.array(z.string()),
+});
 
 const model = "gpt-5.4-mini";
 const responseSchema = {
@@ -18,8 +50,8 @@ const responseSchema = {
           normalizedName: { type: "string" },
           displayName: { type: "string" },
           storageLocation: { type: "string", enum: ["Refrigerator", "Freezer", "Pantry"] },
-          quantity: { type: ["number", "null"], minimum: 0 },
-          unit: { type: ["string", "null"] },
+          quantity: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
+          unit: { anyOf: [{ type: "string" }, { type: "null" }] },
           confidence: { type: "number", minimum: 0, maximum: 1 },
           uncertaintyReasons: { type: "array", items: { type: "string" } },
         },
@@ -40,7 +72,7 @@ function normalizeName(value: string) {
 }
 
 router.post("/scan/analyze", async (req, res) => {
-  const parsedRequest = ScanAnalysisRequest.safeParse(req.body);
+  const parsedRequest = scanRequestSchema.safeParse(req.body);
   if (!parsedRequest.success) {
     res.status(400).json({ error: "Invalid scan request", details: parsedRequest.error.flatten() });
     return;
@@ -137,11 +169,11 @@ router.post("/scan/analyze", async (req, res) => {
         sourcePhotoId: suggestion.sourcePhotoId,
         ...(existingIngredients.some((item) => normalizeName(item.name) === normalizedName) ? { existingInventoryMatch: normalizedName } : {}),
       };
-      const validated = ScanAnalysisResponse.shape.suggestions.element.safeParse(normalized);
+      const validated = suggestionSchema.safeParse(normalized);
       return validated.success ? [validated.data] : [];
     });
 
-    const result = ScanAnalysisResponse.parse({
+    const result = scanResponseSchema.parse({
       scanId: `scan-${Date.now()}`,
       suggestions,
       warnings: [...aiResult.warnings, "Review every suggestion before saving. Photos cannot establish freshness or expiration dates."],

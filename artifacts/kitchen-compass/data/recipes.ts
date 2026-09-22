@@ -1,6 +1,10 @@
+import { scaleNutrition, scaleQuantity } from '@/lib/kitchenLogic';
+
 export interface RecipeIngredient {
   name: string;
   amount: string;
+  quantity: number;
+  unit: string;
   required?: boolean;
 }
 
@@ -21,6 +25,12 @@ export interface Recipe {
   ingredients: RecipeIngredient[];
   nutrition: { calories: number; protein: number; carbs: number; fat: number; fiber: number; sodium: number };
   steps: { title: string; body: string; duration?: number; temperature?: string; ingredients?: string[] }[];
+  allergens: string[];
+  allergenInfo: 'complete' | 'incomplete';
+  sourceVersion: string;
+  nutritionSource: string;
+  storageInstructions: string;
+  reheatingInstructions: string;
 }
 
 export const recipes: Recipe[] = [
@@ -39,12 +49,12 @@ export const recipes: Recipe[] = [
     scoreNote: 'High protein and vegetables, with moderate sodium from the stock.',
     image: require('../assets/images/lemon-chicken.jpg'),
     ingredients: [
-      { name: 'chicken breast', amount: '2 (12 oz)', required: true },
-      { name: 'lemon', amount: '1', required: true },
-      { name: 'broccoli', amount: '2 cups', required: true },
-      { name: 'olive oil', amount: '1 tbsp', required: true },
-      { name: 'garlic', amount: '2 cloves', required: true },
-      { name: 'fresh parsley', amount: '2 tbsp', required: false },
+      { name: 'chicken breast', amount: '2 (12 oz)', quantity: 2, unit: 'breast', required: true },
+      { name: 'lemon', amount: '1', quantity: 1, unit: 'fruit', required: true },
+      { name: 'broccoli', amount: '2 cups', quantity: 2, unit: 'cup', required: true },
+      { name: 'olive oil', amount: '1 tbsp', quantity: 1, unit: 'tbsp', required: true },
+      { name: 'garlic', amount: '2 cloves', quantity: 2, unit: 'clove', required: true },
+      { name: 'fresh parsley', amount: '2 tbsp', quantity: 2, unit: 'tbsp', required: false },
     ],
     nutrition: { calories: 465, protein: 42, carbs: 18, fat: 24, fiber: 6, sodium: 410 },
     steps: [
@@ -53,6 +63,12 @@ export const recipes: Recipe[] = [
       { title: 'Sear and roast', body: 'Sear chicken in an oven-safe pan over medium-high heat for 3 minutes per side. Add broccoli, then roast until the thickest part reaches 165°F, about 18–20 minutes.', duration: 20, temperature: '425°F / 220°C', ingredients: ['chicken breast', 'broccoli'] },
       { title: 'Finish and serve', body: 'Rest chicken for 5 minutes. Squeeze the remaining lemon over the pan and scatter with parsley. Slice against the grain and spoon pan juices over top.', duration: 5, ingredients: ['lemon', 'fresh parsley'] },
     ],
+    allergens: [],
+    allergenInfo: 'complete',
+    sourceVersion: 'kitchen-compass-curated-1',
+    nutritionSource: 'Estimated from USDA ingredient averages; stock brand may change sodium.',
+    storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
+    reheatingInstructions: 'Reheat covered until the center reaches 165°F.',
   },
   {
     id: 'tomato-basil-pasta',
@@ -69,12 +85,12 @@ export const recipes: Recipe[] = [
     scoreNote: 'Good fiber and lycopene from tomatoes; watch sodium in the pasta water and cheese.',
     image: require('../assets/images/tomato-pasta.jpg'),
     ingredients: [
-      { name: 'pasta', amount: '6 oz', required: true },
-      { name: 'canned tomatoes', amount: '1 (14 oz) can', required: true },
-      { name: 'garlic', amount: '2 cloves', required: true },
-      { name: 'olive oil', amount: '1 tbsp', required: true },
-      { name: 'basil', amount: '1 handful', required: false },
-      { name: 'parmesan', amount: '2 tbsp', required: false },
+      { name: 'pasta', amount: '6 oz', quantity: 6, unit: 'oz', required: true },
+      { name: 'canned tomatoes', amount: '1 (14 oz) can', quantity: 14, unit: 'oz', required: true },
+      { name: 'garlic', amount: '2 cloves', quantity: 2, unit: 'clove', required: true },
+      { name: 'olive oil', amount: '1 tbsp', quantity: 1, unit: 'tbsp', required: true },
+      { name: 'basil', amount: '1 handful', quantity: 1, unit: 'handful', required: false },
+      { name: 'parmesan', amount: '2 tbsp', quantity: 2, unit: 'tbsp', required: false },
     ],
     nutrition: { calories: 420, protein: 14, carbs: 68, fat: 12, fiber: 7, sodium: 530 },
     steps: [
@@ -83,6 +99,12 @@ export const recipes: Recipe[] = [
       { title: 'Bring it together', body: 'Toss pasta into the sauce, adding reserved pasta water a splash at a time until glossy. Turn off the heat and fold in basil.', ingredients: ['pasta', 'basil'] },
       { title: 'Serve', body: 'Finish with parmesan if desired. Eat immediately for the best texture; refrigerate leftovers within 2 hours.', ingredients: ['parmesan'] },
     ],
+    allergens: ['wheat', 'milk'],
+    allergenInfo: 'complete',
+    sourceVersion: 'kitchen-compass-curated-1',
+    nutritionSource: 'Estimated from USDA ingredient averages; pasta and cheese brands vary.',
+    storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
+    reheatingInstructions: 'Reheat with a splash of water until steaming hot.',
   },
   {
     id: 'green-egg-toast',
@@ -98,10 +120,10 @@ export const recipes: Recipe[] = [
     score: 84,
     scoreNote: 'Protein, healthy fats, and fiber make this a steady-start breakfast.',
     ingredients: [
-      { name: 'eggs', amount: '2', required: true },
-      { name: 'avocado', amount: '½', required: true },
-      { name: 'bread', amount: '1 slice', required: true },
-      { name: 'lemon', amount: '½', required: false },
+      { name: 'eggs', amount: '2', quantity: 2, unit: 'egg', required: true },
+      { name: 'avocado', amount: '½', quantity: 0.5, unit: 'fruit', required: true },
+      { name: 'bread', amount: '1 slice', quantity: 1, unit: 'slice', required: true },
+      { name: 'lemon', amount: '½', quantity: 0.5, unit: 'fruit', required: false },
     ],
     nutrition: { calories: 340, protein: 17, carbs: 28, fat: 19, fiber: 7, sodium: 310 },
     steps: [
@@ -109,8 +131,30 @@ export const recipes: Recipe[] = [
       { title: 'Cook the eggs', body: 'Cook 2 eggs in a lightly oiled pan over medium heat until the whites are set and the yolks are cooked to your liking.', duration: 5, ingredients: ['eggs'] },
       { title: 'Top and season', body: 'Mash ½ avocado with lemon, salt, and pepper. Spread over toast and top with eggs.' , ingredients: ['avocado', 'lemon'] },
     ],
+    allergens: ['egg', 'wheat'],
+    allergenInfo: 'complete',
+    sourceVersion: 'kitchen-compass-curated-1',
+    nutritionSource: 'Estimated from USDA ingredient averages; bread size and egg size vary.',
+    storageInstructions: 'Best served immediately; refrigerate cooked eggs within 2 hours.',
+    reheatingInstructions: 'Reheat eggs gently until steaming; toast is best made fresh.',
   },
 ];
+
+for (const recipe of recipes) {
+  for (const ingredient of recipe.ingredients) {
+    if (ingredient.quantity === undefined || ingredient.unit === undefined) {
+      throw new Error(`Recipe ingredient ${ingredient.name} is missing a numeric quantity.`);
+    }
+  }
+}
+
+export function scaledIngredient(recipe: Recipe, ingredient: RecipeIngredient, targetServings: number) {
+  return { ...ingredient, quantity: scaleQuantity(ingredient.quantity, recipe.servings, targetServings) };
+}
+
+export function scaledNutrition(recipe: Recipe, targetServings: number) {
+  return scaleNutrition(recipe.nutrition, recipe.servings, targetServings);
+}
 
 export function getRecipe(id?: string) {
   return recipes.find((recipe) => recipe.id === id) ?? recipes[0];

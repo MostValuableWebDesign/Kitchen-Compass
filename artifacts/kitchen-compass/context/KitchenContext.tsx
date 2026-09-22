@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { normalizeIngredientName } from '@/lib/kitchenLogic';
 
 export type StorageLocation = 'Refrigerator' | 'Freezer' | 'Pantry';
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
@@ -7,9 +8,12 @@ export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
 export interface Ingredient {
   id: string;
   name: string;
+  normalizedName?: string;
   location: StorageLocation;
   quantity?: string;
+  quantityValue?: number;
   unit?: string;
+  quantityKnown?: boolean;
   status: 'fresh' | 'low' | 'used';
   confidence?: 'confirmed' | 'uncertain';
   expires?: string;
@@ -19,6 +23,7 @@ export interface Ingredient {
 export interface Preferences {
   servings: number;
   allergies: string[];
+  dietaryRestrictions: string[];
   dislikes: string[];
   cuisines: string[];
   skill: 'Beginner' | 'Comfortable' | 'Confident';
@@ -53,6 +58,7 @@ const STORAGE_KEY = 'kitchen-compass-state-v1';
 const defaultPreferences: Preferences = {
   servings: 2,
   allergies: [],
+  dietaryRestrictions: [],
   dislikes: [],
   cuisines: ['Mediterranean'],
   skill: 'Comfortable',
@@ -65,6 +71,13 @@ const KitchenContext = createContext<KitchenContextValue | null>(null);
 
 function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseQuantity(quantity?: string) {
+  if (!quantity?.trim()) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
+  const match = quantity.trim().match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/);
+  if (!match) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
+  return { quantityValue: Number(match[1]), unit: match[2]?.toLowerCase(), quantityKnown: true };
 }
 
 export function KitchenProvider({ children }: { children: ReactNode }) {
@@ -98,15 +111,34 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     hydrated,
     addIngredient: (ingredient) => {
       setIngredients((current) => {
-        const existingIndex = current.findIndex(
-          (item) => item.name.trim().toLowerCase() === ingredient.name.trim().toLowerCase() && item.location === ingredient.location,
-        );
-        if (existingIndex >= 0) {
+        const normalizedName = normalizeIngredientName(ingredient.name);
+        const parsed = parseQuantity(ingredient.quantity);
+        const incoming = { ...ingredient, normalizedName, ...parsed };
+        const existingIndex = current.findIndex((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === normalizedName && item.location === ingredient.location);
+        if (existingIndex < 0) return [...current, { ...incoming, id: createId() }];
+        const existing = current[existingIndex];
+        const sameUnit = existing.quantityKnown && incoming.quantityKnown && existing.unit === incoming.unit;
+        if (sameUnit && existing.quantityValue !== undefined && incoming.quantityValue !== undefined) {
           const next = [...current];
-          next[existingIndex] = { ...next[existingIndex], ...ingredient, confidence: ingredient.confidence ?? next[existingIndex].confidence };
+          next[existingIndex] = {
+            ...existing,
+            ...ingredient,
+            normalizedName,
+            quantityValue: existing.quantityValue + incoming.quantityValue,
+            quantity: `${existing.quantityValue + incoming.quantityValue}${incoming.unit ? ` ${incoming.unit}` : ''}`,
+            unit: incoming.unit,
+            quantityKnown: true,
+            confidence: ingredient.confidence ?? existing.confidence,
+          };
           return next;
         }
-        return [...current, { ...ingredient, id: createId() }];
+        if (!existing.quantityKnown && !incoming.quantityKnown) {
+          const next = [...current];
+          next[existingIndex] = { ...existing, ...ingredient, normalizedName, confidence: ingredient.confidence ?? existing.confidence };
+          return next;
+        }
+        // Preserve both rows when quantities cannot be safely combined. Never overwrite stock.
+        return [...current, { ...incoming, id: createId() }];
       });
     },
     updateIngredient: (id, changes) => setIngredients((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item)),

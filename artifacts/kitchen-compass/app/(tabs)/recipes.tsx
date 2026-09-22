@@ -6,24 +6,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { recipes } from '@/data/recipes';
+import { recipeReadiness } from '@/lib/kitchenLogic';
 import { useColors } from '@/hooks/useColors';
 
 export default function RecipesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients } = useKitchen();
+  const { ingredients, preferences } = useKitchen();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [different, setDifferent] = useState(false);
   const filters = ['All', 'Ready to cook', 'Quick meals', 'Breakfast'];
   const filtered = useMemo(() => recipes.filter((recipe) => {
     const matchesSearch = `${recipe.title} ${recipe.cuisine}`.toLowerCase().includes(search.toLowerCase());
-    const required = recipe.ingredients.filter((item) => item.required !== false);
-    const ready = required.every((requiredItem) => ingredients.some((item) => item.name.toLowerCase().includes(requiredItem.name.toLowerCase()) || requiredItem.name.toLowerCase().includes(item.name.toLowerCase())));
-    const matchesFilter = filter === 'All' || (filter === 'Ready to cook' && ready) || (filter === 'Quick meals' && recipe.prep + recipe.cook <= 30) || (filter === 'Breakfast' && recipe.meal === 'Breakfast');
+    const safety = recipeReadiness(recipe, ingredients, preferences.allergies);
+    const matchesFilter = filter === 'All' || (filter === 'Ready to cook' && safety.ready) || (filter === 'Quick meals' && recipe.prep + recipe.cook <= 30) || (filter === 'Breakfast' && recipe.meal === 'Breakfast');
     return matchesSearch && matchesFilter;
-  }), [filter, ingredients, search]);
+  }), [filter, ingredients, preferences.allergies, search]);
   const shown = different ? [...filtered].reverse() : filtered;
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
@@ -33,8 +33,9 @@ export default function RecipesScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{filters.map((item) => <Chip key={item} label={item} selected={filter === item} onPress={() => setFilter(item)} />)}</ScrollView>
         <View style={styles.discoveryHeader}><View><Text style={[styles.heading, { color: colors.foreground }]}>{filter === 'All' ? 'A good place to start' : filter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{ingredients.length ? 'Matched against your confirmed kitchen' : 'Add ingredients to make these suggestions personal'}</Text></View><Pressable onPress={() => setDifferent((value) => !value)} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable></View>
         {shown.length ? shown.map((recipe) => {
-          const ready = recipe.ingredients.filter((item) => item.required !== false).every((required) => ingredients.some((item) => item.name.toLowerCase().includes(required.name.toLowerCase()) || required.name.toLowerCase().includes(item.name.toLowerCase())));
-          return <RecipeCard key={recipe.id} recipe={recipe} hasIngredients={ready} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
+          const safety = recipeReadiness(recipe, ingredients, preferences.allergies);
+          const statusText = safety.allergenConflict ? 'Allergen conflict' : safety.allergenIncomplete ? 'Allergen info incomplete' : undefined;
+          return <RecipeCard key={recipe.id} recipe={recipe} hasIngredients={safety.ready} statusText={statusText} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
         }) : <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipes match that filter</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Try a different category or clear your search.</Text></View>}
       </ScrollView>
     </View>
