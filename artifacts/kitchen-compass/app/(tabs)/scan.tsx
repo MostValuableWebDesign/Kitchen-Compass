@@ -12,6 +12,8 @@ import { useColors } from '@/hooks/useColors';
 import { normalizeIngredientName } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 
+const MAX_SCAN_PHOTOS = 10;
+
 export default function ScanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -79,6 +81,10 @@ export default function ScanScreen() {
     }
   };
   const takePhoto = async () => {
+    if (pendingCameraAssets.length >= MAX_SCAN_PHOTOS) {
+      Alert.alert('Photo limit reached', `You can analyze up to ${MAX_SCAN_PHOTOS} photos at once.`);
+      return;
+    }
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Camera access needed', permission.canAskAgain ? 'Allow camera access to photograph ingredients.' : 'Camera access is off for Kitchen Compass. You can enable it in Settings.', permission.canAskAgain ? [{ text: 'Not now', style: 'cancel' }] : [{ text: 'Open Settings', onPress: openSettings }, { text: 'Cancel', style: 'cancel' }]);
@@ -98,7 +104,7 @@ export default function ScanScreen() {
       Alert.alert('Photo access needed', permission.canAskAgain ? 'Allow photo access to choose a kitchen image.' : 'Photo access is off for Kitchen Compass. You can enable it in Settings.', permission.canAskAgain ? [{ text: 'Not now', style: 'cancel' }] : [{ text: 'Open Settings', onPress: openSettings }, { text: 'Cancel', style: 'cancel' }]);
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: 8, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: MAX_SCAN_PHOTOS, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
     if (!result.canceled && result.assets.length) void reviewPhotos(result.assets);
   };
   const updateSuggestion = (suggestionId: string, changes: Partial<IngredientSuggestion>) => {

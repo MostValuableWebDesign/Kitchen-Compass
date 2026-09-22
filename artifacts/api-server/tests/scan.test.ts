@@ -220,6 +220,47 @@ test("successful scans are validated and identify existing inventory matches", a
   }
 });
 
+test("supports the maximum ten-photo scan batch", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({ suggestions: [], warnings: [] }),
+          },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await request({
+      photos: Array.from({ length: 10 }, (_, index) => ({
+        id: `photo-${index + 1}`,
+        mimeType: "image/jpeg",
+        base64: "aGVsbG8=",
+      })),
+    }, await issueAccess());
+    assert.equal(response.status, 200);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("rejects scan batches above ten photos", async () => {
+  const response = await request({
+    photos: Array.from({ length: 11 }, (_, index) => ({
+      id: `photo-${index + 1}`,
+      mimeType: "image/jpeg",
+      base64: "aGVsbG8=",
+    })),
+  }, await issueAccess());
+  assert.equal(response.status, 400);
+  const payload = await response.json() as { error: { code: string } };
+  assert.equal(payload.error.code, "INVALID_REQUEST");
+});
+
 test("multi-photo scans preserve source photos and deduplicate the same ingredient globally", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
