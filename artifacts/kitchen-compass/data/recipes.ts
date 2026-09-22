@@ -1,4 +1,5 @@
 import { scaleNutrition, scaleQuantity } from '@/lib/kitchenLogic';
+import { calculateHealthScore, calculateRecipeNutrition, type HealthScoreCalculation, type NutritionAmounts, type NutritionCalculation } from '@workspace/recipe-calculations';
 
 export interface RecipeIngredient {
   name: string;
@@ -26,17 +27,14 @@ export interface Recipe {
   cook: number;
   difficulty: string;
   equipment: string[];
-  score: number;
-  scoreNote: string;
+  healthScore: HealthScoreCalculation;
   image?: number;
   ingredients: RecipeIngredient[];
-  nutrition: { calories: number; protein: number; carbs: number; fat: number; fiber: number; sodium: number };
+  nutrition: NutritionCalculation;
   steps: { title: string; body: string; duration?: number; temperature?: string; ingredients?: string[] }[];
   allergens: string[];
   allergenInfo: 'complete' | 'incomplete';
   sourceVersion: string;
-  nutritionSource: string;
-  nutritionProvenance?: 'ai-estimate' | 'source-backed';
   recipeVersion?: string;
   source?: 'curated' | 'server-ai';
   storageInstructions: string;
@@ -47,7 +45,7 @@ export interface Recipe {
   nutritionTags?: string[];
 }
 
-export const recipes: Recipe[] = [
+const rawRecipes: Array<Omit<Recipe, 'nutrition' | 'healthScore'>> = [
   {
     id: 'lemon-herb-chicken',
     title: 'Lemon herb chicken',
@@ -59,8 +57,6 @@ export const recipes: Recipe[] = [
     cook: 25,
     difficulty: 'Easy',
     equipment: ['Stovetop', 'Oven'],
-    score: 88,
-    scoreNote: 'High protein and vegetables, with moderate sodium from the stock.',
     image: require('../assets/images/lemon-chicken.jpg'),
     ingredients: [
       { name: 'chicken breast', amount: '2 (12 oz)', quantity: 2, unit: 'breast', required: true },
@@ -70,7 +66,6 @@ export const recipes: Recipe[] = [
       { name: 'garlic', amount: '2 cloves', quantity: 2, unit: 'clove', required: true },
       { name: 'fresh parsley', amount: '2 tbsp', quantity: 2, unit: 'tbsp', required: false },
     ],
-    nutrition: { calories: 465, protein: 42, carbs: 18, fat: 24, fiber: 6, sodium: 410 },
     steps: [
       { title: 'Prep the kitchen', body: 'Heat the oven to 425°F. Wash and cut the broccoli into bite-size florets. Pat the chicken dry so it browns instead of steaming.' },
       { title: 'Season the chicken', body: 'Rub 1 tablespoon olive oil, the zest of 1 lemon, 2 minced garlic cloves, salt, and pepper over both chicken breasts.', ingredients: ['chicken breast', 'lemon', 'olive oil', 'garlic'] },
@@ -80,7 +75,6 @@ export const recipes: Recipe[] = [
     allergens: [],
     allergenInfo: 'complete',
     sourceVersion: 'kitchen-compass-curated-1',
-    nutritionSource: 'Estimated from USDA ingredient averages; stock brand may change sodium.',
     storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
     reheatingInstructions: 'Reheat covered until the center reaches 165°F.',
     dietaryTags: ['high-protein'],
@@ -97,8 +91,6 @@ export const recipes: Recipe[] = [
     cook: 18,
     difficulty: 'Easy',
     equipment: ['Stovetop'],
-    score: 79,
-    scoreNote: 'Good fiber and lycopene from tomatoes; watch sodium in the pasta water and cheese.',
     image: require('../assets/images/tomato-pasta.jpg'),
     ingredients: [
       { name: 'pasta', amount: '6 oz', quantity: 6, unit: 'oz', required: true },
@@ -108,7 +100,6 @@ export const recipes: Recipe[] = [
       { name: 'basil', amount: '1 handful', quantity: 1, unit: 'handful', required: false },
       { name: 'parmesan', amount: '2 tbsp', quantity: 2, unit: 'tbsp', required: false },
     ],
-    nutrition: { calories: 420, protein: 14, carbs: 68, fat: 12, fiber: 7, sodium: 530 },
     steps: [
       { title: 'Boil the pasta', body: 'Bring a large pot of water to a boil. Salt it lightly, add 6 oz pasta, and cook until just tender. Reserve ½ cup pasta water before draining.', duration: 10, ingredients: ['pasta'] },
       { title: 'Build the sauce', body: 'Warm 1 tablespoon olive oil in a skillet. Cook 2 sliced garlic cloves for 30 seconds, then add canned tomatoes. Simmer until slightly thickened.', duration: 8, ingredients: ['canned tomatoes', 'garlic', 'olive oil'] },
@@ -118,7 +109,6 @@ export const recipes: Recipe[] = [
     allergens: ['wheat', 'milk'],
     allergenInfo: 'complete',
     sourceVersion: 'kitchen-compass-curated-1',
-    nutritionSource: 'Estimated from USDA ingredient averages; pasta and cheese brands vary.',
     storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
     reheatingInstructions: 'Reheat with a splash of water until steaming hot.',
     dietaryTags: ['vegetarian'],
@@ -135,15 +125,12 @@ export const recipes: Recipe[] = [
     cook: 8,
     difficulty: 'Easy',
     equipment: ['Stovetop'],
-    score: 84,
-    scoreNote: 'Protein, healthy fats, and fiber make this a steady-start breakfast.',
     ingredients: [
       { name: 'eggs', amount: '2', quantity: 2, unit: 'egg', required: true },
       { name: 'avocado', amount: '½', quantity: 0.5, unit: 'fruit', required: true },
       { name: 'bread', amount: '1 slice', quantity: 1, unit: 'slice', required: true },
       { name: 'lemon', amount: '½', quantity: 0.5, unit: 'fruit', required: false },
     ],
-    nutrition: { calories: 340, protein: 17, carbs: 28, fat: 19, fiber: 7, sodium: 310 },
     steps: [
       { title: 'Toast the bread', body: 'Toast 1 slice of bread until deeply golden and crisp.' },
       { title: 'Cook the eggs', body: 'Cook 2 eggs in a lightly oiled pan over medium heat until the whites are set and the yolks are cooked to your liking.', duration: 5, ingredients: ['eggs'] },
@@ -152,7 +139,6 @@ export const recipes: Recipe[] = [
     allergens: ['egg', 'wheat'],
     allergenInfo: 'complete',
     sourceVersion: 'kitchen-compass-curated-1',
-    nutritionSource: 'Estimated from USDA ingredient averages; bread size and egg size vary.',
     storageInstructions: 'Best served immediately; refrigerate cooked eggs within 2 hours.',
     reheatingInstructions: 'Reheat eggs gently until steaming; toast is best made fresh.',
     dietaryTags: ['vegetarian'],
@@ -160,7 +146,7 @@ export const recipes: Recipe[] = [
   },
 ];
 
-for (const recipe of recipes) {
+for (const recipe of rawRecipes) {
   for (const ingredient of recipe.ingredients) {
     if (ingredient.quantity === undefined || ingredient.unit === undefined) {
       throw new Error(`Recipe ingredient ${ingredient.name} is missing a numeric quantity.`);
@@ -168,12 +154,21 @@ for (const recipe of recipes) {
   }
 }
 
+export const recipes: Recipe[] = rawRecipes.map((recipe) => {
+  const nutrition = calculateRecipeNutrition(recipe.ingredients, recipe.servings);
+  return { ...recipe, nutrition, healthScore: calculateHealthScore(nutrition) };
+});
+
 export function scaledIngredient(recipe: Recipe, ingredient: RecipeIngredient, targetServings: number) {
   return { ...ingredient, quantity: scaleQuantity(ingredient.quantity, recipe.servings, targetServings) };
 }
 
-export function scaledNutrition(recipe: Recipe, targetServings: number) {
-  return scaleNutrition(recipe.nutrition, recipe.servings, targetServings);
+export function scaledNutrition(recipe: Recipe, targetServings: number): NutritionCalculation {
+  if (recipe.nutrition.status !== 'calculated' || !recipe.nutrition.total) return recipe.nutrition;
+  const total = scaleNutrition(recipe.nutrition.total, recipe.servings, targetServings);
+  const perServing = Object.fromEntries(Object.entries(total as Record<string, number>)
+    .map(([key, value]) => [key, value / targetServings])) as NutritionAmounts;
+  return { ...recipe.nutrition, total, perServing };
 }
 
 export function getRecipe(id?: string) {

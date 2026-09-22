@@ -61,8 +61,8 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
             </View>
             <Text style={[styles.recipeMeta, { color: colors.mutedForeground }]}>{recipe.cuisine} · {recipe.prep + recipe.cook} min · {recipe.difficulty}</Text>
           </View>
-          <View style={[styles.scoreBadge, { backgroundColor: recipe.score >= 85 ? colors.secondary : colors.accent }]}>
-            <Text style={[styles.scoreText, { color: recipe.score >= 85 ? colors.primary : colors.accentForeground }]}>{recipe.score}</Text>
+           <View style={[styles.scoreBadge, { backgroundColor: recipe.healthScore.score !== undefined && recipe.healthScore.score >= 85 ? colors.secondary : colors.accent }]}>
+             <Text style={[styles.scoreText, { color: recipe.healthScore.score !== undefined && recipe.healthScore.score >= 85 ? colors.primary : colors.accentForeground }]}>{recipe.healthScore.score ?? '—'}</Text>
           </View>
         </View>
         <Text numberOfLines={2} style={[styles.recipeDescription, { color: colors.mutedForeground }]}>{recipe.description}</Text>

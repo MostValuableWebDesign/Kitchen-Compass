@@ -5,18 +5,23 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecipeNutritionPerServing } from './recipeNutritionPerServing';
+import type { RecipeNutritionSource } from './recipeNutritionSource';
+import type { RecipeNutritionStatus } from './recipeNutritionStatus';
+import type { RecipeNutritionTotal } from './recipeNutritionTotal';
 
 export interface RecipeNutrition {
+  status: RecipeNutritionStatus;
+  perServing?: RecipeNutritionPerServing;
+  total?: RecipeNutritionTotal;
+  coveredIngredients: string[];
+  uncoveredIngredients: string[];
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  ingredientCoverage: number;
   /** @minimum 0 */
-  calories: number;
-  /** @minimum 0 */
-  protein: number;
-  /** @minimum 0 */
-  carbs: number;
-  /** @minimum 0 */
-  fat: number;
-  /** @minimum 0 */
-  fiber: number;
-  /** @minimum 0 */
-  sodium: number;
+  vegetableServingsPerServing?: number;
+  source: RecipeNutritionSource;
 }

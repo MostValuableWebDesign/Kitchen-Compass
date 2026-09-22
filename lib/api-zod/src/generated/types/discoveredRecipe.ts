@@ -8,7 +8,7 @@
 import type { DiscoveredRecipeAllergenInfo } from './discoveredRecipeAllergenInfo';
 import type { DiscoveredRecipeDifficulty } from './discoveredRecipeDifficulty';
 import type { DiscoveredRecipeMealType } from './discoveredRecipeMealType';
-import type { DiscoveredRecipeNutritionProvenance } from './discoveredRecipeNutritionProvenance';
+import type { RecipeHealthScore } from './recipeHealthScore';
 import type { RecipeIngredient } from './recipeIngredient';
 import type { RecipeNutrition } from './recipeNutrition';
 import type { RecipeStep } from './recipeStep';
@@ -29,18 +29,10 @@ export interface DiscoveredRecipe {
   cookMinutes: number;
   difficulty: DiscoveredRecipeDifficulty;
   equipment: string[];
-  /**
-     * @minimum 0
-     * @maximum 100
-     */
-  healthScore: number;
-  scoreNote: string;
+  healthScore: RecipeHealthScore;
   /** @minItems 1 */
   ingredients: RecipeIngredient[];
   nutrition: RecipeNutrition;
-  nutritionProvenance: DiscoveredRecipeNutritionProvenance;
-  /** @minLength 1 */
-  nutritionSource: string;
   /** @minItems 1 */
   steps: RecipeStep[];
   allergens: string[];
