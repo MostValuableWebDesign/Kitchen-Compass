@@ -7,6 +7,7 @@ import { AppHeader, Chip, RecipeCard, SectionTitle } from '@/components/KitchenU
 import { useKitchen } from '@/context/KitchenContext';
 import { recipes } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
+import { recipeReadiness } from '@/lib/kitchenLogic';
 
 export default function TodayScreen() {
   const colors = useColors();
@@ -19,7 +20,7 @@ export default function TodayScreen() {
   const useSoon = ingredients.filter((item) => item.expires || item.status === 'low').slice(0, 3);
   const hasIngredient = (recipeId: string) => {
     const recipe = recipes.find((item) => item.id === recipeId);
-    return !!recipe && recipe.ingredients.filter((item) => item.required !== false).every((required) => ingredients.some((item) => item.name.toLowerCase().includes(required.name.toLowerCase()) || required.name.toLowerCase().includes(item.name.toLowerCase())));
+    return !!recipe && recipeReadiness(recipe, ingredients, preferences.allergies).ready;
   };
 
   return (
@@ -75,10 +76,22 @@ export default function TodayScreen() {
         <View style={[styles.modalBackdrop, { backgroundColor: 'rgba(32,53,44,0.35)' }]}>
           <View style={[styles.settingsSheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 18 }]}>
             <View style={styles.sheetHeader}><Text style={[styles.sheetTitle, { color: colors.foreground }]}>Your preferences</Text><Pressable onPress={() => setSettingsOpen(false)}><Feather name="x" size={22} color={colors.foreground} /></Pressable></View>
-            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Default servings</Text>
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Household size</Text>
             <TextInput value={String(preferences.servings)} keyboardType="number-pad" onChangeText={(value) => setPreferences({ servings: Math.max(1, Number(value) || 1) })} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Allergies</Text>
+             <TextInput value={preferences.allergies.join(', ')} onChangeText={(value) => setPreferences({ allergies: value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. peanuts, egg" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dietary restrictions</Text>
+             <TextInput value={preferences.dietaryRestrictions.join(', ')} onChangeText={(value) => setPreferences({ dietaryRestrictions: value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. vegetarian" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dislikes</Text>
+             <TextInput value={preferences.dislikes.join(', ')} onChangeText={(value) => setPreferences({ dislikes: value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. cilantro" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cuisines</Text>
+             <TextInput value={preferences.cuisines.join(', ')} onChangeText={(value) => setPreferences({ cuisines: value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. Mediterranean, Italian" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cooking skill</Text>
+             <View style={styles.chipWrap}>{(['Beginner', 'Comfortable', 'Confident'] as const).map((skill) => <Chip key={skill} label={skill} selected={preferences.skill === skill} onPress={() => setPreferences({ skill })} />)}</View>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cooking time</Text>
             <View style={styles.chipWrap}>{[30, 45, 60].map((time) => <Chip key={time} label={`${time} min`} selected={preferences.cookTime === time} onPress={() => setPreferences({ cookTime: time })} />)}</View>
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Equipment</Text>
+             <View style={styles.chipWrap}>{['Stovetop', 'Oven', 'Microwave'].map((item) => <Chip key={item} label={item} selected={preferences.equipment.includes(item)} onPress={() => setPreferences({ equipment: preferences.equipment.includes(item) ? preferences.equipment.filter((value) => value !== item) : [...preferences.equipment, item] })} />)}</View>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Nutrition focus</Text>
             <View style={styles.chipWrap}>{['More vegetables', 'Higher protein'].map((item) => <Chip key={item} label={item} selected={preferences.nutrition.includes(item)} onPress={() => setPreferences({ nutrition: preferences.nutrition.includes(item) ? preferences.nutrition.filter((value) => value !== item) : [...preferences.nutrition, item] })} />)}</View>
             <Pressable onPress={() => setSettingsOpen(false)} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveButtonText, { color: colors.primaryForeground }]}>Save preferences</Text></Pressable>
