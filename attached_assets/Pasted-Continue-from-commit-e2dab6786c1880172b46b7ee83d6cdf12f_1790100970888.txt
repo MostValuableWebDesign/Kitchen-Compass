@@ -1,0 +1,129 @@
+Continue from commit e2dab6786c1880172b46b7ee83d6cdf12f4bb703. Preserve the current design and working scan flow. Fix the remaining implementation defects below and do not report the app complete until the stated checks pass.
+
+1. SECURE THE SCAN API
+
+Update artifacts/api-server/src/routes/scan.ts and server middleware.
+
+Protect POST /api/scan/analyze with:
+- authenticated or installation-scoped access
+- server-side rate limiting
+- maximum decoded image size and total request size
+- request timeout
+- bounded OpenAI output tokens
+- structured error logging without image data or API keys
+
+Do not expose OPENAI_API_KEY to the mobile bundle. Return 401, 413, 429, and 503 states that the mobile app handles distinctly. Add API tests proving unauthorized, oversized, rate-limited, invalid, missing-key, and successful structured responses.
+
+2. REPAIR THE LOCKFILE
+
+Regenerate pnpm-lock.yaml from the committed pnpm-workspace.yaml so:
+
+pnpm install --frozen-lockfile
+
+passes from a clean checkout. Do not weaken the minimum-release-age or build-package security settings.
+
+3. MAKE READINESS QUANTITY-AWARE
+
+Update recipeReadiness so “Ready to cook” requires:
+- confirmed inventory
+- non-used status
+- all required ingredient identities
+- sufficient compatible quantities for the selected serving count
+
+If quantities are missing or units cannot be safely compared, return “quantity check needed,” not ready.
+
+Return a structured result with:
+- ready
+- missing ingredients
+- insufficient ingredients
+- quantity-check ingredients
+- allergen conflict
+- incomplete allergen information
+
+Use this same result on Today, Recipes, recipe detail, Meal Plan, and Shopping List.
+
+4. IMPLEMENT REAL WEEKLY RESERVATIONS
+
+Extend PlannedMeal and KitchenContext with serving count and reservation records.
+
+Planning a meal must:
+- reserve required quantities
+- consider all previously planned meals
+- respect allergies, dietary restrictions, dislikes, equipment, and cooking-time limits
+- warn when known inventory would be overallocated
+- mark unknown quantities for confirmation
+- release old reservations when a meal is swapped or removed
+
+Remove the claim that planning reserves ingredients unless actual reservation records exist.
+
+Use preferences.servings everywhere. Remove the hard-coded `2` from shopping.tsx.
+
+5. FIX COOKED-MEAL ACCOUNTING
+
+Replace markCooked(recipeIngredientNames) with a transaction based on a planned-meal ID or unique cooking-session ID.
+
+Before completion, show:
+- servings prepared
+- proposed ingredient deductions
+- inventory rows being consumed
+- editable actual quantities
+- leftover portions
+
+On confirmation:
+- deduct compatible known quantities
+- mark an item used only when its remaining quantity reaches zero
+- record the completed meal once
+- reject repeated completion of the same transaction
+- create a leftover record with portions and preparation date
+- release that meal’s reservations
+
+Remove all substring matching from inventory deductions.
+
+6. COMPLETE SHOPPING IMPORT AND PERSISTENCE
+
+Use preferences.servings in calculateShoppingNeeds.
+
+Persist:
+- checked items
+- manual items
+- list state
+
+Implement “Add purchased items to My Kitchen” as an editable confirmation screen containing ingredient, quantity, unit, and storage location. Only confirmed rows may change inventory. Do not add items from the alert button directly.
+
+7. APPLY ALL SAVED PREFERENCES
+
+Recipe discovery and meal planning must use:
+- allergies
+- dietary restrictions
+- dislikes
+- cuisines
+- cooking skill
+- time limit
+- equipment
+- nutrition preference
+
+Allergies remain strict exclusions. Unknown allergen information must fail closed.
+
+8. TESTS
+
+Add tests for:
+- insufficient quantities cannot produce Ready to cook
+- target servings affect readiness and shopping quantities
+- two planned meals cannot silently overallocate one inventory quantity
+- swapping and removing a meal releases reservations
+- allergen-conflicting meals cannot be planned
+- dietary restrictions and equipment affect suggestions
+- cooking completion deducts once
+- partial quantities remain available
+- leftovers do not deduct raw ingredients again
+- purchased-item confirmation updates inventory
+- scan API authentication, rate limits, size limits, timeout, and invalid AI output
+
+Run and report:
+- pnpm install --frozen-lockfile
+- pnpm run typecheck
+- pnpm --filter @workspace/kitchen-compass test
+- API tests
+- production build
+
+Separately state whether camera capture and live photo recognition were tested on a physical iPhone. Do not count simulator, web preview, compilation, or HTTP success as physical-device verification.
