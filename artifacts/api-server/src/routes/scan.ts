@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
+import { decodedBase64Bytes, scanLimits, sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
 
@@ -33,6 +34,20 @@ const scanResponseSchema = z.object({
   scanId: z.string(),
   suggestions: z.array(suggestionSchema),
   warnings: z.array(z.string()),
+});
+
+const modelResponseSchema = z.object({
+  suggestions: z.array(z.object({
+    sourcePhotoId: z.string().min(1),
+    normalizedName: z.string().min(1).max(120),
+    displayName: z.string().min(1).max(120),
+    storageLocation: z.enum(["Refrigerator", "Freezer", "Pantry"]),
+    quantity: z.number().min(0).nullable(),
+    unit: z.string().max(40).nullable(),
+    confidence: z.number().min(0).max(1),
+    uncertaintyReasons: z.array(z.string().max(240)).max(8),
+  })).max(40),
+  warnings: z.array(z.string().max(240)).max(20),
 });
 
 const model = "gpt-5.4-mini";
@@ -74,16 +89,26 @@ function normalizeName(value: string) {
 router.post("/scan/analyze", async (req, res) => {
   const parsedRequest = scanRequestSchema.safeParse(req.body);
   if (!parsedRequest.success) {
-    res.status(400).json({ error: "Invalid scan request", details: parsedRequest.error.flatten() });
-    return;
-  }
-
-  if (!process.env.OPENAI_API_KEY) {
-    res.status(503).json({ error: "Ingredient photo recognition is unavailable. Manual entry is still available." });
+    sendScanError(req, res, 400, "INVALID_REQUEST", "The scan request is invalid.");
     return;
   }
 
   const { photos, existingIngredients = [] } = parsedRequest.data;
+  const photoSizes = photos.map((photo) => decodedBase64Bytes(photo.base64));
+  if (photoSizes.some((size) => size === null || size > scanLimits.maxPhotoBytes)) {
+    sendScanError(req, res, 413, "PAYLOAD_TOO_LARGE", "One or more photos are too large.");
+    return;
+  }
+  const totalPhotoBytes = photoSizes.reduce<number>((sum, size) => sum + (size ?? 0), 0);
+  if (totalPhotoBytes > scanLimits.maxTotalPhotoBytes) {
+    sendScanError(req, res, 413, "PAYLOAD_TOO_LARGE", "The combined photo payload is too large.");
+    return;
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition is unavailable. Manual entry is still available.");
+    return;
+  }
+
   const content = [
     {
       type: "text",
@@ -103,6 +128,8 @@ router.post("/scan/analyze", async (req, res) => {
     })),
   ];
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), scanLimits.requestTimeoutMs);
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -110,9 +137,11 @@ router.post("/scan/analyze", async (req, res) => {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model,
         temperature: 0,
+        max_completion_tokens: 700,
         response_format: {
           type: "json_schema",
           json_schema: { name: "ingredient_scan", strict: true, schema: responseSchema },
@@ -123,30 +152,23 @@ router.post("/scan/analyze", async (req, res) => {
 
     if (!response.ok) {
       req.log.error({ status: response.status }, "Ingredient scan AI request failed");
-      res.status(503).json({ error: "Ingredient photo recognition is temporarily unavailable. Your existing kitchen inventory was not changed." });
+      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition is temporarily unavailable. Your existing kitchen inventory was not changed.");
       return;
     }
 
     const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const rawContent = payload.choices?.[0]?.message?.content;
     if (!rawContent) {
-      res.status(503).json({ error: "Ingredient photo recognition returned no suggestions. Your existing kitchen inventory was not changed." });
+      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition returned no suggestions. Your existing kitchen inventory was not changed.");
       return;
     }
 
-    const aiResult = JSON.parse(rawContent) as {
-      suggestions: Array<{
-        sourcePhotoId: string;
-        normalizedName: string;
-        displayName: string;
-        storageLocation: "Refrigerator" | "Freezer" | "Pantry";
-        quantity: number | null;
-        unit: string | null;
-        confidence: number;
-        uncertaintyReasons: string[];
-      }>;
-      warnings: string[];
-    };
+    const aiResult = modelResponseSchema.parse(JSON.parse(rawContent));
+    const photoIds = new Set(photos.map((photo) => photo.id));
+    if (aiResult.suggestions.some((suggestion) => !photoIds.has(suggestion.sourcePhotoId))) {
+      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition returned an invalid result. Your existing kitchen inventory was not changed.");
+      return;
+    }
 
     const seen = new Set<string>();
     const suggestions = aiResult.suggestions.flatMap((suggestion) => {
@@ -180,8 +202,11 @@ router.post("/scan/analyze", async (req, res) => {
     });
     res.json(result);
   } catch (error) {
-    req.log.error({ err: error }, "Ingredient scan processing failed");
-    res.status(503).json({ error: "Ingredient photo recognition failed. Your existing kitchen inventory was not changed." });
+    const isTimeout = error instanceof Error && error.name === "AbortError";
+    req.log.error({ reason: isTimeout ? "timeout" : "provider_or_validation_failure" }, "Ingredient scan processing failed");
+    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition failed. Your existing kitchen inventory was not changed.");
+  } finally {
+    clearTimeout(timeout);
   }
 });
 

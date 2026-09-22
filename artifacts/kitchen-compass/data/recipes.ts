@@ -31,6 +31,9 @@ export interface Recipe {
   nutritionSource: string;
   storageInstructions: string;
   reheatingInstructions: string;
+  dietaryTags?: string[];
+  dislikeTags?: string[];
+  nutritionTags?: string[];
 }
 
 export const recipes: Recipe[] = [
@@ -69,6 +72,8 @@ export const recipes: Recipe[] = [
     nutritionSource: 'Estimated from USDA ingredient averages; stock brand may change sodium.',
     storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
     reheatingInstructions: 'Reheat covered until the center reaches 165°F.',
+    dietaryTags: ['high-protein'],
+    nutritionTags: ['More vegetables', 'More protein'],
   },
   {
     id: 'tomato-basil-pasta',
@@ -105,6 +110,8 @@ export const recipes: Recipe[] = [
     nutritionSource: 'Estimated from USDA ingredient averages; pasta and cheese brands vary.',
     storageInstructions: 'Refrigerate within 2 hours for up to 3 days.',
     reheatingInstructions: 'Reheat with a splash of water until steaming hot.',
+    dietaryTags: ['vegetarian'],
+    nutritionTags: ['More vegetables'],
   },
   {
     id: 'green-egg-toast',
@@ -137,6 +144,8 @@ export const recipes: Recipe[] = [
     nutritionSource: 'Estimated from USDA ingredient averages; bread size and egg size vary.',
     storageInstructions: 'Best served immediately; refrigerate cooked eggs within 2 hours.',
     reheatingInstructions: 'Reheat eggs gently until steaming; toast is best made fresh.',
+    dietaryTags: ['vegetarian'],
+    nutritionTags: ['More vegetables', 'More protein'],
   },
 ];
 

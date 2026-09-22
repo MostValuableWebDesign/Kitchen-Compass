@@ -18,6 +18,7 @@ export default function ScanScreen() {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [recognitionState, setRecognitionState] = useState<'idle' | 'analyzing' | 'ready' | 'unavailable'>('idle');
+  const [recognitionMessage, setRecognitionMessage] = useState('');
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [location, setLocation] = useState<StorageLocation>('Refrigerator');
@@ -30,6 +31,7 @@ export default function ScanScreen() {
     setName('');
     setMode('review');
     setRecognitionState('analyzing');
+    setRecognitionMessage('');
     try {
       const photos = await Promise.all(assets.map(async (asset, index) => ({
         id: `photo-${index + 1}`,
@@ -42,8 +44,18 @@ export default function ScanScreen() {
       });
       setSuggestions(result.suggestions);
       setRecognitionState('ready');
-    } catch {
+    } catch (error) {
       setRecognitionState('unavailable');
+      const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
+      setRecognitionMessage(
+        status === 401
+          ? 'This installation is not authorized for photo recognition. Restart the app and try again.'
+          : status === 413
+            ? 'That photo payload is too large. Choose fewer photos or use smaller images.'
+            : status === 429
+              ? 'Photo recognition is temporarily rate-limited. Try again in a little while.'
+              : 'Recognition is unavailable right now. Your existing kitchen was not changed. Manual entry remains available below.',
+      );
     }
   };
   const takePhoto = async () => {
@@ -75,6 +87,7 @@ export default function ScanScreen() {
     setPhotoUris([]);
     setSuggestions([]);
     setRecognitionState('idle');
+    setRecognitionMessage('');
     setName('');
     setQuantity('');
   };
@@ -117,7 +130,7 @@ export default function ScanScreen() {
             {photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
             <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
             {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
-            {recognitionState === 'unavailable' ? <View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>Recognition is unavailable right now. Your existing kitchen was not changed. Manual entry remains available below.</Text></View> : null}
+             {recognitionState === 'unavailable' ? <View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View> : null}
             {suggestions.map((suggestion) => <View key={suggestion.suggestionId} style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.suggestionHeader}><Text style={[styles.suggestionLabel, { color: colors.mutedForeground }]}>REVIEW SUGGESTION</Text><Pressable accessibilityLabel={`Remove ${suggestion.displayName}`} onPress={() => removeSuggestion(suggestion.suggestionId)}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable></View>
               <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />

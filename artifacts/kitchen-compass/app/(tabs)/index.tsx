@@ -8,19 +8,20 @@ import { useKitchen } from '@/context/KitchenContext';
 import { recipes } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { recipeReadiness } from '@/lib/kitchenLogic';
+import { recipeMatchesPreferences } from '@/lib/kitchenLogic';
 
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, preferences, plan, setPreferences } = useKitchen();
+  const { ingredients, preferences, plan, reservations, setPreferences } = useKitchen();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
   const useSoon = ingredients.filter((item) => item.expires || item.status === 'low').slice(0, 3);
   const hasIngredient = (recipeId: string) => {
     const recipe = recipes.find((item) => item.id === recipeId);
-    return !!recipe && recipeReadiness(recipe, ingredients, preferences.allergies).ready;
+    return !!recipe && recipeMatchesPreferences(recipe, preferences) && recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations).ready;
   };
 
   return (
@@ -68,7 +69,7 @@ export default function TodayScreen() {
         )}
 
         <SectionTitle title="Quick inspiration" action="See all" onPress={() => router.push('/recipes')} />
-        {recipes.slice(0, 2).map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} hasIngredients={hasIngredient(recipe.id)} onPress={() => router.push(`/recipe/${recipe.id}`)} />)}
+        {recipes.filter((recipe) => recipeMatchesPreferences(recipe, preferences)).slice(0, 2).map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} hasIngredients={hasIngredient(recipe.id)} onPress={() => router.push(`/recipe/${recipe.id}`)} />)}
         <View style={{ height: 18 }} />
       </ScrollView>
 
@@ -93,7 +94,7 @@ export default function TodayScreen() {
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Equipment</Text>
              <View style={styles.chipWrap}>{['Stovetop', 'Oven', 'Microwave'].map((item) => <Chip key={item} label={item} selected={preferences.equipment.includes(item)} onPress={() => setPreferences({ equipment: preferences.equipment.includes(item) ? preferences.equipment.filter((value) => value !== item) : [...preferences.equipment, item] })} />)}</View>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Nutrition focus</Text>
-            <View style={styles.chipWrap}>{['More vegetables', 'Higher protein'].map((item) => <Chip key={item} label={item} selected={preferences.nutrition.includes(item)} onPress={() => setPreferences({ nutrition: preferences.nutrition.includes(item) ? preferences.nutrition.filter((value) => value !== item) : [...preferences.nutrition, item] })} />)}</View>
+             <View style={styles.chipWrap}>{['More vegetables', 'More protein'].map((item) => <Chip key={item} label={item} selected={preferences.nutrition.includes(item)} onPress={() => setPreferences({ nutrition: preferences.nutrition.includes(item) ? preferences.nutrition.filter((value) => value !== item) : [...preferences.nutrition, item] })} />)}</View>
             <Pressable onPress={() => setSettingsOpen(false)} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveButtonText, { color: colors.primaryForeground }]}>Save preferences</Text></Pressable>
           </View>
         </View>
