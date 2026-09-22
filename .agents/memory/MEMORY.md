@@ -1,0 +1,1 @@
+- [Expo mobile preview](expo-mobile-preview.md) — missing React Native DevTools libglib is an environment warning; Metro and Expo Go can still run normally.
