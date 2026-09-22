@@ -39,6 +39,8 @@ export interface DiscoveredRecipe {
   allergenInfo: DiscoveredRecipeAllergenInfo;
   storageInstructions: string;
   reheatingInstructions: string;
+  servingSuggestions: string[];
+  commonMistakes: string[];
   dietaryTags: string[];
   dislikeTags: string[];
   nutritionTags: string[];

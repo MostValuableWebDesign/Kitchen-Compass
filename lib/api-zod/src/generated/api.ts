@@ -184,6 +184,11 @@ export const discoverRecipesResponseRecipesItemNutritionVegetableServingsPerServ
 export const discoverRecipesResponseRecipesItemStepsItemDurationMin = 0;
 
 
+export const discoverRecipesResponseRecipesItemStepsItemIngredientAmountsItemQuantityExclusiveMin = 0;
+
+
+
+
 
 
 
@@ -256,13 +261,33 @@ export const DiscoverRecipesResponse = zod.object({
   "title": zod.string().min(1),
   "body": zod.string().min(1),
   "duration": zod.number().int().min(discoverRecipesResponseRecipesItemStepsItemDurationMin).optional(),
-  "temperature": zod.string().optional(),
-  "ingredients": zod.array(zod.string())
+  "temperature": zod.object({
+  "fahrenheit": zod.number(),
+  "celsius": zod.number()
+}).optional(),
+  "ingredients": zod.array(zod.string()),
+  "ingredientAmounts": zod.array(zod.object({
+  "name": zod.string().min(1),
+  "quantity": zod.number().gt(discoverRecipesResponseRecipesItemStepsItemIngredientAmountsItemQuantityExclusiveMin),
+  "unit": zod.string().min(1),
+  "note": zod.string().optional()
+})),
+  "cues": zod.array(zod.string()),
+  "safetyTemperature": zod.object({
+  "food": zod.string().min(1),
+  "temperature": zod.object({
+  "fahrenheit": zod.number(),
+  "celsius": zod.number()
+})
+}).optional(),
+  "mistakes": zod.array(zod.string())
 })).min(1),
   "allergens": zod.array(zod.string()),
   "allergenInfo": zod.enum(['complete', 'incomplete']),
   "storageInstructions": zod.string(),
   "reheatingInstructions": zod.string(),
+  "servingSuggestions": zod.array(zod.string()),
+  "commonMistakes": zod.array(zod.string()),
   "dietaryTags": zod.array(zod.string()),
   "dislikeTags": zod.array(zod.string()),
   "nutritionTags": zod.array(zod.string()),
