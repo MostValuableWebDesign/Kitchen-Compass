@@ -133,6 +133,7 @@ export function recipeReadiness(
   allergies: string[],
   targetServings = 1,
   reservations: ReservationRecord[] = [],
+  plannedMealId?: string,
 ): RecipeReadinessResult {
   const result: RecipeReadinessResult = {
     ready: true,
@@ -166,7 +167,10 @@ export function recipeReadiness(
         continue;
       }
       const reserved = item.id ? reservations
-        .filter((reservation) => reservation.inventoryId === item.id && reservation.normalizedName === identity && reservation.quantityKnown)
+        .filter((reservation) => reservation.inventoryId === item.id
+          && reservation.normalizedName === identity
+          && reservation.quantityKnown
+          && reservation.plannedMealId !== plannedMealId)
         .reduce((sum, reservation) => {
           const converted = convertQuantity(reservation.quantity ?? 0, reservation.unit, item.unit);
           return sum + (converted ?? 0);
@@ -290,6 +294,7 @@ export type ShoppingNeed = {
   quantity?: number;
   unit?: string;
   quantityCheckNeeded: boolean;
+  quantityCheckReasons: Array<'unknown-inventory' | 'incompatible-unit'>;
   category: 'Produce' | 'Protein' | 'Pantry' | 'Dairy & eggs' | 'Other';
 };
 
@@ -307,7 +312,7 @@ export function calculateShoppingNeeds(
   recipes: ReservationRecipe[],
   inventory: InventoryCandidate[],
   targetServings: number,
-  reservations: ReservationRecord[] = [],
+  _reservations: ReservationRecord[] = [],
 ) {
   const demand = new Map<string, { name: string; quantity: number; unit: string }>();
   for (const planned of plan) {
@@ -328,20 +333,14 @@ export function calculateShoppingNeeds(
   return [...demand.entries()].map(([normalizedName, need]) => {
     const matching = inventory.filter((item) => ingredientIdentitiesMatch(need.name, item));
     let covered = 0;
-    let quantityCheckNeeded = false;
+    const quantityCheckReasons = new Set<'unknown-inventory' | 'incompatible-unit'>();
     for (const item of matching) {
       if (item.quantityKnown !== true || item.quantityValue === undefined || !item.unit) {
-        quantityCheckNeeded = true;
+        quantityCheckReasons.add('unknown-inventory');
         continue;
       }
-      const reserved = item.id ? reservations
-        .filter((reservation) => reservation.inventoryId === item.id && reservation.quantityKnown)
-        .reduce((sum, reservation) => {
-          const converted = convertQuantity(reservation.quantity ?? 0, reservation.unit, need.unit);
-          return sum + (converted ?? 0);
-        }, 0) : 0;
-      const converted = convertQuantity(Math.max(0, item.quantityValue - reserved), item.unit, need.unit);
-      if (converted === null) quantityCheckNeeded = true;
+      const converted = convertQuantity(item.quantityValue, item.unit, need.unit);
+      if (converted === null) quantityCheckReasons.add('incompatible-unit');
       else covered += converted;
     }
     const remaining = Number.isNaN(need.quantity) ? undefined : Math.max(0, need.quantity - covered);
@@ -350,7 +349,8 @@ export function calculateShoppingNeeds(
       name: need.name,
       normalizedName,
       ...(remaining && remaining > 0 ? { quantity: Number(remaining.toFixed(2)), unit: need.unit } : {}),
-      quantityCheckNeeded: quantityCheckNeeded || Number.isNaN(need.quantity),
+      quantityCheckNeeded: quantityCheckReasons.size > 0 || Number.isNaN(need.quantity),
+      quantityCheckReasons: [...quantityCheckReasons],
       category: categoryFor(need.name),
     } satisfies ShoppingNeed;
   }).filter((item) => item.quantityCheckNeeded || item.quantity !== undefined);
@@ -375,6 +375,22 @@ export function deductInventory<T extends InventoryCandidate & { id: string }>(i
       status: remaining <= 0 ? 'used' : item.status,
     };
   });
+}
+
+export function applyCookingTransaction<T extends InventoryCandidate & { id: string }>(
+  inventory: T[],
+  completedTransactionIds: string[],
+  transactionId: string,
+  deductions: Deduction[],
+) {
+  if (completedTransactionIds.includes(transactionId)) {
+    return { applied: false, inventory, completedTransactionIds };
+  }
+  return {
+    applied: true,
+    inventory: deductInventory(inventory, deductions),
+    completedTransactionIds: [...completedTransactionIds, transactionId],
+  };
 }
 
 export function scaleQuantity(quantity: number, sourceServings: number, targetServings: number) {

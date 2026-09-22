@@ -9,14 +9,17 @@ import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-cl
 import { Chip, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
+import { normalizeIngredientName } from '@/lib/kitchenLogic';
 
 export default function ScanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addIngredient, ingredients } = useKitchen();
+  const { addIngredient, ingredients, updateIngredient } = useKitchen();
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [scanDecisions, setScanDecisions] = useState<Record<string, 'same' | 'additional' | 'correction'>>({});
   const [recognitionState, setRecognitionState] = useState<'idle' | 'analyzing' | 'ready' | 'unavailable'>('idle');
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [name, setName] = useState('');
@@ -28,6 +31,8 @@ export default function ScanScreen() {
   const reviewPhotos = async (assets: ImagePicker.ImagePickerAsset[]) => {
     setPhotoUris(assets.map((asset) => asset.uri));
     setSuggestions([]);
+    setScanId(null);
+    setScanDecisions({});
     setName('');
     setMode('review');
     setRecognitionState('analyzing');
@@ -42,14 +47,16 @@ export default function ScanScreen() {
         photos,
         existingIngredients: ingredients.map((item) => ({ name: item.name, location: item.location })),
       });
+      setScanId(result.scanId);
       setSuggestions(result.suggestions);
+      setScanDecisions(Object.fromEntries(result.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion.existingInventoryMatch ? 'same' : 'additional'])));
       setRecognitionState('ready');
     } catch (error) {
       setRecognitionState('unavailable');
       const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
       setRecognitionMessage(
         status === 401
-          ? 'This installation is not authorized for photo recognition. Restart the app and try again.'
+          ? 'Secure scan access could not be established. Try again later or use manual entry below.'
           : status === 413
             ? 'That photo payload is too large. Choose fewer photos or use smaller images.'
             : status === 429
@@ -86,6 +93,8 @@ export default function ScanScreen() {
     setMode('choose');
     setPhotoUris([]);
     setSuggestions([]);
+    setScanId(null);
+    setScanDecisions({});
     setRecognitionState('idle');
     setRecognitionMessage('');
     setName('');
@@ -96,15 +105,43 @@ export default function ScanScreen() {
       Alert.alert('Review an ingredient first', 'Confirm at least one recognized item or add an ingredient manually.');
       return;
     }
-    suggestions.forEach((suggestion) => addIngredient({
-      name: suggestion.displayName.trim(),
-      quantity: suggestion.quantityKnown && suggestion.quantity !== undefined ? `${suggestion.quantity} ${suggestion.unit ?? ''}`.trim() : undefined,
-      location: suggestion.storageLocation,
-      status: 'fresh',
-      confidence: 'confirmed',
-      photoUri: photoUris[0],
-    }));
-    if (name.trim()) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed' });
+    const reviewedAt = new Date().toISOString();
+    suggestions.forEach((suggestion) => {
+      const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+      if (decision === 'same') return;
+      const quantityText = suggestion.quantityKnown && suggestion.quantity !== undefined
+        ? `${suggestion.quantity} ${suggestion.unit ?? ''}`.trim()
+        : undefined;
+      if (decision === 'correction') {
+        const existing = ingredients.find((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
+        if (!existing) return;
+        updateIngredient(existing.id, {
+          name: suggestion.displayName.trim(),
+          ...(quantityText ? { quantity: quantityText } : {}),
+          location: suggestion.storageLocation,
+          status: 'fresh',
+          confidence: 'confirmed',
+          source: 'scan',
+          sourceScanId: scanId ?? undefined,
+          sourcePhotoId: suggestion.sourcePhotoId,
+          reviewedAt,
+        });
+        return;
+      }
+      addIngredient({
+        name: suggestion.displayName.trim(),
+        quantity: quantityText,
+        location: suggestion.storageLocation,
+        status: 'fresh',
+        confidence: 'confirmed',
+        photoUri: photoUris[0],
+        source: 'scan',
+        sourceScanId: scanId ?? undefined,
+        sourcePhotoId: suggestion.sourcePhotoId,
+        reviewedAt,
+      });
+    });
+    if (name.trim()) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
     Alert.alert('Added to My Kitchen', 'Every saved suggestion was reviewed on this screen. Quantities were not inferred when the photo could not support them.', [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
   };
 
@@ -137,6 +174,7 @@ export default function ScanScreen() {
               <View style={styles.quantityRow}><TextInput value={suggestion.quantityKnown && suggestion.quantity !== undefined ? String(suggestion.quantity) : ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { quantity: value ? Number(value) : undefined, quantityKnown: Boolean(value) && Number.isFinite(Number(value)) })} keyboardType="decimal-pad" placeholder="Qty" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /><TextInput value={suggestion.unit ?? ''} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { unit: value, quantityKnown: Boolean(value.trim()) && suggestion.quantity !== undefined })} placeholder="unit (optional)" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /></View>
               <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={suggestion.storageLocation === item} onPress={() => updateSuggestion(suggestion.suggestionId, { storageLocation: item })} />)}</View>
               <Text style={[styles.confidenceText, { color: colors.mutedForeground }]}>{Math.round(suggestion.confidence * 100)}% confidence · {suggestion.quantityKnown ? 'quantity supported by photo' : 'quantity check needed'}</Text>
+               {suggestion.existingInventoryMatch ? <View style={[styles.duplicateBox, { backgroundColor: colors.secondary }]}><Text style={[styles.duplicateTitle, { color: colors.secondaryForeground }]}>Matches existing kitchen stock</Text><Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch).map((item) => item.name).join(', ') || suggestion.existingInventoryMatch}</Text><View style={styles.chips}><Chip label="Same item" selected={(scanDecisions[suggestion.suggestionId] ?? 'same') === 'same'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'same' }))} /><Chip label="Additional stock" selected={scanDecisions[suggestion.suggestionId] === 'additional'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'additional' }))} /><Chip label="Correct existing" selected={scanDecisions[suggestion.suggestionId] === 'correction'} onPress={() => setScanDecisions((current) => ({ ...current, [suggestion.suggestionId]: 'correction' }))} /></View><Text style={[styles.duplicateBody, { color: colors.secondaryForeground }]}>{(scanDecisions[suggestion.suggestionId] ?? 'same') === 'same' ? 'Default: this photo does not change stock.' : (scanDecisions[suggestion.suggestionId] === 'additional' ? 'The confirmed quantity will be added as new stock.' : 'The reviewed name, location, and supported quantity will replace this row.')}</Text></View> : null}
             </View>)}
             <Text style={[styles.label, { color: colors.foreground }]}>Ingredient name</Text>
             <TextInput autoFocus value={name} onChangeText={setName} placeholder="e.g. spinach" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
@@ -189,6 +227,9 @@ const styles = StyleSheet.create({
   quantityInput: { flex: 1 },
   unitInput: { flex: 2 },
   confidenceText: { fontSize: 11, marginTop: 10 },
+  duplicateBox: { borderRadius: 14, padding: 11, marginTop: 11, gap: 6 },
+  duplicateTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  duplicateBody: { fontSize: 11, lineHeight: 16 },
   saveButton: { height: 53, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginTop: 26 },
   saveText: { fontSize: 15, fontFamily: 'Inter_700Bold' },
   pressed: { opacity: 0.72 },

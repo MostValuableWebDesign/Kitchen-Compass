@@ -16,24 +16,31 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { KitchenProvider } from '@/context/KitchenContext';
-import { setBaseUrl, setInstallationIdGetter } from '@workspace/api-client-react';
+import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 setBaseUrl(process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : null);
-const INSTALLATION_KEY = 'kitchen-compass-installation-id-v1';
-let installationIdPromise: Promise<string> | null = null;
-function getInstallationId() {
-  if (!installationIdPromise) {
-    installationIdPromise = AsyncStorage.getItem(INSTALLATION_KEY).then((stored) => {
-      if (stored) return stored;
-      const created = `kc-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
-      return AsyncStorage.setItem(INSTALLATION_KEY, created).then(() => created);
-    });
+const SCAN_ACCESS_TOKEN_KEY = 'kitchen-compass-scan-access-token-v1';
+let scanAccessTokenPromise: Promise<string | null> | null = null;
+function getScanAccessToken() {
+  if (!scanAccessTokenPromise) {
+    scanAccessTokenPromise = AsyncStorage.getItem(SCAN_ACCESS_TOKEN_KEY).then(async (stored) => {
+      const storedExpiry = stored ? Number(stored.split('.')[2]) : 0;
+      if (stored && Number.isFinite(storedExpiry) && storedExpiry > Date.now() + 60_000) return stored;
+      const domain = process.env.EXPO_PUBLIC_DOMAIN;
+      if (!domain) return null;
+      const response = await fetch(`https://${domain}/api/scan/access`, { method: 'POST' });
+      if (!response.ok) return null;
+      const payload = await response.json() as { accessToken?: string };
+      if (!payload.accessToken) return null;
+      await AsyncStorage.setItem(SCAN_ACCESS_TOKEN_KEY, payload.accessToken);
+      return payload.accessToken;
+    }).catch(() => null);
   }
-  return installationIdPromise;
+  return scanAccessTokenPromise;
 }
-setInstallationIdGetter(getInstallationId);
+setAuthTokenGetter(getScanAccessToken);
 
 const queryClient = new QueryClient();
 

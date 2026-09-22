@@ -6,7 +6,7 @@ import { Chip, SectionTitle } from '@/components/KitchenUI';
 import { MealType, useKitchen } from '@/context/KitchenContext';
 import { recipes } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
-import { recipeMatchesPreferences } from '@/lib/kitchenLogic';
+import { calculateShoppingNeeds, recipeMatchesPreferences } from '@/lib/kitchenLogic';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const mealTypes: MealType[] = ['Breakfast', 'Lunch', 'Dinner'];
@@ -15,7 +15,7 @@ export default function PlanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { plan, setMeal, removeMeal, preferences, reservationWarnings } = useKitchen();
+  const { plan, setMeal, removeMeal, preferences, ingredients, reservations } = useKitchen();
   const getMeal = (day: string, meal: MealType) => plan.find((item) => item.day === day && item.meal === meal);
   const cycleMeal = (day: string, meal: MealType) => {
     const current = getMeal(day, meal);
@@ -27,7 +27,7 @@ export default function PlanScreen() {
     const next = candidates[(Math.max(0, candidates.findIndex((recipe) => recipe.id === current?.recipeId)) + 1) % candidates.length];
     setMeal(day, meal, next.id, preferences.servings);
   };
-  const missingCount = reservationWarnings.length;
+  const missingCount = calculateShoppingNeeds(plan, recipes, ingredients, preferences.servings, reservations).length;
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={styles.content}>

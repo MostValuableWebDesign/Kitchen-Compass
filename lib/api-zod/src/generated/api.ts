@@ -65,3 +65,15 @@ export const AnalyzeIngredientPhotosResponse = zod.object({
 })
 
 
+/**
+ * @summary Issue a server-verifiable scan credential
+ */
+
+
+
+export const IssueScanAccessResponse = zod.object({
+  "accessToken": zod.string(),
+  "expiresInSeconds": zod.number().int().min(1)
+})
+
+
