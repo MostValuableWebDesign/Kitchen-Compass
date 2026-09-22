@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
+import { randomUUID } from "node:crypto";
 import app from "../src/app";
-import { resetScanRateLimiter } from "../src/middleware/scanSecurity";
+import { consumeQuota, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "scan-test-session-secret";
 process.env.OPENAI_API_KEY = "scan-test-openai-key";
@@ -61,6 +62,32 @@ test("changing the installation header alone does not reset the access quota", a
   const response = await request({ photos: [] }, accessToken, "test-installation-changed");
   assert.equal(response.status, 429);
   assert.equal(response.headers.get("retry-after"), "30");
+});
+
+test("spoofed forwarded IP headers cannot reset access-token quotas", async () => {
+  for (let index = 0; index < 3; index += 1) {
+    const response = await originalFetch(`${baseUrl}/scan/access`, {
+      method: "POST",
+      headers: { "x-forwarded-for": `198.51.100.${index + 1}` },
+    });
+    assert.equal(response.status, 200);
+  }
+  const response = await originalFetch(`${baseUrl}/scan/access`, {
+    method: "POST",
+    headers: { "x-forwarded-for": "203.0.113.99" },
+  });
+  assert.equal(response.status, 429);
+});
+
+test("persistent quota increments on insert and on conflict when PostgreSQL is available", { skip: !process.env.DATABASE_URL }, async () => {
+  const { pool } = await import("@workspace/db");
+  const key = `test:${randomUUID()}`;
+  const first = await consumeQuota(key, 2, 60_000);
+  const second = await consumeQuota(key, 2, 60_000);
+  const row = await pool.query("SELECT request_count FROM kitchen_scan_quota WHERE bucket_key = $1", [key]);
+  assert.equal(first, true);
+  assert.equal(second, true);
+  assert.equal(row.rows[0]?.request_count, 2);
 });
 
 test("scan rejects malformed requests with a sanitized structured error", async () => {

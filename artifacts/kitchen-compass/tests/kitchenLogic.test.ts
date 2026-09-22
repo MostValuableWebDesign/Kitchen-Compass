@@ -12,6 +12,7 @@ import {
   scaleQuantity,
 } from '../lib/kitchenLogic';
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
+import { recipes } from '../data/recipes';
 
 const greenEggToast = {
   id: 'green-egg-toast',
@@ -176,6 +177,13 @@ test('saved preferences exclude unsafe or incompatible discovery results', () =>
     allergies: [], dietaryRestrictions: ['vegetarian'], dislikes: [], cuisines: ['Mediterranean'],
     skill: 'Beginner', cookTime: 45, equipment: ['Stovetop'], nutrition: [],
   }), false);
+});
+
+test('new-user defaults keep all built-in recipes discoverable', () => {
+  assert.deepEqual(defaultPreferences.cuisines, []);
+  for (const recipe of recipes) {
+    assert.equal(recipeMatchesPreferences(recipe, defaultPreferences), true, recipe.id);
+  }
 });
 
 test('v1 migration preserves inventory, preferences, and multiple planned meals', () => {

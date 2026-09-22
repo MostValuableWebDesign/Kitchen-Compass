@@ -6,7 +6,24 @@ import { logger } from "./lib/logger";
 import { scanAccess, scanLimits } from "./middleware/scanSecurity";
 
 const app: Express = express();
-app.set("trust proxy", true);
+
+function normalizeProxyAddress(address: string) {
+  return address.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
+}
+
+function isTrustedProxy(address: string) {
+  const configured = (process.env.TRUSTED_PROXY_IPS ?? "")
+    .split(",")
+    .map((value) => normalizeProxyAddress(value.trim()))
+    .filter(Boolean);
+  if (!configured.length) return false;
+  const normalized = normalizeProxyAddress(address);
+  return configured.includes(address) || configured.includes(normalized);
+}
+
+// Only explicitly configured proxy addresses may influence req.ip. With no
+// allowlist, Express uses the socket address and ignores client X-Forwarded-For.
+app.set("trust proxy", isTrustedProxy);
 
 app.use(
   pinoHttp({
