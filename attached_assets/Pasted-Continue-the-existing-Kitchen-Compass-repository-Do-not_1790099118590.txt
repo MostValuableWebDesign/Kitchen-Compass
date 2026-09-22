@@ -1,0 +1,126 @@
+Continue the existing Kitchen Compass repository. Do not replace the current design or rebuild the project from scratch. The current build is a frontend prototype and must not be described as complete.
+
+Fix the following gaps in priority order.
+
+1. IMPLEMENT REAL PHOTO RECOGNITION
+
+Create server-side endpoints for scan analysis. Keep all AI credentials on the server.
+
+A scan must support multiple photos and return structured, Zod-validated ingredient suggestions containing:
+- stable suggestion ID
+- normalized ingredient name
+- display name
+- proposed storage location
+- quantity and unit only when reasonably supported
+- confidence value
+- uncertainty reasons
+- source photo ID
+
+Never infer expiration dates, freshness, hidden items, or precise quantities from appearance. Let the user review, edit, remove, and confirm every suggestion before inventory changes.
+
+Deduplicate suggestions within a scan and against existing inventory. Do not silently overwrite quantities. If AI configuration is unavailable, show a clear unavailable state and preserve manual entry.
+
+2. MAKE ALLERGY HANDLING FAIL CLOSED
+
+Add onboarding and editable settings for:
+- household size
+- allergies
+- dietary restrictions
+- dislikes
+- cuisines
+- cooking skill
+- cooking-time limit
+- equipment
+- nutrition preferences
+
+Recipes with a confirmed allergen conflict must be excluded. Recipes with incomplete allergen information must be visibly marked “allergen information incomplete” and must never be labeled allergy-safe.
+
+Uncertain, used-up, and unconfirmed inventory items must not qualify a recipe as “Ready to cook.”
+
+Replace substring ingredient matching with normalized ingredient identities and explicit aliases. Do not allow broad substring matches to create false availability.
+
+3. CORRECT SERVING SCALING
+
+Store recipe amounts as numeric quantity plus unit where practical, with a source serving count.
+
+Changing servings must scale:
+- ingredient quantities
+- nutrition per recipe total
+
+Keep cooking times independent unless a recipe explicitly defines a time adjustment. Continue showing nutrition per serving. Add tests using the one-serving Green Egg Toast recipe changed to two servings.
+
+4. IMPLEMENT REAL INVENTORY ACCOUNTING
+
+Replace free-text-only quantity handling with:
+- numeric quantity
+- normalized unit
+- quantity-known flag
+- inventory status
+- confirmed/uncertain state
+
+Planning must create reservations without reducing physical inventory. Calculate reservations across the entire week and prevent known quantities from being allocated twice. Unknown quantities must produce “quantity check needed.”
+
+When marking a meal cooked:
+- identify the exact planned meal
+- ask for servings prepared
+- show proposed ingredient deductions
+- let the user correct actual amounts
+- apply the transaction once
+- make repeat submission idempotent
+- record leftovers with portions and preparation date
+
+Do not mark every matching inventory row completely used.
+
+5. COMPLETE THE MEAL PLANNER AND SHOPPING LIST
+
+Generate a seven-day plan that respects confirmed inventory, quantities, allergies, preferences, equipment, cook-time limits, variety, and use-soon dates.
+
+Support adding, swapping, moving, and removing meals.
+
+Build a real shopping-list screen that:
+- aggregates duplicate ingredients
+- converts compatible units when safe
+- subtracts unreserved inventory
+- flags unknown quantities
+- groups grocery categories
+- supports manual items and checkboxes
+- shares through the iPhone share sheet
+- adds purchased items to inventory only through an explicit confirmation flow
+
+Make the Meal Plan shopping card and “View needs” action navigate to this screen.
+
+6. COMPLETE RECIPES
+
+Replace the three-recipe-only experience with validated recipe generation or a documented recipe provider.
+
+Every recipe must include:
+- source/version identifier
+- required versus optional ingredients
+- servings and scalable amounts
+- prep, cooking, storage, and reheating instructions
+- food-safety temperatures where applicable
+- substitutions checked against allergies
+- suitable alternative cooking methods with complete instructions
+- estimated nutrition with source and missing-data state
+- a documented health-score rubric
+- representative imagery labeled illustrative when generated
+
+Never manufacture precise nutrition values when source data is unavailable.
+
+7. TESTS AND VERIFICATION
+
+Add focused automated tests proving:
+- uncertain and used inventory cannot make a recipe ready
+- allergy conflicts are excluded
+- incomplete allergen data is flagged
+- multiple scan photos do not silently duplicate ingredients
+- serving changes scale quantities and nutrition correctly
+- weekly reservations cannot overallocate known stock
+- swapping meals releases and recalculates reservations
+- cooking deduction is idempotent
+- leftovers do not consume raw ingredients twice
+- shopping quantities aggregate correctly
+- camera denial leaves manual entry usable
+- failed AI requests preserve confirmed inventory
+
+Run the app TypeScript check, API typecheck, focused tests, and production build. Do not report physical camera validation unless it was actually tested on an iPhone. Finish with a checklist separating implemented behavior, automated verification, required credentials, and physical-device verification still outstanding.
