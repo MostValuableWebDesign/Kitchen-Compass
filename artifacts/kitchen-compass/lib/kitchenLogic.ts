@@ -308,9 +308,11 @@ export function recipeMatchesPreferences(
   return true;
 }
 
-export type PlannedRecipeInput = { id: string; recipeId: string; servings: number; leftoverId?: string };
+export type PlannedRecipeInput = { id: string; recipeId: string; recipeVersion?: string; servings: number; leftoverId?: string };
 type ReservationRecipe = {
   id: string;
+  sourceVersion?: string;
+  recipeVersion?: string;
   servings: number;
   ingredients: Array<{ name: string; quantity: number; unit: string; required?: boolean }>;
 };
@@ -410,7 +412,7 @@ export function buildReservations(
   const warnings: string[] = [];
   for (const planned of plan) {
     if (planned.leftoverId) continue;
-    const recipe = recipes.find((item) => item.id === planned.recipeId);
+    const recipe = recipes.find((item) => item.id === planned.recipeId && (!planned.recipeVersion || item.recipeVersion === planned.recipeVersion || item.sourceVersion === planned.recipeVersion));
     if (!recipe) continue;
     for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
       const normalizedName = normalizeIngredientName(ingredient.name);
@@ -485,7 +487,7 @@ export function calculateShoppingNeeds(
   const demand = new Map<string, { name: string; quantity: number; unit: string }>();
   for (const planned of plan) {
     if (planned.leftoverId) continue;
-    const recipe = recipes.find((item) => item.id === planned.recipeId);
+    const recipe = recipes.find((item) => item.id === planned.recipeId && (!planned.recipeVersion || item.recipeVersion === planned.recipeVersion || item.sourceVersion === planned.recipeVersion));
     if (!recipe) continue;
     for (const ingredient of recipe.ingredients.filter((item) => item.required !== false)) {
       const normalizedName = normalizeIngredientName(ingredient.name);

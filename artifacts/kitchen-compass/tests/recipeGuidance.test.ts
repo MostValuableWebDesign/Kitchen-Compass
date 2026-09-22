@@ -24,7 +24,7 @@ test('every curated recipe has ordered, beginner-complete primary steps', () => 
 });
 
 test('step ingredient amounts scale with servings while durations stay unchanged', () => {
-  const recipe = getRecipe('lemon-herb-chicken');
+  const recipe = getRecipe('lemon-herb-chicken')!;
   const step = recipe.steps[2]!;
   const chicken = recipe.ingredients.find((item) => item.name === 'chicken breast')!;
   const scaled = scaledIngredient(recipe, chicken, 4);
@@ -55,7 +55,7 @@ test('each alternative method is independently complete and ordered', () => {
 });
 
 test('recipes without finished-dish images remain explicitly unavailable', () => {
-  assert.equal(getRecipe('green-egg-toast').image, undefined);
-  assert.equal(Boolean(getRecipe('lemon-herb-chicken').image), true);
-  assert.equal(Boolean(getRecipe('tomato-basil-pasta').image), true);
+  assert.equal(getRecipe('green-egg-toast')!.image, undefined);
+  assert.equal(Boolean(getRecipe('lemon-herb-chicken')!.image), true);
+  assert.equal(Boolean(getRecipe('tomato-basil-pasta')!.image), true);
 });

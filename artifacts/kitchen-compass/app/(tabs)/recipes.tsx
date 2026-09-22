@@ -6,10 +6,10 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
-import { recipes } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { buildRecipeDiscoveryRequest, mergeRecipes, mapDiscoveredRecipe, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { getAvailableRecipes } from '@/lib/recipeLookup';
 
 type ResultFilter = 'All' | 'Ready to cook' | 'Almost ready' | 'Check quantities' | 'Quick meals' | 'Use soon' | 'Favorites';
 
@@ -43,7 +43,7 @@ export default function RecipesScreen() {
   const [variation, setVariation] = useState(0);
 
   const discovery = useDiscoverRecipes();
-  const availableRecipes = useMemo(() => mergeRecipes(recipes, savedRecipes), [savedRecipes]);
+  const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
   const inventoryPayload = useMemo(() => ingredients.map((item) => ({
     name: item.name,
     location: item.location,

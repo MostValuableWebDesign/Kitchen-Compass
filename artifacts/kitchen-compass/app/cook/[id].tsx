@@ -4,9 +4,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getRecipe, formatTemperature, scaledIngredient, type RecipeMethod, type RecipeStep } from '@/data/recipes';
+import { formatTemperature, scaledIngredient, type RecipeMethod, type RecipeStep } from '@/data/recipes';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
+import { lookupPlannedRecipe } from '@/lib/recipeLookup';
 
 type TemperatureUnit = 'F' | 'C';
 
@@ -19,10 +20,10 @@ export default function CookScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, plannedMealId } = useLocalSearchParams<{ id: string; plannedMealId?: string }>();
-  const recipe = getRecipe(id);
-  const { plan, preferences, previewCook, completeCook } = useKitchen();
-  const resolvedMealId = plannedMealId ?? plan.find((meal) => meal.recipeId === recipe.id)?.id;
+  const { plan, preferences, savedRecipes, previewCook, completeCook } = useKitchen();
+  const resolvedMealId = plannedMealId ?? plan.find((meal) => meal.recipeId === id)?.id;
   const plannedMeal = plan.find((meal) => meal.id === resolvedMealId);
+  const recipe = lookupPlannedRecipe(plannedMeal, savedRecipes);
   const isLeftoverMeal = Boolean(plannedMeal?.leftoverId);
   const preview = useMemo(() => resolvedMealId ? previewCook(resolvedMealId) : null, [previewCook, resolvedMealId]);
   const [step, setStep] = useState(0);
@@ -34,10 +35,10 @@ export default function CookScreen() {
   const [unit, setUnit] = useState<TemperatureUnit>('F');
   const [keepAwake, setKeepAwake] = useState(false);
   const [methodId, setMethodId] = useState<string | undefined>();
-  const method = recipe.methods?.find((item) => item.id === methodId);
-  const steps = useMemo(() => methodSteps(recipe.steps, method), [method, recipe.steps]);
-  const current = steps[Math.min(step, steps.length - 1)] ?? recipe.steps[0]!;
-  const targetServings = Math.max(1, Number(servings) || preview?.servings || recipe.servings);
+  const method = recipe?.methods?.find((item) => item.id === methodId);
+  const steps = useMemo(() => recipe ? methodSteps(recipe.steps, method) : [], [method, recipe]);
+  const current = steps[Math.min(step, steps.length - 1)] ?? steps[0];
+  const targetServings = Math.max(1, Number(servings) || preview?.servings || recipe?.servings || preferences.servings);
 
   useEffect(() => {
     if (keepAwake) {
@@ -92,6 +93,19 @@ export default function CookScreen() {
 
   const timerLabel = timer > 0 ? `${Math.floor(timer / 60)}:${String(timer % 60).padStart(2, '0')}` : 'Start timer';
   const amountLabel = (amount: number, ingredientUnit: string) => `${amount} ${ingredientUnit}`;
+
+  if (!recipe || !current) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.primary, paddingTop: insets.top + 14, paddingBottom: insets.bottom + 14 }]}>
+        <Pressable accessibilityLabel="Close cooking mode" onPress={() => router.back()}><Feather name="x" size={23} color={colors.primaryForeground} /></Pressable>
+        <View style={styles.unavailable}>
+          <Feather name="alert-circle" size={34} color={colors.accent} />
+          <Text style={[styles.unavailableTitle, { color: colors.primaryForeground }]}>Recipe unavailable</Text>
+          <Text style={[styles.unavailableBody, { color: colors.primaryForeground }]}>This planned recipe version is no longer saved. Your meal plan was preserved and no inventory was changed.</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.primary, paddingTop: insets.top + 14, paddingBottom: insets.bottom + 14 }]}>
@@ -166,6 +180,9 @@ export default function CookScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: 20, justifyContent: 'space-between' },
+  unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 25 },
+  unavailableTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  unavailableBody: { fontSize: 14, lineHeight: 21, textAlign: 'center' },
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   topLabel: { fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 1.5 },
   stepCount: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
