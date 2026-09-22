@@ -129,13 +129,14 @@ router.post("/scan/analyze", async (req, res) => {
         "Only provide a quantity and unit when a package label or clearly countable item supports it; otherwise use null.",
         "Use storageLocation only as a cautious proposal based on the visible item, not as a fact.",
         "When unsure, lower confidence and explain the uncertainty reason.",
+        "Each image has a Photo ID immediately before it. Use that exact ID in sourcePhotoId for every suggestion.",
         `Existing inventory for duplicate awareness: ${JSON.stringify(existingIngredients)}`,
       ].join("\n"),
     },
-    ...photos.map((photo) => ({
-      type: "image_url",
-      image_url: { url: `data:${photo.mimeType};base64,${photo.base64}` },
-    })),
+    ...photos.flatMap((photo) => [
+      { type: "text", text: `Photo ID: ${photo.id}` },
+      { type: "image_url", image_url: { url: `data:${photo.mimeType};base64,${photo.base64}` } },
+    ]),
   ];
 
   const controller = new AbortController();
@@ -150,8 +151,7 @@ router.post("/scan/analyze", async (req, res) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        temperature: 0,
-        max_completion_tokens: 700,
+        max_completion_tokens: 3000,
         response_format: {
           type: "json_schema",
           json_schema: { name: "ingredient_scan", strict: true, schema: responseSchema },

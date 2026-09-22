@@ -308,6 +308,35 @@ const responseSchemaForOpenAi = {
   required: ["recipes"],
 } as const;
 
+type JsonSchemaNode = Record<string, unknown>;
+
+// OpenAI strict structured output requires every object property to be in
+// `required`. Optional values must be represented as required, nullable fields.
+export function makeStrictRecipeSchema(node: JsonSchemaNode): JsonSchemaNode {
+  const result: JsonSchemaNode = { ...node };
+  if (node.type === "object" && node.properties && typeof node.properties === "object") {
+    const properties = node.properties as Record<string, JsonSchemaNode>;
+    const originallyRequired = new Set(Array.isArray(node.required) ? node.required as string[] : []);
+    result.properties = Object.fromEntries(Object.entries(properties).map(([key, value]) => {
+      const nested = makeStrictRecipeSchema(value);
+      return [key, originallyRequired.has(key) ? nested : { anyOf: [nested, { type: "null" }] }];
+    }));
+    result.required = Object.keys(properties);
+    result.additionalProperties = false;
+  }
+  if (node.type === "array" && node.items && typeof node.items === "object") {
+    result.items = makeStrictRecipeSchema(node.items as JsonSchemaNode);
+  }
+  return result;
+}
+
+function removeNullOptionalFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(removeNullOptionalFields);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null)
+    .map(([key, item]) => [key, removeNullOptionalFields(item)]));
+}
+
 router.post("/recipes/discover", async (req, res) => {
   const parsed = requestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -348,9 +377,8 @@ router.post("/recipes/discover", async (req, res) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        temperature: 0.7,
         max_completion_tokens: 5000,
-        response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: responseSchemaForOpenAi } },
+        response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(responseSchemaForOpenAi) } },
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -362,7 +390,7 @@ router.post("/recipes/discover", async (req, res) => {
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const rawContent = payload.choices?.[0]?.message?.content;
     if (!rawContent) throw new Error("Recipe discovery returned no content.");
-    const aiResult = aiResponseSchema.parse(JSON.parse(rawContent));
+    const aiResult = aiResponseSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
     const safeRecipes = aiResult.recipes
       .filter(validateSteps)
       .filter((recipe) => !excludeRecipeVersions.includes(stableVersion(recipe)))
