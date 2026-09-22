@@ -9,7 +9,7 @@ const scanRequestSchema = z.object({
     id: z.string().min(1),
     mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
     base64: z.string().min(1),
-  })).min(1).max(8),
+  })).min(1).max(10),
   existingIngredients: z.array(z.object({
     name: z.string().min(1),
     location: z.enum(["Refrigerator", "Freezer", "Pantry"]),
