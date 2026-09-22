@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { z } from "zod";
+import { calculateHealthScore, calculateRecipeNutrition } from "@workspace/recipe-calculations";
 import { sendScanError, scanLimits } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
@@ -59,13 +60,39 @@ const stepSchema = z.object({
   ingredients: z.array(z.string().max(120)).max(30),
 });
 
-const nutritionSchema = z.object({
+const nutritionAmountsSchema = z.object({
   calories: z.number().min(0),
   protein: z.number().min(0),
   carbs: z.number().min(0),
   fat: z.number().min(0),
   fiber: z.number().min(0),
   sodium: z.number().min(0),
+  addedSugar: z.number().min(0),
+  saturatedFat: z.number().min(0),
+});
+
+const nutritionSchema = z.object({
+  status: z.enum(["calculated", "insufficient-information"]),
+  perServing: nutritionAmountsSchema.optional(),
+  total: nutritionAmountsSchema.optional(),
+  coveredIngredients: z.array(z.string()),
+  uncoveredIngredients: z.array(z.string()),
+  ingredientCoverage: z.number().min(0).max(1),
+  vegetableServingsPerServing: z.number().min(0).optional(),
+  source: z.object({ id: z.string(), label: z.string() }),
+});
+
+const healthScoreSchema = z.object({
+  status: z.enum(["calculated", "insufficient-information"]),
+  score: z.number().int().min(0).max(100).optional(),
+  note: z.string(),
+  factors: z.array(z.object({
+    key: z.enum(["vegetables", "fiber", "protein", "sodium", "added-sugar", "saturated-fat"]),
+    label: z.string(),
+    direction: z.enum(["positive", "negative", "neutral"]),
+    points: z.number(),
+    detail: z.string(),
+  })),
 });
 
 const substitutionSchema = z.object({
@@ -84,12 +111,7 @@ const aiRecipeSchema = z.object({
   cookMinutes: z.number().int().min(0).max(360),
   difficulty: z.enum(["Easy", "Moderate", "Hard"]),
   equipment: z.array(z.string().min(1).max(80)).min(1).max(20),
-  healthScore: z.number().int().min(0).max(100),
-  scoreNote: z.string().min(1).max(300),
   ingredients: z.array(ingredientSchema).min(1).max(40),
-  nutrition: nutritionSchema,
-  nutritionProvenance: z.enum(["ai-estimate", "source-backed"]),
-  nutritionSource: z.string().min(1).max(300),
   steps: z.array(stepSchema).min(1).max(30),
   allergens: z.array(z.string().min(1).max(80)).max(30),
   allergenInfo: z.enum(["complete", "incomplete"]),
@@ -108,6 +130,8 @@ const aiResponseSchema = z.object({
 const recipeSchema = aiRecipeSchema.extend({
   id: z.string(),
   recipeVersion: z.string(),
+  healthScore: healthScoreSchema,
+  nutrition: nutritionSchema,
   substitutions: z.array(substitutionSchema.extend({ validated: z.literal(true) })),
 });
 
@@ -143,11 +167,7 @@ function canonicalRecipe(recipe: z.infer<typeof aiRecipeSchema>) {
     cookMinutes: recipe.cookMinutes,
     difficulty: recipe.difficulty,
     equipment: [...recipe.equipment].map((item) => item.trim()).sort(),
-    healthScore: recipe.healthScore,
     ingredients: recipe.ingredients.map((item) => ({ ...item, name: item.name.trim(), unit: item.unit.trim() })),
-    nutrition: recipe.nutrition,
-    nutritionProvenance: recipe.nutritionProvenance,
-    nutritionSource: recipe.nutritionSource.trim(),
     steps: recipe.steps,
     allergens: [...recipe.allergens].map(normalize).sort(),
     storageInstructions: recipe.storageInstructions.trim(),
@@ -189,7 +209,6 @@ function allergenIdentity(value: string) {
 }
 
 function violatesPreferences(recipe: z.infer<typeof aiRecipeSchema>, preferences: z.infer<typeof preferencesSchema>, filters: z.infer<typeof filtersSchema>) {
-  if (recipe.nutritionProvenance !== "ai-estimate") return "nutrition provenance is not verifiable";
   const requestedAllergies = preferences.allergies.map(allergenIdentity);
   const recipeAllergens = recipe.allergens.map(allergenIdentity);
   if (recipe.allergenInfo !== "complete") return "allergen information is incomplete";
@@ -208,7 +227,8 @@ function violatesPreferences(recipe: z.infer<typeof aiRecipeSchema>, preferences
   if (filters.maxMinutes !== undefined && recipe.prepMinutes + recipe.cookMinutes > filters.maxMinutes) return "it exceeds the selected time filter";
   if (filters.mealType !== "Any" && recipe.mealType !== filters.mealType) return "it does not match the selected meal type";
   if (filters.cuisine && normalize(recipe.cuisine) !== normalize(filters.cuisine)) return "it does not match the selected cuisine";
-  if (filters.minHealthScore !== undefined && recipe.healthScore < filters.minHealthScore) return "it is below the selected health score";
+  const healthScore = calculateHealthScore(calculateRecipeNutrition(recipe.ingredients, recipe.servings));
+  if (filters.minHealthScore !== undefined && (healthScore.score === undefined || healthScore.score < filters.minHealthScore)) return "it is below the selected health score or has insufficient score information";
   const equipment = new Set([...preferences.equipment, ...(filters.equipment ?? [])].map(normalize));
   if (recipe.equipment.some((item) => !equipment.has(normalize(item)))) return "it requires equipment that is not available";
   if (preferences.skill === "Beginner" && recipe.difficulty !== "Easy") return "it is above the saved skill level";
@@ -222,6 +242,8 @@ function validateSteps(recipe: z.infer<typeof aiRecipeSchema>) {
 
 function makeResponseRecipe(recipe: z.infer<typeof aiRecipeSchema>, preferences: z.infer<typeof preferencesSchema>, filters: z.infer<typeof filtersSchema>) {
   const version = stableVersion(recipe);
+  const nutrition = calculateRecipeNutrition(recipe.ingredients, recipe.servings);
+  const healthScore = calculateHealthScore(nutrition);
   const substitutions = recipe.substitutions
     .filter((substitution) => !hasIngredient(recipe, [substitution.to]))
     .filter((substitution) => !violatesPreferences({
@@ -234,6 +256,8 @@ function makeResponseRecipe(recipe: z.infer<typeof aiRecipeSchema>, preferences:
     ...recipe,
     id: `discovered-${version}`,
     recipeVersion: version,
+    nutrition,
+    healthScore,
     substitutions,
   };
 }
@@ -259,12 +283,7 @@ const responseSchemaForOpenAi = {
           cookMinutes: { type: "integer", minimum: 0 },
           difficulty: { type: "string", enum: ["Easy", "Moderate", "Hard"] },
           equipment: { type: "array", items: { type: "string" } },
-          healthScore: { type: "integer", minimum: 0, maximum: 100 },
-          scoreNote: { type: "string" },
           ingredients: { type: "array", items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, quantity: { type: "number", exclusiveMinimum: 0 }, unit: { type: "string" }, required: { type: "boolean" } }, required: ["name", "quantity", "unit", "required"] } },
-          nutrition: { type: "object", additionalProperties: false, properties: { calories: { type: "number", minimum: 0 }, protein: { type: "number", minimum: 0 }, carbs: { type: "number", minimum: 0 }, fat: { type: "number", minimum: 0 }, fiber: { type: "number", minimum: 0 }, sodium: { type: "number", minimum: 0 } }, required: ["calories", "protein", "carbs", "fat", "fiber", "sodium"] },
-          nutritionProvenance: { type: "string", enum: ["ai-estimate", "source-backed"] },
-          nutritionSource: { type: "string" },
           steps: { type: "array", items: { type: "object", additionalProperties: false, properties: { order: { type: "integer", minimum: 1 }, title: { type: "string" }, body: { type: "string" }, duration: { type: "integer", minimum: 0 }, temperature: { type: "string" }, ingredients: { type: "array", items: { type: "string" } } }, required: ["order", "title", "body", "ingredients"] } },
           allergens: { type: "array", items: { type: "string" } },
           allergenInfo: { type: "string", enum: ["complete", "incomplete"] },
@@ -275,7 +294,7 @@ const responseSchemaForOpenAi = {
           nutritionTags: { type: "array", items: { type: "string" } },
           substitutions: { type: "array", items: { type: "object", additionalProperties: false, properties: { from: { type: "string" }, to: { type: "string" }, reason: { type: "string" } }, required: ["from", "to", "reason"] } },
         },
-        required: ["title", "description", "cuisine", "mealType", "servings", "prepMinutes", "cookMinutes", "difficulty", "equipment", "healthScore", "scoreNote", "ingredients", "nutrition", "nutritionProvenance", "nutritionSource", "steps", "allergens", "allergenInfo", "storageInstructions", "reheatingInstructions", "dietaryTags", "dislikeTags", "nutritionTags", "substitutions"],
+         required: ["title", "description", "cuisine", "mealType", "servings", "prepMinutes", "cookMinutes", "difficulty", "equipment", "ingredients", "steps", "allergens", "allergenInfo", "storageInstructions", "reheatingInstructions", "dietaryTags", "dislikeTags", "nutritionTags", "substitutions"],
       },
     },
   },
@@ -304,7 +323,7 @@ router.post("/recipes/discover", async (req, res) => {
     "All steps must be ordered from 1 with no gaps.",
     "Allergen information must be complete. List every allergen known for every ingredient. If uncertain, do not return the recipe.",
     "Only include substitutions that are safe for the supplied allergies, restrictions, dislikes, and equipment. Do not make medical claims.",
-    "Nutrition is an estimate unless you have a real source. Set nutritionProvenance to ai-estimate and nutritionSource to a clear statement of the estimate.",
+     "Do not provide health scores or nutrition values. The server calculates both from ingredient quantities and its bundled reference table. Use explicit ingredient names, numeric quantities, and units; do not invent missing quantities.",
     `Variation seed: ${variationSeed}`,
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
     `Confirmed inventory: ${JSON.stringify(usableInventory)}`,

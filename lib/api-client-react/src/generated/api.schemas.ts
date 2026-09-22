@@ -232,7 +232,15 @@ export interface RecipeStep {
   ingredients: string[];
 }
 
-export interface RecipeNutrition {
+export type RecipeNutritionStatus = typeof RecipeNutritionStatus[keyof typeof RecipeNutritionStatus];
+
+
+export const RecipeNutritionStatus = {
+  calculated: 'calculated',
+  'insufficient-information': 'insufficient-information',
+} as const;
+
+export interface RecipeNutritionPerServing {
   /** @minimum 0 */
   calories: number;
   /** @minimum 0 */
@@ -245,6 +253,98 @@ export interface RecipeNutrition {
   fiber: number;
   /** @minimum 0 */
   sodium: number;
+  /** @minimum 0 */
+  addedSugar: number;
+  /** @minimum 0 */
+  saturatedFat: number;
+}
+
+export interface RecipeNutritionTotal {
+  /** @minimum 0 */
+  calories: number;
+  /** @minimum 0 */
+  protein: number;
+  /** @minimum 0 */
+  carbs: number;
+  /** @minimum 0 */
+  fat: number;
+  /** @minimum 0 */
+  fiber: number;
+  /** @minimum 0 */
+  sodium: number;
+  /** @minimum 0 */
+  addedSugar: number;
+  /** @minimum 0 */
+  saturatedFat: number;
+}
+
+export interface RecipeNutritionSource {
+  id: string;
+  label: string;
+}
+
+export interface RecipeNutrition {
+  status: RecipeNutritionStatus;
+  perServing?: RecipeNutritionPerServing;
+  total?: RecipeNutritionTotal;
+  coveredIngredients: string[];
+  uncoveredIngredients: string[];
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  ingredientCoverage: number;
+  /** @minimum 0 */
+  vegetableServingsPerServing?: number;
+  source: RecipeNutritionSource;
+}
+
+export type RecipeScoreFactorKey = typeof RecipeScoreFactorKey[keyof typeof RecipeScoreFactorKey];
+
+
+export const RecipeScoreFactorKey = {
+  vegetables: 'vegetables',
+  fiber: 'fiber',
+  protein: 'protein',
+  sodium: 'sodium',
+  'added-sugar': 'added-sugar',
+  'saturated-fat': 'saturated-fat',
+} as const;
+
+export type RecipeScoreFactorDirection = typeof RecipeScoreFactorDirection[keyof typeof RecipeScoreFactorDirection];
+
+
+export const RecipeScoreFactorDirection = {
+  positive: 'positive',
+  negative: 'negative',
+  neutral: 'neutral',
+} as const;
+
+export interface RecipeScoreFactor {
+  key: RecipeScoreFactorKey;
+  label: string;
+  direction: RecipeScoreFactorDirection;
+  points: number;
+  detail: string;
+}
+
+export type RecipeHealthScoreStatus = typeof RecipeHealthScoreStatus[keyof typeof RecipeHealthScoreStatus];
+
+
+export const RecipeHealthScoreStatus = {
+  calculated: 'calculated',
+  'insufficient-information': 'insufficient-information',
+} as const;
+
+export interface RecipeHealthScore {
+  status: RecipeHealthScoreStatus;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  score?: number;
+  note: string;
+  factors: RecipeScoreFactor[];
 }
 
 export interface RecipeSubstitution {
@@ -275,14 +375,6 @@ export const DiscoveredRecipeDifficulty = {
   Hard: 'Hard',
 } as const;
 
-export type DiscoveredRecipeNutritionProvenance = typeof DiscoveredRecipeNutritionProvenance[keyof typeof DiscoveredRecipeNutritionProvenance];
-
-
-export const DiscoveredRecipeNutritionProvenance = {
-  'ai-estimate': 'ai-estimate',
-  'source-backed': 'source-backed',
-} as const;
-
 export type DiscoveredRecipeAllergenInfo = typeof DiscoveredRecipeAllergenInfo[keyof typeof DiscoveredRecipeAllergenInfo];
 
 
@@ -306,18 +398,10 @@ export interface DiscoveredRecipe {
   cookMinutes: number;
   difficulty: DiscoveredRecipeDifficulty;
   equipment: string[];
-  /**
-     * @minimum 0
-     * @maximum 100
-     */
-  healthScore: number;
-  scoreNote: string;
+  healthScore: RecipeHealthScore;
   /** @minItems 1 */
   ingredients: RecipeIngredient[];
   nutrition: RecipeNutrition;
-  nutritionProvenance: DiscoveredRecipeNutritionProvenance;
-  /** @minLength 1 */
-  nutritionSource: string;
   /** @minItems 1 */
   steps: RecipeStep[];
   allergens: string[];

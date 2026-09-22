@@ -88,7 +88,7 @@ export default function RecipesScreen() {
       && (maxMinutes === undefined || totalMinutes <= maxMinutes)
       && (!equipment || recipe.equipment.includes(equipment))
       && (!dietaryPreference || recipe.dietaryTags?.map((tag) => tag.toLowerCase()).includes(dietaryPreference.toLowerCase()) || recipeMatchesPreferences(recipe, { ...preferences, dietaryRestrictions: [dietaryPreference] }))
-      && (minHealthScore === undefined || recipe.score >= minHealthScore);
+       && (minHealthScore === undefined || (recipe.healthScore.score !== undefined && recipe.healthScore.score >= minHealthScore));
     const matchesResultFilter = resultFilter === 'All'
       || (resultFilter === 'Quick meals' && totalMinutes <= 30)
       || (resultFilter === 'Use soon' && usesSoon)

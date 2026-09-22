@@ -364,25 +364,88 @@ components:
     RecipeNutrition:
       type: object
       properties:
-        calories:
+        status:
+          type: string
+          enum: [calculated, insufficient-information]
+        perServing:
+          $ref: "#/components/schemas/RecipeNutritionPerServing"
+        total:
+          $ref: "#/components/schemas/RecipeNutritionTotal"
+        coveredIngredients:
+          type: array
+          items: { type: string }
+        uncoveredIngredients:
+          type: array
+          items: { type: string }
+        ingredientCoverage:
           type: number
           minimum: 0
-        protein:
+          maximum: 1
+        vegetableServingsPerServing:
           type: number
           minimum: 0
-        carbs:
-          type: number
+        source:
+          $ref: "#/components/schemas/RecipeNutritionSource"
+      required: [status, coveredIngredients, uncoveredIngredients, ingredientCoverage, source]
+    RecipeNutritionPerServing:
+      type: object
+      properties:
+        calories: { type: number, minimum: 0 }
+        protein: { type: number, minimum: 0 }
+        carbs: { type: number, minimum: 0 }
+        fat: { type: number, minimum: 0 }
+        fiber: { type: number, minimum: 0 }
+        sodium: { type: number, minimum: 0 }
+        addedSugar: { type: number, minimum: 0 }
+        saturatedFat: { type: number, minimum: 0 }
+      required: [calories, protein, carbs, fat, fiber, sodium, addedSugar, saturatedFat]
+    RecipeNutritionTotal:
+      type: object
+      properties:
+        calories: { type: number, minimum: 0 }
+        protein: { type: number, minimum: 0 }
+        carbs: { type: number, minimum: 0 }
+        fat: { type: number, minimum: 0 }
+        fiber: { type: number, minimum: 0 }
+        sodium: { type: number, minimum: 0 }
+        addedSugar: { type: number, minimum: 0 }
+        saturatedFat: { type: number, minimum: 0 }
+      required: [calories, protein, carbs, fat, fiber, sodium, addedSugar, saturatedFat]
+    RecipeNutritionSource:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+      required: [id, label]
+    RecipeScoreFactor:
+      type: object
+      properties:
+        key:
+          type: string
+          enum: [vegetables, fiber, protein, sodium, added-sugar, saturated-fat]
+        label: { type: string }
+        direction:
+          type: string
+          enum: [positive, negative, neutral]
+        points: { type: number }
+        detail: { type: string }
+      required: [key, label, direction, points, detail]
+    RecipeHealthScore:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [calculated, insufficient-information]
+        score:
+          type: integer
           minimum: 0
-        fat:
-          type: number
-          minimum: 0
-        fiber:
-          type: number
-          minimum: 0
-        sodium:
-          type: number
-          minimum: 0
-      required: [calories, protein, carbs, fat, fiber, sodium]
+          maximum: 100
+        note: { type: string }
+        factors:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipeScoreFactor"
+      required: [status, note, factors]
     RecipeSubstitution:
       type: object
       properties:
@@ -430,11 +493,7 @@ components:
           type: array
           items: { type: string }
         healthScore:
-          type: integer
-          minimum: 0
-          maximum: 100
-        scoreNote:
-          type: string
+          $ref: "#/components/schemas/RecipeHealthScore"
         ingredients:
           type: array
           minItems: 1
@@ -442,12 +501,6 @@ components:
             $ref: "#/components/schemas/RecipeIngredient"
         nutrition:
           $ref: "#/components/schemas/RecipeNutrition"
-        nutritionProvenance:
-          type: string
-          enum: [ai-estimate, source-backed]
-        nutritionSource:
-          type: string
-          minLength: 1
         steps:
           type: array
           minItems: 1
@@ -489,11 +542,8 @@ components:
         - difficulty
         - equipment
         - healthScore
-        - scoreNote
         - ingredients
         - nutrition
-        - nutritionProvenance
-        - nutritionSource
         - steps
         - allergens
         - allergenInfo

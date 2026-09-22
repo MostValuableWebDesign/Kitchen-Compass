@@ -133,26 +133,50 @@ export const discoverRecipesResponseRecipesItemPrepMinutesMin = 0;
 
 export const discoverRecipesResponseRecipesItemCookMinutesMin = 0;
 
-export const discoverRecipesResponseRecipesItemHealthScoreMin = 0;
-export const discoverRecipesResponseRecipesItemHealthScoreMax = 100;
+export const discoverRecipesResponseRecipesItemHealthScoreScoreMin = 0;
+export const discoverRecipesResponseRecipesItemHealthScoreScoreMax = 100;
 
 
 export const discoverRecipesResponseRecipesItemIngredientsItemQuantityExclusiveMin = 0;
 
 
 
-export const discoverRecipesResponseRecipesItemNutritionCaloriesMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingCaloriesMin = 0;
 
-export const discoverRecipesResponseRecipesItemNutritionProteinMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingProteinMin = 0;
 
-export const discoverRecipesResponseRecipesItemNutritionCarbsMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingCarbsMin = 0;
 
-export const discoverRecipesResponseRecipesItemNutritionFatMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingFatMin = 0;
 
-export const discoverRecipesResponseRecipesItemNutritionFiberMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingFiberMin = 0;
 
-export const discoverRecipesResponseRecipesItemNutritionSodiumMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionPerServingSodiumMin = 0;
 
+export const discoverRecipesResponseRecipesItemNutritionPerServingAddedSugarMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionPerServingSaturatedFatMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalCaloriesMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalProteinMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalCarbsMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalFatMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalFiberMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalSodiumMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalAddedSugarMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionTotalSaturatedFatMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionIngredientCoverageMin = 0;
+export const discoverRecipesResponseRecipesItemNutritionIngredientCoverageMax = 1;
+
+export const discoverRecipesResponseRecipesItemNutritionVegetableServingsPerServingMin = 0;
 
 
 
@@ -178,8 +202,18 @@ export const DiscoverRecipesResponse = zod.object({
   "cookMinutes": zod.number().int().min(discoverRecipesResponseRecipesItemCookMinutesMin),
   "difficulty": zod.enum(['Easy', 'Moderate', 'Hard']),
   "equipment": zod.array(zod.string()),
-  "healthScore": zod.number().int().min(discoverRecipesResponseRecipesItemHealthScoreMin).max(discoverRecipesResponseRecipesItemHealthScoreMax),
-  "scoreNote": zod.string(),
+  "healthScore": zod.object({
+  "status": zod.enum(['calculated', 'insufficient-information']),
+  "score": zod.number().int().min(discoverRecipesResponseRecipesItemHealthScoreScoreMin).max(discoverRecipesResponseRecipesItemHealthScoreScoreMax).optional(),
+  "note": zod.string(),
+  "factors": zod.array(zod.object({
+  "key": zod.enum(['vegetables', 'fiber', 'protein', 'sodium', 'added-sugar', 'saturated-fat']),
+  "label": zod.string(),
+  "direction": zod.enum(['positive', 'negative', 'neutral']),
+  "points": zod.number(),
+  "detail": zod.string()
+}))
+}),
   "ingredients": zod.array(zod.object({
   "name": zod.string().min(1),
   "quantity": zod.number().gt(discoverRecipesResponseRecipesItemIngredientsItemQuantityExclusiveMin),
@@ -187,15 +221,36 @@ export const DiscoverRecipesResponse = zod.object({
   "required": zod.boolean()
 })).min(1),
   "nutrition": zod.object({
-  "calories": zod.number().min(discoverRecipesResponseRecipesItemNutritionCaloriesMin),
-  "protein": zod.number().min(discoverRecipesResponseRecipesItemNutritionProteinMin),
-  "carbs": zod.number().min(discoverRecipesResponseRecipesItemNutritionCarbsMin),
-  "fat": zod.number().min(discoverRecipesResponseRecipesItemNutritionFatMin),
-  "fiber": zod.number().min(discoverRecipesResponseRecipesItemNutritionFiberMin),
-  "sodium": zod.number().min(discoverRecipesResponseRecipesItemNutritionSodiumMin)
+  "status": zod.enum(['calculated', 'insufficient-information']),
+  "perServing": zod.object({
+  "calories": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingCaloriesMin),
+  "protein": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingProteinMin),
+  "carbs": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingCarbsMin),
+  "fat": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingFatMin),
+  "fiber": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingFiberMin),
+  "sodium": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingSodiumMin),
+  "addedSugar": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingAddedSugarMin),
+  "saturatedFat": zod.number().min(discoverRecipesResponseRecipesItemNutritionPerServingSaturatedFatMin)
+}).optional(),
+  "total": zod.object({
+  "calories": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalCaloriesMin),
+  "protein": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalProteinMin),
+  "carbs": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalCarbsMin),
+  "fat": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalFatMin),
+  "fiber": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalFiberMin),
+  "sodium": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalSodiumMin),
+  "addedSugar": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalAddedSugarMin),
+  "saturatedFat": zod.number().min(discoverRecipesResponseRecipesItemNutritionTotalSaturatedFatMin)
+}).optional(),
+  "coveredIngredients": zod.array(zod.string()),
+  "uncoveredIngredients": zod.array(zod.string()),
+  "ingredientCoverage": zod.number().min(discoverRecipesResponseRecipesItemNutritionIngredientCoverageMin).max(discoverRecipesResponseRecipesItemNutritionIngredientCoverageMax),
+  "vegetableServingsPerServing": zod.number().min(discoverRecipesResponseRecipesItemNutritionVegetableServingsPerServingMin).optional(),
+  "source": zod.object({
+  "id": zod.string(),
+  "label": zod.string()
+})
 }),
-  "nutritionProvenance": zod.enum(['ai-estimate', 'source-backed']),
-  "nutritionSource": zod.string().min(1),
   "steps": zod.array(zod.object({
   "order": zod.number().int().min(1),
   "title": zod.string().min(1),

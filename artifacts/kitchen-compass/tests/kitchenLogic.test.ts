@@ -17,6 +17,7 @@ import {
   scaleQuantity,
 } from '../lib/kitchenLogic';
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
+import { calculateHealthScore, calculateRecipeNutrition } from '@workspace/recipe-calculations';
 
 const greenEggToast = {
   id: 'green-egg-toast',
@@ -94,6 +95,50 @@ test('one-serving Green Egg Toast scales to two servings', () => {
   assert.equal(scaleQuantity(2, 1, 2), 4);
   assert.equal(scaleQuantity(0.5, 1, 2), 1);
   assert.deepEqual(scaleNutrition({ calories: 340, protein: 17 }, 1, 2), { calories: 680, protein: 34 });
+});
+
+test('nutrition is calculated from ingredient quantities and exposes per-serving values', () => {
+  const ingredients = [
+    { name: 'eggs', quantity: 2, unit: 'egg' },
+    { name: 'avocado', quantity: 0.5, unit: 'fruit' },
+    { name: 'bread', quantity: 1, unit: 'slice' },
+  ];
+  const nutrition = calculateRecipeNutrition(ingredients, 1);
+  const twoServings = calculateRecipeNutrition(ingredients, 2);
+  assert.equal(nutrition.status, 'calculated');
+  assert.equal(nutrition.ingredientCoverage, 1);
+  assert.equal(nutrition.perServing?.calories, 384);
+  assert.equal(nutrition.total?.addedSugar, 1.4);
+  assert.equal(nutrition.source.id, 'bundled-ingredient-reference-v1');
+  assert.equal(twoServings.total?.calories, nutrition.total?.calories);
+  assert.equal(twoServings.perServing?.calories, 192);
+});
+
+test('unsupported or missing reference data is insufficient, not a guessed number', () => {
+  const nutrition = calculateRecipeNutrition([
+    { name: 'spinach', quantity: 1, unit: 'cup' },
+  ], 2);
+  assert.equal(nutrition.status, 'insufficient-information');
+  assert.equal(nutrition.perServing, undefined);
+  assert.deepEqual(nutrition.uncoveredIngredients, ['spinach']);
+  assert.equal(calculateHealthScore(nutrition).status, 'insufficient-information');
+});
+
+test('health score uses all six documented factors and keeps allergy safety separate', () => {
+  const nutrition = calculateRecipeNutrition([
+    { name: 'eggs', quantity: 2, unit: 'egg' },
+    { name: 'broccoli', quantity: 2, unit: 'cup' },
+    { name: 'olive oil', quantity: 1, unit: 'tbsp' },
+  ], 1);
+  const score = calculateHealthScore(nutrition);
+  assert.equal(score.status, 'calculated');
+  assert.deepEqual(score.factors.map((factor) => factor.key), ['vegetables', 'fiber', 'protein', 'sodium', 'added-sugar', 'saturated-fat']);
+  assert.equal(score.factors.some((factor) => factor.direction === 'positive'), true);
+  assert.equal(score.factors.some((factor) => factor.direction === 'negative'), true);
+  assert.equal(score.score !== undefined, true);
+  // Allergy conflict is evaluated by recipeReadiness, not by the general-health rubric.
+  assert.equal(recipeReadiness({ ...eggsOnlyRecipe, allergens: ['egg'] }, [], ['egg']).allergenConflict, true);
+  assert.equal(calculateHealthScore(nutrition).score, score.score);
 });
 
 test('weekly demand aggregates meals and does not allocate unknown stock as known stock', () => {

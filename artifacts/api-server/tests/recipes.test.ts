@@ -51,15 +51,10 @@ function validModelRecipe() {
     cookMinutes: 7,
     difficulty: "Easy",
     equipment: ["Stovetop"],
-    healthScore: 82,
-    scoreNote: "Protein-forward with vegetables.",
     ingredients: [
       { name: "eggs", quantity: 2, unit: "egg", required: true },
       { name: "spinach", quantity: 1, unit: "cup", required: false },
     ],
-    nutrition: { calories: 300, protein: 18, carbs: 12, fat: 18, fiber: 4, sodium: 250 },
-    nutritionProvenance: "ai-estimate",
-    nutritionSource: "AI estimate from ingredient averages; verify package labels.",
     steps: [{ order: 1, title: "Cook", body: "Cook the eggs until set.", ingredients: ["eggs"] }],
     allergens: ["egg"],
     allergenInfo: "complete",
@@ -102,13 +97,16 @@ test("recipe discovery returns only strict, versioned, server-validated recipes"
       body: JSON.stringify(requestBody()),
     });
     assert.equal(response.status, 200);
-    const payload = await response.json() as { source: string; recipes: Array<{ id: string; recipeVersion: string; allergenInfo: string; nutritionProvenance: string; substitutions: Array<{ validated: boolean }> }> };
+    const payload = await response.json() as { source: string; recipes: Array<{ id: string; recipeVersion: string; allergenInfo: string; healthScore: { status: string }; nutrition: { status: string; uncoveredIngredients: string[]; source: { id: string } }; substitutions: Array<{ validated: boolean }> }> };
     assert.equal(payload.source, "server-ai");
     assert.equal(payload.recipes.length, 1);
     assert.match(payload.recipes[0]!.id, /^discovered-/);
     assert.match(payload.recipes[0]!.recipeVersion, /^[a-f0-9]{24}$/);
     assert.equal(payload.recipes[0]!.allergenInfo, "complete");
-    assert.equal(payload.recipes[0]!.nutritionProvenance, "ai-estimate");
+    assert.equal(payload.recipes[0]!.healthScore.status, "insufficient-information");
+    assert.equal(payload.recipes[0]!.nutrition.status, "insufficient-information");
+    assert.deepEqual(payload.recipes[0]!.nutrition.uncoveredIngredients, ["spinach"]);
+    assert.equal(payload.recipes[0]!.nutrition.source.id, "bundled-ingredient-reference-v1");
     assert.equal(payload.recipes[0]!.substitutions[0]!.validated, true);
   } finally {
     globalThis.fetch = original;

@@ -1,4 +1,5 @@
 import type { DiscoveredRecipe, RecipeDiscoveryFilters, RecipeDiscoveryInventory, RecipeDiscoveryPreferences } from '@workspace/api-client-react';
+import type { HealthScoreCalculation, NutritionCalculation } from '@workspace/recipe-calculations';
 import type { Recipe } from '@/data/recipes';
 
 export type RecipeFilterState = {
@@ -25,22 +26,19 @@ export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
     prep: recipe.prepMinutes,
     cook: recipe.cookMinutes,
     difficulty: recipe.difficulty,
-    equipment: recipe.equipment,
-    score: recipe.healthScore,
-    scoreNote: recipe.scoreNote,
+    equipment: recipe.equipment ?? [],
+    healthScore: recipe.healthScore as HealthScoreCalculation,
     ingredients: recipe.ingredients.map((ingredient) => ({
       ...ingredient,
       amount: `${ingredient.quantity} ${ingredient.unit}`,
     })),
-    nutrition: recipe.nutrition,
+    nutrition: recipe.nutrition as NutritionCalculation,
     steps: recipe.steps,
     allergens: recipe.allergens,
     allergenInfo: recipe.allergenInfo,
     sourceVersion: recipe.recipeVersion,
     recipeVersion: recipe.recipeVersion,
     source: 'server-ai',
-    nutritionProvenance: recipe.nutritionProvenance,
-    nutritionSource: recipe.nutritionSource,
     storageInstructions: recipe.storageInstructions,
     reheatingInstructions: recipe.reheatingInstructions,
     dietaryTags: recipe.dietaryTags,
@@ -66,10 +64,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function isCacheableRecipe(value: unknown): value is Recipe {
   if (!isRecord(value)) return false;
   const nutritionRecord = isRecord(value.nutrition) ? value.nutrition : null;
-  const nutrition = nutritionRecord !== null && ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sodium'].every((key) => {
-    const amount = nutritionRecord[key];
-    return typeof amount === 'number' && Number.isFinite(amount);
-  });
+  const nutrition = nutritionRecord !== null
+    && (nutritionRecord.status === 'calculated' || nutritionRecord.status === 'insufficient-information')
+    && Array.isArray(nutritionRecord.coveredIngredients)
+    && Array.isArray(nutritionRecord.uncoveredIngredients)
+    && typeof nutritionRecord.ingredientCoverage === 'number'
+    && isRecord(nutritionRecord.source)
+    && typeof nutritionRecord.source.id === 'string'
+    && typeof nutritionRecord.source.label === 'string';
   const ingredients = Array.isArray(value.ingredients) && value.ingredients.length > 0 && value.ingredients.every((item) =>
     isRecord(item)
     && typeof item.name === 'string'
@@ -92,7 +94,9 @@ export function isCacheableRecipe(value: unknown): value is Recipe {
     && Array.isArray(value.allergens)
     && value.allergenInfo === 'complete'
     && nutrition
-    && typeof value.nutritionSource === 'string'
+    && isRecord(value.healthScore)
+    && (value.healthScore.status === 'calculated' || value.healthScore.status === 'insufficient-information')
+    && nutrition
     && (value.source === 'server-ai' || value.source === 'curated' || value.source === undefined);
 }
 
