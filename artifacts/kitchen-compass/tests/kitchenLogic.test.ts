@@ -8,8 +8,12 @@ import {
   ingredientIdentitiesMatch,
   ingredientRowsMatch,
   confirmedDateStatus,
+  consumeLeftover,
+  movePlannedMeals,
   normalizeConfirmedDate,
   parseQuantityText,
+  replacePlanSlots,
+  rankPlanRecipes,
   recipeMatchesPreferences,
   recipeAvailabilityLabel,
   recipeReadiness,
@@ -196,6 +200,68 @@ test('changing a planned meal releases its old reservation and recalculates need
   assert.equal(recipeReadiness(eggsOnlyRecipe, inventory, [], 1, swappedReservations, 'monday-dinner').ready, true);
 });
 
+test('moving a meal swaps occupied slots without losing either choice', () => {
+  const plan = [
+    { id: 'monday-dinner', day: 'Monday', meal: 'Dinner' as const, recipeId: 'eggs-only', servings: 1 },
+    { id: 'tuesday-lunch', day: 'Tuesday', meal: 'Lunch' as const, recipeId: 'green-egg-toast', servings: 2 },
+  ];
+  const moved = movePlannedMeals(plan, { day: 'Monday', meal: 'Dinner' }, { day: 'Tuesday', meal: 'Lunch' });
+  assert.equal(moved.find((item) => item.id === 'monday-dinner')?.day, 'Tuesday');
+  assert.equal(moved.find((item) => item.id === 'monday-dinner')?.meal, 'Lunch');
+  assert.equal(moved.find((item) => item.id === 'tuesday-lunch')?.day, 'Monday');
+  assert.equal(moved.find((item) => item.id === 'tuesday-lunch')?.meal, 'Dinner');
+});
+
+test('partial regeneration replaces selected slots and preserves other saved choices', () => {
+  const plan = [
+    { id: 'monday-breakfast', day: 'Monday', meal: 'Breakfast' as const, recipeId: 'eggs-only', servings: 1 },
+    { id: 'tuesday-dinner', day: 'Tuesday', meal: 'Dinner' as const, recipeId: 'green-egg-toast', servings: 2 },
+  ];
+  const next = replacePlanSlots(
+    plan,
+    [{ day: 'Monday', meal: 'Breakfast' }],
+    [{ ...plan[0], recipeId: 'green-egg-toast' }],
+  );
+  assert.equal(next.find((item) => item.day === 'Monday' && item.meal === 'Breakfast')?.recipeId, 'green-egg-toast');
+  assert.equal(next.find((item) => item.day === 'Tuesday' && item.meal === 'Dinner')?.recipeId, 'green-egg-toast');
+  assert.equal(next.length, 2);
+});
+
+test('recipe ranking prefers safe, available, soon-to-expire kitchen ingredients', () => {
+  const ranked = rankPlanRecipes(
+    [
+      {
+        id: 'ready-soon',
+        meal: 'Dinner',
+        servings: 1,
+        cook: 20,
+        equipment: ['Stovetop'],
+        cuisine: 'Any',
+        difficulty: 'Easy',
+        allergens: [],
+        allergenInfo: 'complete' as const,
+        ingredients: [{ name: 'eggs', quantity: 1, unit: 'egg', required: true }],
+      },
+      {
+        id: 'missing',
+        meal: 'Dinner',
+        servings: 1,
+        cook: 20,
+        equipment: ['Stovetop'],
+        cuisine: 'Any',
+        difficulty: 'Easy',
+        allergens: [],
+        allergenInfo: 'complete' as const,
+        ingredients: [{ name: 'chicken', quantity: 1, unit: 'piece', required: true }],
+      },
+    ],
+    [{ id: 'egg-row', name: 'eggs', status: 'fresh', confidence: 'confirmed', quantityValue: 1, unit: 'egg', quantityKnown: true, dateConfirmed: true, expires: '2026-09-25' }],
+    { ...defaultPreferences, cookTime: 45, equipment: ['Stovetop'], nutrition: [] },
+    1,
+  );
+  assert.equal(ranked[0]?.recipe.id, 'ready-soon');
+});
+
 test('reservations allocate exact quantities and warn instead of claiming stock', () => {
   const result = buildReservations(
     [{ id: 'monday-dinner', recipeId: 'green-egg-toast', servings: 1 }],
@@ -211,6 +277,24 @@ test('reservations allocate exact quantities and warn instead of claiming stock'
   );
   assert.equal(over.warnings.length, 1);
   assert.equal(over.reservations.some((item) => item.quantityKnown === false), true);
+});
+
+test('leftover meals do not reserve or shop for the original raw ingredients', () => {
+  const leftoverPlan = [{ id: 'monday-lunch', recipeId: 'green-egg-toast', servings: 1, leftoverId: 'leftover-1' }];
+  const inventory = [{ id: 'egg-row', name: 'eggs', status: 'fresh' as const, confidence: 'confirmed' as const, quantityValue: 2, unit: 'egg', quantityKnown: true }];
+  assert.deepEqual(buildReservations(leftoverPlan, [greenEggToast], inventory).reservations, []);
+  assert.deepEqual(calculateShoppingNeeds(leftoverPlan, [greenEggToast], inventory, 1), []);
+});
+
+test('leftover consumption supports partial portions and removes the row at zero', () => {
+  const starting = [{ id: 'leftover-1', portions: 3, recipeId: 'green-egg-toast' }];
+  const partial = consumeLeftover(starting, 'leftover-1', 1);
+  assert.equal(partial.consumed, true);
+  assert.equal(partial.leftovers[0]?.portions, 2);
+  const finished = consumeLeftover(partial.leftovers, 'leftover-1', 2);
+  assert.equal(finished.consumed, true);
+  assert.deepEqual(finished.leftovers, []);
+  assert.equal(consumeLeftover(starting, 'leftover-1', 4).consumed, false);
 });
 
 test('cooking deductions use exact inventory ids and preserve partial stock', () => {

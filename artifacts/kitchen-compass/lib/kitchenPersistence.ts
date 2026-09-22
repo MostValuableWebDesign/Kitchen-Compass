@@ -93,6 +93,9 @@ function normalizePlan(value: unknown, servings: number): PlannedMeal[] {
       recipeId: meal.recipeId,
       ...(typeof meal.recipeVersion === 'string' && meal.recipeVersion ? { recipeVersion: meal.recipeVersion } : {}),
       servings: typeof meal.servings === 'number' && meal.servings > 0 ? meal.servings : servings,
+      ...(typeof meal.leftoverId === 'string' && meal.leftoverId ? { leftoverId: meal.leftoverId } : {}),
+      ...(meal.needsConfirmation === true ? { needsConfirmation: true } : {}),
+      ...(Array.isArray(meal.confirmationReasons) ? { confirmationReasons: meal.confirmationReasons.filter((reason): reason is string => typeof reason === 'string') } : {}),
     };
   });
 }
