@@ -7,6 +7,8 @@ import type {
   ShoppingListState,
 } from '@/context/KitchenContext';
 import { normalizeConfirmedDate, normalizeIngredientName, parseQuantityText, type ReservationRecord } from '@/lib/kitchenLogic';
+import { parseCachedRecipes } from '@/lib/recipeDiscovery';
+import type { Recipe } from '@/data/recipes';
 
 export type PersistedKitchenState = {
   ingredients: Ingredient[];
@@ -16,6 +18,8 @@ export type PersistedKitchenState = {
   completedMeals: CompletedMeal[];
   leftovers: Leftover[];
   shoppingList: ShoppingListState;
+  savedRecipes: Recipe[];
+  favoriteRecipeVersions: string[];
 };
 
 export const defaultPreferences: Preferences = {
@@ -87,6 +91,7 @@ function normalizePlan(value: unknown, servings: number): PlannedMeal[] {
       day: meal.day,
       meal: mealType,
       recipeId: meal.recipeId,
+      ...(typeof meal.recipeVersion === 'string' && meal.recipeVersion ? { recipeVersion: meal.recipeVersion } : {}),
       servings: typeof meal.servings === 'number' && meal.servings > 0 ? meal.servings : servings,
     };
   });
@@ -126,6 +131,10 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
         manualItems: Array.isArray(saved.shoppingList.manualItems) ? saved.shoppingList.manualItems : [],
       }
       : { checkedIds: [], manualItems: [] },
+    savedRecipes: parseCachedRecipes(saved.savedRecipes),
+    favoriteRecipeVersions: Array.isArray(saved.favoriteRecipeVersions)
+      ? saved.favoriteRecipeVersions.filter((value): value is string => typeof value === 'string')
+      : [],
   };
 }
 

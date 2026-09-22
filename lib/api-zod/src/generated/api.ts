@@ -77,3 +77,149 @@ export const IssueScanAccessResponse = zod.object({
 })
 
 
+/**
+ * @summary Discover structured recipes from confirmed kitchen inventory
+ */
+
+export const discoverRecipesBodyInventoryItemQuantityValueMin = 0;
+
+export const discoverRecipesBodyInventoryMax = 100;
+
+
+
+export const discoverRecipesBodyFiltersMinHealthScoreMin = 0;
+export const discoverRecipesBodyFiltersMinHealthScoreMax = 100;
+
+export const discoverRecipesBodyVariationSeedMax = 80;
+
+export const discoverRecipesBodyExcludeRecipeVersionsMax = 30;
+
+
+
+export const DiscoverRecipesBody = zod.object({
+  "inventory": zod.array(zod.object({
+  "name": zod.string().min(1),
+  "location": zod.enum(['Refrigerator', 'Freezer', 'Pantry']),
+  "quantityValue": zod.number().min(discoverRecipesBodyInventoryItemQuantityValueMin).optional(),
+  "unit": zod.string().optional(),
+  "quantityKnown": zod.boolean(),
+  "status": zod.enum(['fresh', 'low', 'used']),
+  "confidence": zod.enum(['confirmed', 'uncertain']).optional()
+})).max(discoverRecipesBodyInventoryMax),
+  "preferences": zod.object({
+  "allergies": zod.array(zod.string()),
+  "dietaryRestrictions": zod.array(zod.string()),
+  "dislikes": zod.array(zod.string()),
+  "cuisines": zod.array(zod.string()),
+  "skill": zod.enum(['Beginner', 'Comfortable', 'Confident']),
+  "cookTime": zod.number().int().min(1),
+  "equipment": zod.array(zod.string()),
+  "nutrition": zod.array(zod.string())
+}),
+  "filters": zod.object({
+  "mealType": zod.enum(['Any', 'Breakfast', 'Lunch', 'Dinner']),
+  "cuisine": zod.string().optional(),
+  "maxMinutes": zod.number().int().min(1).optional(),
+  "equipment": zod.array(zod.string()).optional(),
+  "dietaryPreference": zod.string().optional(),
+  "minHealthScore": zod.number().int().min(discoverRecipesBodyFiltersMinHealthScoreMin).max(discoverRecipesBodyFiltersMinHealthScoreMax).optional()
+}),
+  "variationSeed": zod.string().min(1).max(discoverRecipesBodyVariationSeedMax),
+  "excludeRecipeVersions": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeVersionsMax)
+})
+
+
+export const discoverRecipesResponseRecipesItemPrepMinutesMin = 0;
+
+export const discoverRecipesResponseRecipesItemCookMinutesMin = 0;
+
+export const discoverRecipesResponseRecipesItemHealthScoreMin = 0;
+export const discoverRecipesResponseRecipesItemHealthScoreMax = 100;
+
+
+export const discoverRecipesResponseRecipesItemIngredientsItemQuantityExclusiveMin = 0;
+
+
+
+export const discoverRecipesResponseRecipesItemNutritionCaloriesMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionProteinMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionCarbsMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionFatMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionFiberMin = 0;
+
+export const discoverRecipesResponseRecipesItemNutritionSodiumMin = 0;
+
+
+
+
+
+export const discoverRecipesResponseRecipesItemStepsItemDurationMin = 0;
+
+
+
+
+
+
+
+export const DiscoverRecipesResponse = zod.object({
+  "recipes": zod.array(zod.object({
+  "id": zod.string(),
+  "recipeVersion": zod.string(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "cuisine": zod.string(),
+  "mealType": zod.enum(['Breakfast', 'Lunch', 'Dinner']),
+  "servings": zod.number().int().min(1),
+  "prepMinutes": zod.number().int().min(discoverRecipesResponseRecipesItemPrepMinutesMin),
+  "cookMinutes": zod.number().int().min(discoverRecipesResponseRecipesItemCookMinutesMin),
+  "difficulty": zod.enum(['Easy', 'Moderate', 'Hard']),
+  "equipment": zod.array(zod.string()),
+  "healthScore": zod.number().int().min(discoverRecipesResponseRecipesItemHealthScoreMin).max(discoverRecipesResponseRecipesItemHealthScoreMax),
+  "scoreNote": zod.string(),
+  "ingredients": zod.array(zod.object({
+  "name": zod.string().min(1),
+  "quantity": zod.number().gt(discoverRecipesResponseRecipesItemIngredientsItemQuantityExclusiveMin),
+  "unit": zod.string().min(1),
+  "required": zod.boolean()
+})).min(1),
+  "nutrition": zod.object({
+  "calories": zod.number().min(discoverRecipesResponseRecipesItemNutritionCaloriesMin),
+  "protein": zod.number().min(discoverRecipesResponseRecipesItemNutritionProteinMin),
+  "carbs": zod.number().min(discoverRecipesResponseRecipesItemNutritionCarbsMin),
+  "fat": zod.number().min(discoverRecipesResponseRecipesItemNutritionFatMin),
+  "fiber": zod.number().min(discoverRecipesResponseRecipesItemNutritionFiberMin),
+  "sodium": zod.number().min(discoverRecipesResponseRecipesItemNutritionSodiumMin)
+}),
+  "nutritionProvenance": zod.enum(['ai-estimate', 'source-backed']),
+  "nutritionSource": zod.string().min(1),
+  "steps": zod.array(zod.object({
+  "order": zod.number().int().min(1),
+  "title": zod.string().min(1),
+  "body": zod.string().min(1),
+  "duration": zod.number().int().min(discoverRecipesResponseRecipesItemStepsItemDurationMin).optional(),
+  "temperature": zod.string().optional(),
+  "ingredients": zod.array(zod.string())
+})).min(1),
+  "allergens": zod.array(zod.string()),
+  "allergenInfo": zod.enum(['complete', 'incomplete']),
+  "storageInstructions": zod.string(),
+  "reheatingInstructions": zod.string(),
+  "dietaryTags": zod.array(zod.string()),
+  "dislikeTags": zod.array(zod.string()),
+  "nutritionTags": zod.array(zod.string()),
+  "substitutions": zod.array(zod.object({
+  "from": zod.string().min(1),
+  "to": zod.string().min(1),
+  "reason": zod.string().min(1),
+  "validated": zod.boolean()
+}))
+})),
+  "source": zod.enum(['server-ai']),
+  "warning": zod.string().optional()
+})
+
+

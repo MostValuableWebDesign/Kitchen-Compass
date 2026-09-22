@@ -23,6 +23,7 @@ export type ReservationRecord = {
 export type RecipeSafetyInput = {
   allergens: string[];
   allergenInfo: 'complete' | 'incomplete';
+  ingredients?: RecipeIngredientInput[];
 };
 
 export type RecipeIngredientInput = {
@@ -65,6 +66,23 @@ const aliases: Record<string, string> = {
 export function normalizeIngredientName(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ');
   return aliases[normalized] ?? normalized;
+}
+
+const allergenGroups: Record<string, string[]> = {
+  egg: ['egg', 'eggs'],
+  milk: ['milk', 'dairy', 'cheese', 'butter', 'yogurt', 'cream', 'parmesan'],
+  wheat: ['wheat', 'bread', 'pasta', 'flour', 'barley', 'rye'],
+  peanut: ['peanut', 'peanuts'],
+  'tree nut': ['tree nut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio'],
+  fish: ['fish', 'salmon', 'tuna'],
+  shellfish: ['shellfish', 'shrimp', 'prawn', 'crab', 'lobster'],
+  soy: ['soy', 'soya', 'tofu'],
+  sesame: ['sesame', 'tahini'],
+};
+
+function allergenIdentity(value: string) {
+  const normalized = normalizeIngredientName(value);
+  return Object.entries(allergenGroups).find(([, members]) => members.map(normalizeIngredientName).includes(normalized))?.[0] ?? normalized;
 }
 
 export function canonicalUnit(value?: string) {
@@ -163,8 +181,9 @@ export function ingredientIdentitiesMatch(recipeName: string, inventory: Invento
 }
 
 export function recipeHasAllergyConflict(recipe: RecipeSafetyInput, allergies: string[]) {
-  const requested = allergies.map(normalizeIngredientName);
-  return recipe.allergens.some((allergen) => requested.includes(normalizeIngredientName(allergen)));
+  const requested = allergies.map(allergenIdentity);
+  return recipe.allergens.some((allergen) => requested.includes(allergenIdentity(allergen)))
+    || recipe.ingredients?.some((ingredient) => requested.includes(allergenIdentity(ingredient.name))) === true;
 }
 
 export type RecipeReadinessResult = {
@@ -175,6 +194,17 @@ export type RecipeReadinessResult = {
   allergenConflict: boolean;
   allergenIncomplete: boolean;
 };
+
+export type RecipeAvailabilityLabel = 'Ready to cook' | 'Almost ready' | 'Check quantities' | 'Not enough quantity' | 'Missing ingredients' | 'Not safe';
+
+export function recipeAvailabilityLabel(result: RecipeReadinessResult): RecipeAvailabilityLabel {
+  if (result.allergenConflict || result.allergenIncomplete) return 'Not safe';
+  if (result.ready) return 'Ready to cook';
+  if (result.quantityCheckIngredients.length) return 'Check quantities';
+  if (result.insufficientIngredients.length) return 'Not enough quantity';
+  if (result.missingIngredients.length <= 2) return 'Almost ready';
+  return 'Missing ingredients';
+}
 
 export function recipeReadiness(
   recipe: RecipeSafetyInput & { servings?: number; ingredients: RecipeIngredientInput[] },

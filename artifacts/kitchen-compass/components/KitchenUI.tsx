@@ -47,7 +47,7 @@ export function Chip({ label, selected, onPress, icon }: { label: string; select
   );
 }
 
-export function RecipeCard({ recipe, hasIngredients, statusText, onPress }: { recipe: Recipe; hasIngredients?: boolean; statusText?: string; onPress: () => void }) {
+export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFavorite, onPress }: { recipe: Recipe; hasIngredients?: boolean; statusText?: string; favorite?: boolean; onFavorite?: () => void; onPress: () => void }) {
   const colors = useColors();
   return (
     <Pressable testID={`recipe-${recipe.id}`} onPress={onPress} style={({ pressed }) => [styles.recipeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
@@ -55,7 +55,10 @@ export function RecipeCard({ recipe, hasIngredients, statusText, onPress }: { re
       <View style={styles.recipeBody}>
         <View style={styles.recipeRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.recipeTitle, { color: colors.foreground }]}>{recipe.title}</Text>
+            <View style={styles.titleLine}>
+              <Text style={[styles.recipeTitle, { color: colors.foreground }]}>{recipe.title}</Text>
+              {onFavorite ? <Pressable testID={`favorite-${recipe.id}`} onPress={onFavorite} hitSlop={10}><Ionicons name={favorite ? 'heart' : 'heart-outline'} size={19} color={favorite ? colors.destructive : colors.mutedForeground} /></Pressable> : null}
+            </View>
             <Text style={[styles.recipeMeta, { color: colors.mutedForeground }]}>{recipe.cuisine} · {recipe.prep + recipe.cook} min · {recipe.difficulty}</Text>
           </View>
           <View style={[styles.scoreBadge, { backgroundColor: recipe.score >= 85 ? colors.secondary : colors.accent }]}>
@@ -115,6 +118,7 @@ const styles = StyleSheet.create({
   recipeBody: { padding: 15 },
   recipeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   recipeTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 5 },
+  titleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   recipeMeta: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   recipeDescription: { fontSize: 13, lineHeight: 19, marginTop: 10 },
   recipeFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
