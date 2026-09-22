@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import {
@@ -19,6 +20,22 @@ import {
 import { recipes, type Recipe } from '@/data/recipes';
 import { defaultPreferences, migrateV1KitchenState, parsePersistedKitchenState, type PersistedKitchenState } from '@/lib/kitchenPersistence';
 import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
+import { defaultReminderSettings, syncDailyReminder, type ReminderScheduler, type ReminderSettings } from '@/lib/reminders';
+import { SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
+
+const reminderScheduler: ReminderScheduler = {
+  getPermissionsAsync: Notifications.getPermissionsAsync,
+  requestPermissionsAsync: Notifications.requestPermissionsAsync,
+  cancelAllScheduledNotificationsAsync: Notifications.cancelAllScheduledNotificationsAsync,
+  scheduleNotificationAsync: ({ content, trigger }) => Notifications.scheduleNotificationAsync({
+    content,
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
+      hour: trigger.hour,
+      minute: trigger.minute,
+    },
+  }),
+};
 
 export type StorageLocation = 'Refrigerator' | 'Freezer' | 'Pantry';
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
@@ -45,6 +62,7 @@ export interface Ingredient {
 }
 
 export interface Preferences {
+  householdSize: number;
   servings: number;
   allergies: string[];
   dietaryRestrictions: string[];
@@ -118,6 +136,8 @@ interface KitchenContextValue {
   shoppingList: ShoppingListState;
   savedRecipes: Recipe[];
   favoriteRecipeVersions: string[];
+  onboardingComplete: boolean;
+  reminders: ReminderSettings;
   hydrated: boolean;
   storageError: string | null;
   retryHydration: () => void;
@@ -127,6 +147,10 @@ interface KitchenContextValue {
   removeIngredient: (id: string) => void;
   toggleLow: (id: string) => void;
   setPreferences: (changes: Partial<Preferences>) => void;
+  completeOnboarding: (changes: Preferences) => void;
+  setReminderSettings: (changes: Partial<ReminderSettings>) => Promise<boolean>;
+  clearSavedScanPhotos: () => void;
+  eraseAllData: () => Promise<void>;
   setMeal: (day: string, meal: MealType, recipeId: string, servings?: number, recipeVersion?: string) => void;
   removeMeal: (day: string, meal: MealType) => void;
   generatePlan: (days?: string[], meals?: MealType[]) => void;
@@ -177,6 +201,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [shoppingList, setShoppingListState] = useState<ShoppingListState>({ checkedIds: [], manualItems: [] });
   const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
   const [favoriteRecipeVersions, setFavoriteRecipeVersions] = useState<string[]>([]);
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [reminders, setReminders] = useState<ReminderSettings>(defaultReminderSettings);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -204,6 +230,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
               shoppingList: { checkedIds: [], manualItems: [] },
                savedRecipes: [],
                favoriteRecipeVersions: [],
+               onboardingComplete: false,
+               reminders: defaultReminderSettings,
             };
           // Keep v1 as a recovery copy. The migration is complete only after v2 is written.
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
@@ -218,6 +246,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setShoppingListState(parsed.shoppingList);
         setSavedRecipes(parsed.savedRecipes);
         setFavoriteRecipeVersions(parsed.favoriteRecipeVersions);
+        setOnboardingComplete(parsed.onboardingComplete);
+        setReminders(parsed.reminders);
         setStorageError(null);
         setHydrated(true);
       } catch (error) {
@@ -248,8 +278,15 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       shoppingList,
       savedRecipes,
       favoriteRecipeVersions,
+      onboardingComplete,
+      reminders,
     })).catch(() => undefined);
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, favoriteRecipeVersions, storageError]);
+  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, storageError]);
+
+  useEffect(() => {
+    if (!hydrated || !reminders.enabled) return;
+    void syncDailyReminder(reminders, reminderScheduler, false).catch(() => undefined);
+  }, [hydrated, reminders]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -269,6 +306,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     shoppingList,
     savedRecipes,
     favoriteRecipeVersions,
+    onboardingComplete,
+    reminders,
     hydrated,
     storageError,
     retryHydration: () => setLoadAttempt((attempt) => attempt + 1),
@@ -313,6 +352,43 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     removeIngredient: (id) => setIngredients((current) => current.filter((item) => item.id !== id)),
     toggleLow: (id) => setIngredients((current) => current.map((item) => item.id === id ? { ...item, status: item.status === 'low' ? 'fresh' : 'low' } : item)),
     setPreferences: (changes) => setPreferencesState((current) => ({ ...current, ...changes })),
+    completeOnboarding: (changes) => {
+      setPreferencesState(changes);
+      setOnboardingComplete(true);
+    },
+    setReminderSettings: async (changes) => {
+      const next = { ...reminders, ...changes, hour: Math.max(0, Math.min(23, changes.hour ?? reminders.hour)), minute: Math.max(0, Math.min(59, changes.minute ?? reminders.minute)) };
+      let result;
+      try {
+        result = await syncDailyReminder(next, reminderScheduler, true);
+      } catch {
+        setReminders({ ...next, enabled: false });
+        return false;
+      }
+      if (!result.enabled && next.enabled) {
+        setReminders({ ...next, enabled: false });
+        return false;
+      }
+      setReminders({ ...next, enabled: result.enabled });
+      return true;
+    },
+    clearSavedScanPhotos: () => setIngredients((current) => current.map((item) => item.photoUri ? { ...item, photoUri: undefined } : item)),
+    eraseAllData: async () => {
+      await syncDailyReminder({ ...defaultReminderSettings, enabled: false }, reminderScheduler, false);
+      await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_STORAGE_KEY, SCAN_ACCESS_TOKEN_STORAGE_KEY]);
+      setIngredients([]);
+      setPreferencesState(defaultPreferences);
+      setPlan([]);
+      setReservations([]);
+      setReservationWarnings([]);
+      setCompletedMeals([]);
+      setLeftovers([]);
+      setShoppingListState({ checkedIds: [], manualItems: [] });
+      setSavedRecipes([]);
+      setFavoriteRecipeVersions([]);
+      setReminders(defaultReminderSettings);
+      setOnboardingComplete(false);
+    },
     saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => mergeRecipes(current, nextRecipes).filter((recipe) => recipe.source === 'server-ai')),
     toggleFavoriteRecipe: (recipe) => setFavoriteRecipeVersions((current) => {
       const version = recipeVersion(recipe);
@@ -430,7 +506,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, plan, preferences, reservationWarnings, reservations, savedRecipes, shoppingList, storageError]);
+  }), [completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedRecipes, shoppingList, storageError]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }

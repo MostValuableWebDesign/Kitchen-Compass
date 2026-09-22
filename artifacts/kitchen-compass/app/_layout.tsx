@@ -15,17 +15,17 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { KitchenProvider } from '@/context/KitchenContext';
-import { createScanAccessTokenGetter } from '@/lib/scanAccessToken';
+import { KitchenProvider, useKitchen } from '@/context/KitchenContext';
+import OnboardingScreen from '@/components/OnboardingScreen';
+import { createScanAccessTokenGetter, SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 setBaseUrl(process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : null);
-const SCAN_ACCESS_TOKEN_KEY = 'kitchen-compass-scan-access-token-v1';
 const getScanAccessToken = createScanAccessTokenGetter({
   storage: AsyncStorage,
-  storageKey: SCAN_ACCESS_TOKEN_KEY,
+  storageKey: SCAN_ACCESS_TOKEN_STORAGE_KEY,
   domain: process.env.EXPO_PUBLIC_DOMAIN,
 });
 setAuthTokenGetter(getScanAccessToken);
@@ -33,6 +33,9 @@ setAuthTokenGetter(getScanAccessToken);
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  const { hydrated, onboardingComplete } = useKitchen();
+  if (!hydrated) return null;
+  if (!onboardingComplete) return <OnboardingScreen />;
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

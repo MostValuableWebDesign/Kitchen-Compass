@@ -106,6 +106,7 @@ export default function InventoryEditScreen() {
         </View>
 
         <Pressable onPress={save} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save inventory</Text></Pressable>
+        {ingredient.photoUri ? <Pressable onPress={() => Alert.alert('Delete saved scan photo?', 'The ingredient will remain in your kitchen, but the original scan photo will be removed from this device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete photo', style: 'destructive', onPress: () => updateIngredient(ingredient.id, { photoUri: undefined }) }])} style={({ pressed }) => [styles.photoButton, { borderColor: colors.border }, pressed && styles.pressed]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.photoButtonText, { color: colors.foreground }]}>Delete saved scan photo</Text></Pressable> : null}
         <Pressable onPress={remove} style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}><Text style={[styles.removeText, { color: colors.destructive }]}>Remove from kitchen</Text></Pressable>
       </ScrollView>
     </View>
@@ -129,6 +130,8 @@ const styles = StyleSheet.create({
   saveText: { fontSize: 15, fontFamily: 'Inter_700Bold' },
   removeButton: { height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   removeText: { fontSize: 13, fontFamily: 'Inter_700Bold' },
+  photoButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 10 },
+  photoButtonText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   missingTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', paddingHorizontal: 20 },
   pressed: { opacity: 0.72 },
 });

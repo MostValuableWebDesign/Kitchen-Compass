@@ -4,6 +4,8 @@ export type ScanAccessTokenStorage = {
   setItem: (key: string, value: string) => Promise<void>;
 };
 
+export const SCAN_ACCESS_TOKEN_STORAGE_KEY = 'kitchen-compass-scan-access-token-v1';
+
 type ScanAccessTokenOptions = {
   storage: ScanAccessTokenStorage;
   storageKey: string;
