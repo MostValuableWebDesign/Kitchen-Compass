@@ -20,9 +20,12 @@ export type PersistedKitchenState = {
   shoppingList: ShoppingListState;
   savedRecipes: Recipe[];
   favoriteRecipeVersions: string[];
+  onboardingComplete: boolean;
+  reminders: import('@/lib/reminders').ReminderSettings;
 };
 
 export const defaultPreferences: Preferences = {
+  householdSize: 2,
   servings: 2,
   allergies: [],
   dietaryRestrictions: [],
@@ -31,8 +34,35 @@ export const defaultPreferences: Preferences = {
   skill: 'Comfortable',
   cookTime: 45,
   equipment: ['Stovetop', 'Oven'],
-  nutrition: ['More vegetables'],
+  nutrition: [],
 };
+
+export function emptyPersistedKitchenState(): PersistedKitchenState {
+  return {
+    ingredients: [],
+    preferences: defaultPreferences,
+    plan: [],
+    reservations: [],
+    completedMeals: [],
+    leftovers: [],
+    shoppingList: { checkedIds: [], manualItems: [] },
+    savedRecipes: [],
+    favoriteRecipeVersions: [],
+    onboardingComplete: false,
+    reminders: { enabled: false, hour: 18, minute: 0 },
+  };
+}
+
+export function serializePersistedKitchenState(state: PersistedKitchenState) {
+  return JSON.stringify(state);
+}
+
+export function removeSavedScanPhotos(state: PersistedKitchenState): PersistedKitchenState {
+  return {
+    ...state,
+    ingredients: state.ingredients.map(({ photoUri: _photoUri, ...ingredient }) => ingredient),
+  };
+}
 
 type LegacyState = {
   ingredients?: unknown;
@@ -104,6 +134,7 @@ function normalizePreferences(value: Partial<Preferences> | undefined, defaults:
   const merged = { ...defaults, ...(value ?? {}) };
   return {
     servings: typeof merged.servings === 'number' && merged.servings > 0 ? merged.servings : defaults.servings,
+    householdSize: typeof merged.householdSize === 'number' && merged.householdSize > 0 ? merged.householdSize : defaults.householdSize,
     allergies: Array.isArray(merged.allergies) ? merged.allergies : defaults.allergies,
     dietaryRestrictions: Array.isArray(merged.dietaryRestrictions) ? merged.dietaryRestrictions : defaults.dietaryRestrictions,
     dislikes: Array.isArray(merged.dislikes) ? merged.dislikes : defaults.dislikes,
@@ -138,9 +169,17 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
     favoriteRecipeVersions: Array.isArray(saved.favoriteRecipeVersions)
       ? saved.favoriteRecipeVersions.filter((value): value is string => typeof value === 'string')
       : [],
+    onboardingComplete: saved.onboardingComplete !== false,
+    reminders: saved.reminders && typeof saved.reminders === 'object'
+      ? {
+        enabled: (saved.reminders as { enabled?: unknown }).enabled === true,
+        hour: typeof (saved.reminders as { hour?: unknown }).hour === 'number' ? Math.max(0, Math.min(23, (saved.reminders as { hour: number }).hour)) : 18,
+        minute: typeof (saved.reminders as { minute?: unknown }).minute === 'number' ? Math.max(0, Math.min(59, (saved.reminders as { minute: number }).minute)) : 0,
+      }
+      : { enabled: false, hour: 18, minute: 0 },
   };
 }
 
 export function migrateV1KitchenState(value: string, defaults: Preferences) {
-  return parsePersistedKitchenState(value, defaults);
+  return { ...parsePersistedKitchenState(value, defaults), onboardingComplete: true };
 }

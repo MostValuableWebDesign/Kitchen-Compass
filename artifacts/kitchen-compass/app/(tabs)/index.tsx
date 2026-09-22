@@ -1,11 +1,11 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard, SectionTitle } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
-import { recipes } from '@/data/recipes';
+import { recipes, supportedEquipmentOptions } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, recipeReadiness, recipeMatchesPreferences } from '@/lib/kitchenLogic';
 
@@ -13,7 +13,7 @@ export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, preferences, plan, reservations, setPreferences } = useKitchen();
+  const { ingredients, preferences, plan, reservations, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData } = useKitchen();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
@@ -22,6 +22,9 @@ export default function TodayScreen() {
     const recipe = recipes.find((item) => item.id === recipeId);
     return !!recipe && recipeMatchesPreferences(recipe, preferences) && recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations).ready;
   };
+  const reminderTimeLabel = `${String(reminders.hour % 12 || 12)}:${String(reminders.minute).padStart(2, '0')} ${reminders.hour >= 12 ? 'PM' : 'AM'}`;
+  const confirmErase = () => Alert.alert('Erase all Kitchen Compass data?', 'This removes inventory, saved recipes, plans, preferences, scan photos, and reminder settings from this device. This cannot be undone.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Erase everything', style: 'destructive', onPress: () => void eraseAllData() }]);
+  const confirmPhotoDelete = () => Alert.alert('Delete saved scan photos?', 'This removes the original photos kept with your scanned ingredients. Ingredient names and quantities remain.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete photos', style: 'destructive', onPress: clearSavedScanPhotos }]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
@@ -78,6 +81,8 @@ export default function TodayScreen() {
             <View style={styles.sheetHeader}><Text style={[styles.sheetTitle, { color: colors.foreground }]}>Your preferences</Text><Pressable onPress={() => setSettingsOpen(false)}><Feather name="x" size={22} color={colors.foreground} /></Pressable></View>
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Household size</Text>
             <TextInput value={String(preferences.servings)} keyboardType="number-pad" onChangeText={(value) => setPreferences({ servings: Math.max(1, Number(value) || 1) })} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Default servings</Text>
+             <TextInput value={String(preferences.householdSize)} keyboardType="number-pad" onChangeText={(value) => setPreferences({ householdSize: Math.max(1, Number(value) || 1) })} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Allergies</Text>
              <TextInput value={preferences.allergies.join(', ')} onChangeText={(value) => setPreferences({ allergies: value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. peanuts, egg" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dietary restrictions</Text>
@@ -90,10 +95,17 @@ export default function TodayScreen() {
              <View style={styles.chipWrap}>{(['Beginner', 'Comfortable', 'Confident'] as const).map((skill) => <Chip key={skill} label={skill} selected={preferences.skill === skill} onPress={() => setPreferences({ skill })} />)}</View>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cooking time</Text>
             <View style={styles.chipWrap}>{[30, 45, 60].map((time) => <Chip key={time} label={`${time} min`} selected={preferences.cookTime === time} onPress={() => setPreferences({ cookTime: time })} />)}</View>
-             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Equipment</Text>
-             <View style={styles.chipWrap}>{['Stovetop', 'Oven', 'Microwave'].map((item) => <Chip key={item} label={item} selected={preferences.equipment.includes(item)} onPress={() => setPreferences({ equipment: preferences.equipment.includes(item) ? preferences.equipment.filter((value) => value !== item) : [...preferences.equipment, item] })} />)}</View>
+              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Equipment used by available recipes</Text>
+              <View style={styles.chipWrap}>{supportedEquipmentOptions.map((item) => <Chip key={item} label={item} selected={preferences.equipment.includes(item)} onPress={() => setPreferences({ equipment: preferences.equipment.includes(item) ? preferences.equipment.filter((value) => value !== item) : [...preferences.equipment, item] })} />)}</View>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Nutrition focus</Text>
              <View style={styles.chipWrap}>{['More vegetables', 'More protein'].map((item) => <Chip key={item} label={item} selected={preferences.nutrition.includes(item)} onPress={() => setPreferences({ nutrition: preferences.nutrition.includes(item) ? preferences.nutrition.filter((value) => value !== item) : [...preferences.nutrition, item] })} />)}</View>
+             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Daily meal reminders</Text>
+             <View style={styles.chipWrap}><Chip label="Off" selected={!reminders.enabled} onPress={() => void setReminderSettings({ enabled: false })} /><Chip label="On" selected={reminders.enabled} onPress={async () => { const enabled = await setReminderSettings({ enabled: true }); if (!enabled) Alert.alert('Notifications remain off', 'Kitchen Compass could not get notification permission. You can enable it later in iPhone Settings.'); }} /></View>
+             {reminders.enabled ? <><Text style={[styles.reminderHint, { color: colors.mutedForeground }]}>Reminder time · {reminderTimeLabel}</Text><View style={styles.chipWrap}>{[7, 8, 12, 18, 20].map((hour) => <Chip key={hour} label={`${hour % 12 || 12}${hour >= 12 ? ' PM' : ' AM'}`} selected={reminders.hour === hour} onPress={() => void setReminderSettings({ hour })} />)}</View></> : null}
+             <View style={[styles.offlineNote, { backgroundColor: colors.muted }]}><Ionicons name="phone-portrait-outline" size={17} color={colors.primary} /><Text style={[styles.offlineText, { color: colors.mutedForeground }]}>Inventory, saved recipes, preferences, and your current plan stay on this device and remain readable offline. Scanning and recipe discovery need internet.</Text></View>
+             <View style={[styles.offlineNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={17} color={colors.primary} /><Text style={[styles.offlineText, { color: colors.mutedForeground }]}>A scan photo is sent to the Kitchen Compass server and external AI service only when you ask for recognition. Original photos are deleted after review unless you choose to keep them.</Text></View>
+             <Pressable onPress={confirmPhotoDelete} style={[styles.dataButton, { borderColor: colors.border }]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.dataButtonText, { color: colors.foreground }]}>Delete saved scan photos</Text></Pressable>
+             <Pressable onPress={confirmErase} style={[styles.dataButton, { borderColor: colors.destructive }]}><Feather name="trash-2" size={16} color={colors.destructive} /><Text style={[styles.dataButtonText, { color: colors.destructive }]}>Erase all local data</Text></Pressable>
             <Pressable onPress={() => setSettingsOpen(false)} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveButtonText, { color: colors.primaryForeground }]}>Save preferences</Text></Pressable>
           </View>
         </View>
@@ -131,6 +143,11 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 8, marginTop: 12 },
   input: { height: 48, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, fontFamily: 'Inter_500Medium' },
   chipWrap: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  reminderHint: { fontSize: 12, marginTop: 10, marginBottom: 7 },
+  offlineNote: { flexDirection: 'row', gap: 9, borderRadius: 14, padding: 12, marginTop: 14 },
+  offlineText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  dataButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 10 },
+  dataButtonText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   saveButton: { height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginTop: 25 },
   saveButtonText: { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });

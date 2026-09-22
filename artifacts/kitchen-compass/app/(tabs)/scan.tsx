@@ -28,6 +28,7 @@ export default function ScanScreen() {
   const [quantity, setQuantity] = useState('');
   const [location, setLocation] = useState<StorageLocation>('Refrigerator');
   const [mode, setMode] = useState<'choose' | 'review'>('choose');
+  const [keepPhotos, setKeepPhotos] = useState(false);
 
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
   const reviewPhotos = async (assets: ImagePicker.ImagePickerAsset[]) => {
@@ -109,6 +110,7 @@ export default function ScanScreen() {
     setRecognitionMessage('');
     setName('');
     setQuantity('');
+    setKeepPhotos(false);
   };
   const saveIngredient = () => {
     if (!name.trim() && !suggestions.length) {
@@ -146,6 +148,7 @@ export default function ScanScreen() {
           source: 'scan',
           sourceScanId: scanId ?? undefined,
           sourcePhotoId: suggestion.sourcePhotoId,
+           ...(keepPhotos ? { photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0] } : {}),
           reviewedAt,
         });
         return;
@@ -156,7 +159,7 @@ export default function ScanScreen() {
         location: suggestion.storageLocation,
         status: 'fresh',
         confidence: 'confirmed',
-        photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0],
+        ...(keepPhotos ? { photoUri: photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0] } : {}),
         source: 'scan',
         sourceScanId: scanId ?? undefined,
         sourcePhotoId: suggestion.sourcePhotoId,
@@ -192,7 +195,7 @@ export default function ScanScreen() {
                </View>
              </View> : null}
              <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
-             <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Photos are sent securely to the server for recognition. Nothing is saved to your kitchen until you review, edit, remove, and confirm each suggestion.</Text></View>
+              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photo is sent to the Kitchen Compass server and an external AI service. It is not saved to your kitchen unless you confirm a suggestion.</Text></View>
           </>
         ) : (
           <>
@@ -229,7 +232,7 @@ export default function ScanScreen() {
             <TextInput value={quantity} onChangeText={setQuantity} placeholder="e.g. 1 bag" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
-            {photoUris.length ? <View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View> : null}
+             {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep original scan photos on this device</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
             <Pressable testID="save-ingredient" onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
           </>
         )}
@@ -274,6 +277,9 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', gap: 7, flexWrap: 'wrap' },
   uncertainNote: { flexDirection: 'row', gap: 9, padding: 13, borderRadius: 15, marginTop: 19 },
   uncertainText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  keepPhotoToggle: { flexDirection: 'row', gap: 10, alignItems: 'center', padding: 13, borderRadius: 15, marginTop: 10 },
+  keepPhotoTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  keepPhotoBody: { fontSize: 11, lineHeight: 16, marginTop: 3 },
   stateNote: { flexDirection: 'row', gap: 8, padding: 13, borderRadius: 15, marginBottom: 14 },
   stateText: { flex: 1, fontSize: 12, lineHeight: 17 },
   suggestionCard: { borderWidth: 1, borderRadius: 18, padding: 14, marginBottom: 12 },

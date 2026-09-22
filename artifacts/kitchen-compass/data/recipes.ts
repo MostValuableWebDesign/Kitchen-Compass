@@ -319,6 +319,8 @@ export const recipes: Recipe[] = rawRecipes.map((recipe) => {
   return { ...recipe, nutrition, healthScore: calculateHealthScore(nutrition) };
 });
 
+export const supportedEquipmentOptions = [...new Set(recipes.flatMap((recipe) => recipe.equipment))];
+
 export function scaledIngredient(recipe: Recipe, ingredient: RecipeIngredient, targetServings: number) {
   return { ...ingredient, quantity: scaleQuantity(ingredient.quantity, recipe.servings, targetServings) };
 }

@@ -2,3 +2,4 @@
 - [Scan authorization](scan-authorization.md) — paid photo analysis uses server-issued bearer credentials plus shared production quotas, not client headers.
 - [Recipe calculation provenance](recipe-calculation-provenance.md) — scores and nutrition must be calculated from supported ingredient data; unsupported inputs stay insufficient, never AI-attributed.
 - [Recipe guidance contract](recipe-guidance-contract.md) — curated and discovered recipes share structured step amounts, cues, safety temperatures, and mistake guidance.
+- [Expo notification triggers](expo-notifications-trigger.md) — keep reminder logic injectable and translate daily triggers at the Expo SDK 57 adapter boundary.

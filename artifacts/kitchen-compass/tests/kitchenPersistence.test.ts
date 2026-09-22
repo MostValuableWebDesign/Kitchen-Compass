@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  defaultPreferences,
+  emptyPersistedKitchenState,
+  parsePersistedKitchenState,
+  removeSavedScanPhotos,
+  serializePersistedKitchenState,
+} from '../lib/kitchenPersistence';
+
+test('onboarding preferences and reminder settings persist through the local state format', () => {
+  const state = {
+    ...emptyPersistedKitchenState(),
+    preferences: { ...defaultPreferences, householdSize: 4, servings: 3, allergies: ['peanuts'], cuisines: [] },
+    onboardingComplete: true,
+    reminders: { enabled: true, hour: 7, minute: 30 },
+  };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.equal(restored.onboardingComplete, true);
+  assert.equal(restored.preferences.householdSize, 4);
+  assert.deepEqual(restored.preferences.allergies, ['peanuts']);
+  assert.deepEqual(restored.reminders, { enabled: true, hour: 7, minute: 30 });
+  assert.deepEqual(restored.preferences.cuisines, []);
+});
+
+test('saved scan photo deletion keeps confirmed ingredient data', () => {
+  const state = {
+    ...emptyPersistedKitchenState(),
+    ingredients: [{
+      id: 'eggs', name: 'eggs', normalizedName: 'egg', location: 'Refrigerator' as const,
+      quantity: '6 eggs', quantityValue: 6, unit: 'egg', quantityKnown: true,
+      status: 'fresh' as const, confidence: 'confirmed' as const, photoUri: 'file:///scan.jpg',
+    }],
+  };
+  const cleared = removeSavedScanPhotos(state);
+  assert.equal(cleared.ingredients[0]?.photoUri, undefined);
+  assert.equal(cleared.ingredients[0]?.name, 'eggs');
+  assert.equal(cleared.ingredients[0]?.quantityValue, 6);
+});
+
+test('full local-data reset starts onboarding again and has no offline records', () => {
+  const reset = emptyPersistedKitchenState();
+  assert.equal(reset.onboardingComplete, false);
+  assert.deepEqual(reset.ingredients, []);
+  assert.deepEqual(reset.plan, []);
+  assert.deepEqual(reset.savedRecipes, []);
+  assert.deepEqual(reset.reminders, { enabled: false, hour: 18, minute: 0 });
+});
+
+test('persisted kitchen records remain readable without a network', () => {
+  const state = {
+    ...emptyPersistedKitchenState(),
+    ingredients: [{
+      id: 'rice', name: 'rice', normalizedName: 'rice', location: 'Pantry' as const,
+      quantityKnown: false, status: 'fresh' as const, confidence: 'confirmed' as const,
+    }],
+  };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.equal(restored.ingredients[0]?.name, 'rice');
+  assert.equal(restored.ingredients[0]?.quantityKnown, false);
+});
