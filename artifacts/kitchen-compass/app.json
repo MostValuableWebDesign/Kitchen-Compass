@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Kitchen Compass",
+    "slug": "kitchen-compass",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon_2.png",
+    "scheme": "kitchen-compass",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {},
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kitchen Compass uses your photos to add ingredients from existing kitchen images.",
+          "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review."
+        }
+      ]
+    ],
+    "splash": {
+      "backgroundColor": "#f8f6ef"
+    },
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

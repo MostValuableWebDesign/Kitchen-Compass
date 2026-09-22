@@ -1,0 +1,220 @@
+Build an iPhone mobile app called “Kitchen Compass” that helps me answer: “What can I cook with the food I already have?”
+
+Use React Native with Expo and TypeScript. Build a functional app with real camera access, persistent ingredient inventory, recipe suggestions, and a weekly meal planner. Prioritize a simple, polished experience that works on a physical iPhone.
+
+CORE WORKFLOW
+
+I should be able to:
+1. Photograph ingredients in my refrigerator or pantry.
+2. Review and correct the ingredients the app identifies.
+3. Save those ingredients to my kitchen inventory.
+4. Get recipes based on what I have.
+5. Follow detailed cooking instructions with helpful visuals.
+6. Plan breakfast, lunch, and dinner throughout the week.
+
+1. ONBOARDING AND PREFERENCES
+
+Ask for:
+- Household size and default number of servings.
+- Food allergies and dietary restrictions.
+- Ingredients I dislike.
+- Preferred cuisines.
+- Cooking skill level.
+- Typical time available for cooking.
+- Available equipment, such as an oven, stovetop, microwave, air fryer, slow cooker, or grill.
+- Optional general nutrition preferences, such as more vegetables or higher protein.
+
+Allow me to change these settings later. Treat allergies as strict exclusions and flag ingredients with unknown allergen information.
+
+2. CAMERA SCANNING AND INGREDIENT INVENTORY
+
+Use the iPhone camera to capture one or multiple photos of my refrigerator, pantry, or individual ingredients. Also support selecting existing photos and manually entering ingredients.
+
+Use a real vision-capable AI integration to suggest visible ingredients. Handle multiple photos from the same scanning session without silently creating duplicates.
+
+After scanning, show an editable confirmation screen with:
+- Suggested ingredient name.
+- Photo thumbnail.
+- Suggested storage location: refrigerator, freezer, or pantry.
+- Quantity and unit, if known.
+- Confidence or an “uncertain” label when appropriate.
+- Optional expiration or best-before date entered or confirmed by me.
+
+Do not pretend the camera can reliably see hidden items, measure quantities, detect freshness, or determine expiration dates. Ask me to confirm uncertain information. Never save an entire scan without giving me a chance to review it.
+
+Support packaged-food barcode scanning as an additional input method when a product lookup integration is available. If a barcode is not found, offer photo recognition or manual entry.
+
+Inventory features:
+- Add, edit, remove, and search ingredients.
+- Filter by refrigerator, freezer, and pantry.
+- Track quantities where I provide them; otherwise show “quantity unknown.”
+- Mark items as running low or used up.
+- Highlight items nearing a user-confirmed date.
+- Include an optional list of pantry staples, but never assume I own them without confirmation.
+
+3. RECIPE DISCOVERY
+
+Suggest varied meals that make practical use of my confirmed inventory and preferences.
+
+Organize suggestions into:
+- Ready to cook: all required ingredients are available in sufficient quantities.
+- Check quantities: ingredients are present, but quantities are unknown.
+- Almost ready: only a few ingredients are missing.
+- Use soon: recipes using ingredients approaching their confirmed dates.
+- Quick meals: recipes within my selected time limit.
+
+For every recipe, show:
+- Recipe title and finished-dish visual.
+- Short description.
+- Servings.
+- Prep time, cook time, and total time.
+- Difficulty level.
+- Required equipment.
+- Ingredients and exact amounts.
+- Which ingredients I have and which are missing.
+- Suggested substitutions that respect my allergies and restrictions.
+- Estimated nutrition per serving.
+- An explained health score.
+
+Clearly distinguish required ingredients from optional garnishes. Do not describe a recipe as ready to cook when a required ingredient is missing.
+
+Allow filtering by meal type, cuisine, time, equipment, dietary preference, and health score. Include favorites and “suggest something different.”
+
+4. DETAILED RECIPES AND COOKING MODE
+
+Make instructions clear enough for a beginner.
+
+Each recipe must include:
+- Preparation steps such as washing, chopping, thawing, or preheating.
+- Numbered cooking steps in the correct order.
+- Exact ingredient amounts used in each step.
+- Temperatures in Fahrenheit with an optional Celsius toggle.
+- Approximate durations and sensory cues, such as texture and browning.
+- Food-safety temperatures where applicable; do not rely only on appearance to establish safe doneness.
+- Common mistakes and how to avoid them.
+- Serving suggestions.
+- Appropriate storage and reheating guidance.
+
+Where suitable, offer alternative methods such as stovetop, oven, air fryer, slow cooker, or grill. Each method needs its own complete instructions, timing, temperatures, and equipment. Do not force unsuitable cooking methods onto a recipe.
+
+Add a cooking mode with:
+- Large, readable instructions.
+- One step at a time.
+- Next and previous controls.
+- Built-in timers.
+- Ingredient amounts visible alongside the current step.
+- An optional keep-screen-awake setting.
+
+Changing the serving count should scale ingredient quantities. Do not blindly scale cooking times.
+
+5. FOOD VISUALS
+
+Show a representative finished-dish image for each recipe. Include preparation or intermediate-step visuals where helpful.
+
+Use properly licensed images or generated images. Label generated images as illustrative. If an image is illustrative rather than a verified photo of the recipe, make that clear.
+
+Never show an unrelated dish as if it represents the recipe. If image generation or retrieval fails, show a clear placeholder and keep the recipe usable.
+
+6. HEALTH SCORE AND NUTRITION
+
+Provide an understandable 0–100 recipe health score with a short explanation of what contributes to it.
+
+Use a documented, consistent rubric considering factors such as vegetables, fiber, protein, sodium, added sugar, and saturated fat. Explain that this is an app-defined general nutrition score, not a medical rating or a personalized health assessment.
+
+Calculate estimated nutrition using ingredient quantities and a reputable nutrition data source where available. Show calories, protein, carbohydrates, fat, fiber, and sodium per serving.
+
+Do not invent precise nutrition data. Label estimates clearly, disclose important missing data, and show “insufficient information” instead of a misleading score when necessary. Dietary restrictions and allergy checks must remain separate from the score.
+
+7. WEEKLY MEAL PLANNER
+
+Create an editable seven-day plan with breakfast, lunch, and dinner. Let me choose which meals and days to plan.
+
+The planner should:
+- Use my confirmed inventory first.
+- Prioritize ingredients approaching their confirmed dates.
+- Respect household size, preferences, available equipment, and cooking time.
+- Provide variety.
+- Reuse ingredients intelligently to reduce waste.
+- Include intentional leftovers when I choose.
+- Allow me to swap meals, move meals to another day, or regenerate selected days.
+- Save the plan and display today’s meals prominently on the home screen.
+
+Account for ingredients across the entire week. Do not allocate the same limited quantity to multiple meals. If quantities are unknown, ask me to confirm or clearly mark the plan as needing a quantity check.
+
+Planning a meal should reserve ingredients without subtracting them from actual inventory. When I mark a meal as cooked, let me confirm servings and actual ingredients used before deducting stock. Repeated taps must not deduct ingredients twice.
+
+Track leftovers separately, including portions and preparation date. A leftovers meal should consume those portions rather than deduct the original recipe’s raw ingredients again.
+
+Offer optional daily meal reminders with a user-selected time and notification permission.
+
+8. SHOPPING LIST
+
+Automatically create a shopping list for missing ingredients in my weekly plan.
+
+Combine duplicate ingredients and compatible units. Subtract available inventory correctly and flag quantities that need confirmation.
+
+Group items into sensible grocery categories. Allow manual additions, checkboxes, and sharing through the iPhone share sheet.
+
+Checking off an item should not silently change inventory. Provide a separate “Add purchased items to kitchen” confirmation flow.
+
+9. SCREENS AND DESIGN
+
+Use bottom navigation:
+- Today
+- My Kitchen
+- Scan
+- Recipes
+- Meal Plan
+
+Make the shopping list easy to access from Today and Meal Plan.
+
+Design direction:
+- Clean, welcoming, food-focused interface.
+- Warm neutral backgrounds with fresh green accents.
+- Large food images and readable typography.
+- Clear buttons and generous touch targets.
+- Accessible contrast and support for larger text.
+- Useful loading, empty, permission-denied, offline, and error states.
+
+The Today screen should show today’s meals, items to use soon, quick recipe suggestions, and a prominent scan button.
+
+10. TECHNICAL REQUIREMENTS AND PRIVACY
+
+- Use persistent storage for inventory, preferences, recipes, and meal plans.
+- Keep API keys on the server.
+- Use structured, validated AI responses.
+- Validate generated recipes against allergies, inventory, equipment, and required fields before displaying them.
+- Save recipe versions so an existing meal plan does not change unexpectedly when suggestions regenerate.
+- Explain when photos are sent to an external AI service.
+- Request camera, photo-library, and notification permissions only when needed.
+- Let me delete stored photos and my app data.
+- Avoid retaining original scan photos longer than necessary unless I choose to save them.
+- Preserve confirmed inventory if a scan, recipe request, or network call fails.
+- Cache saved recipes and the current plan for offline viewing.
+- Clearly indicate which features require internet access.
+
+Do not present sample recognition results, fake nutrition, or placeholder integrations as working features. If credentials or a service setup are required, identify exactly what is needed and make the limitation visible.
+
+11. BUILD AND ACCEPTANCE CHECKS
+
+Implement the core scan → review → inventory → recipe → cooking workflow first, then finish the weekly planner and shopping list.
+
+Verify:
+- Camera capture works on a physical iPhone.
+- Denying camera permission leaves manual entry usable.
+- Scan suggestions can be corrected before saving.
+- Multiple images do not silently duplicate inventory.
+- Inventory persists after closing and reopening the app.
+- Allergy conflicts are excluded and uncertain labels are flagged.
+- Missing ingredients and unknown quantities are accurately identified.
+- Serving changes update quantities and nutrition estimates.
+- Alternative cooking methods contain complete instructions.
+- Weekly plans do not overallocate known inventory.
+- Swapping a meal updates reservations and shopping needs.
+- Marking a meal cooked updates inventory only once.
+- Leftovers are tracked without double-counting ingredients.
+- Failed AI requests preserve existing data and offer a retry.
+
+Provide clear instructions for testing on my iPhone with Expo Go or, if native dependencies require it, an Expo development build. State which features have been tested and which still require physical-device verification.
+
+Make reasonable implementation choices and build the app, rather than stopping after a design mockup or project plan.

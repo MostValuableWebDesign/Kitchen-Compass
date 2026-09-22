@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/"
+title = "Kitchen Compass"
+description = "A polished iPhone kitchen companion that helps people scan and manage ingredients, discover recipes from what they have, cook step by step, and plan weekly meals."
+version = "1.0.0"
+id = "artifacts/kitchen-compass"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/" ]
+localPort = 22758
+
+[services.development]
+run = "pnpm --filter @workspace/kitchen-compass run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/kitchen-compass", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/kitchen-compass", "run", "serve" ]
+
+[services.env]
+PORT = "22758"
+BASE_PATH = "/"
