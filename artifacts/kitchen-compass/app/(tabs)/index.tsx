@@ -5,21 +5,25 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard, SectionTitle } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
-import { recipes, supportedEquipmentOptions } from '@/data/recipes';
+import { supportedEquipmentOptions } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, recipeReadiness, recipeMatchesPreferences } from '@/lib/kitchenLogic';
+import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
 
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, preferences, plan, reservations, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData } = useKitchen();
+  const { ingredients, preferences, plan, reservations, savedRecipes, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData } = useKitchen();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
   const useSoon = ingredients.filter((item) => (item.dateConfirmed && confirmedDateStatus(item.expires)) || item.status === 'low').slice(0, 3);
   const hasIngredient = (recipeId: string) => {
-    const recipe = recipes.find((item) => item.id === recipeId);
+    const planned = plan.find((item) => item.recipeId === recipeId);
+    const recipe = planned
+      ? lookupPlannedRecipe(planned, savedRecipes)
+      : getAvailableRecipes(savedRecipes).find((item) => item.id === recipeId);
     return !!recipe && recipeMatchesPreferences(recipe, preferences) && recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations).ready;
   };
   const reminderTimeLabel = `${String(reminders.hour % 12 || 12)}:${String(reminders.minute).padStart(2, '0')} ${reminders.hour >= 12 ? 'PM' : 'AM'}`;
@@ -46,7 +50,7 @@ export default function TodayScreen() {
         <View style={[styles.mealsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {(['Breakfast', 'Lunch', 'Dinner'] as const).map((meal) => {
             const planned = plannedToday.find((item) => item.meal === meal);
-            const recipe = recipes.find((item) => item.id === planned?.recipeId);
+            const recipe = lookupPlannedRecipe(planned, savedRecipes);
             return (
               <Pressable key={meal} onPress={() => router.push('/plan')} style={({ pressed }) => [styles.mealRow, { borderBottomColor: colors.border }, pressed && styles.pressed]}>
                 <View style={[styles.mealIcon, { backgroundColor: colors.secondary }]}><Ionicons name={meal === 'Breakfast' ? 'sunny-outline' : meal === 'Lunch' ? 'partly-sunny-outline' : 'moon-outline'} size={17} color={colors.primary} /></View>
@@ -71,7 +75,17 @@ export default function TodayScreen() {
         )}
 
         <SectionTitle title="Quick inspiration" action="See all" onPress={() => router.push('/recipes')} />
-        {recipes.filter((recipe) => recipeMatchesPreferences(recipe, preferences)).slice(0, 2).map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} hasIngredients={hasIngredient(recipe.id)} onPress={() => router.push(`/recipe/${recipe.id}`)} />)}
+         {getAvailableRecipes(savedRecipes)
+           .filter((recipe) => recipeMatchesPreferences(recipe, preferences))
+           .slice(0, 2)
+           .map((recipe) => (
+             <RecipeCard
+               key={`${recipe.id}-${recipe.sourceVersion}`}
+               recipe={recipe}
+               hasIngredients={hasIngredient(recipe.id)}
+               onPress={() => router.push(`/recipe/${recipe.id}`)}
+             />
+           ))}
         <View style={{ height: 18 }} />
       </ScrollView>
 

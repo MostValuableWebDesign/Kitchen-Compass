@@ -5,9 +5,9 @@ import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Chip } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen, type PurchaseRow } from '@/context/KitchenContext';
-import { recipes } from '@/data/recipes';
 import { calculateShoppingNeeds } from '@/lib/kitchenLogic';
 import { useColors } from '@/hooks/useColors';
+import { getAvailableRecipes } from '@/lib/recipeLookup';
 
 const categories = ['Produce', 'Protein', 'Dairy & eggs', 'Pantry', 'Other'] as const;
 
@@ -15,11 +15,11 @@ export default function ShoppingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { plan, ingredients, preferences, reservations, shoppingList, setShoppingList, addPurchasedItems } = useKitchen();
+  const { plan, ingredients, preferences, reservations, savedRecipes, shoppingList, setShoppingList, addPurchasedItems } = useKitchen();
   const [manualItem, setManualItem] = useState('');
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
-  const needs = useMemo(() => calculateShoppingNeeds(plan, recipes, ingredients, preferences.servings, reservations), [ingredients, plan, preferences.servings, reservations]);
+  const needs = useMemo(() => calculateShoppingNeeds(plan, getAvailableRecipes(savedRecipes), ingredients, preferences.servings, reservations), [ingredients, plan, preferences.servings, reservations, savedRecipes]);
   const checked = shoppingList.checkedIds;
   const manualItems = shoppingList.manualItems;
   const toggleChecked = (id: string) => setShoppingList({ checkedIds: checked.includes(id) ? checked.filter((value) => value !== id) : [...checked, id] });

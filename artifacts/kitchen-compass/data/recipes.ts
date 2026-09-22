@@ -334,5 +334,5 @@ export function scaledNutrition(recipe: Recipe, targetServings: number): Nutriti
 }
 
 export function getRecipe(id?: string) {
-  return recipes.find((recipe) => recipe.id === id) ?? recipes[0];
+  return recipes.find((recipe) => recipe.id === id);
 }

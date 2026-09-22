@@ -5,11 +5,12 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Chip } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
-import { formatTemperature, getRecipe } from '@/data/recipes';
+import { formatTemperature } from '@/data/recipes';
 import { scaledIngredient, scaledNutrition } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
+import { recipeVersion } from '@/lib/recipeDiscovery';
+import { lookupRecipe } from '@/lib/recipeLookup';
 
 export default function RecipeDetailScreen() {
   const colors = useColors();
@@ -17,14 +18,26 @@ export default function RecipeDetailScreen() {
   const router = useRouter();
   const { id, plannedMealId: requestedPlannedMealId } = useLocalSearchParams<{ id: string; plannedMealId?: string }>();
   const { ingredients, preferences, reservations, plan, savedRecipes, favoriteRecipeVersions, toggleFavoriteRecipe } = useKitchen();
-  const recipe = mergeRecipes([getRecipe(id)], savedRecipes).find((item) => item.id === id) ?? getRecipe(id);
+  const requestedId = Array.isArray(requestedPlannedMealId) ? requestedPlannedMealId[0] : requestedPlannedMealId;
+  const plannedOccurrences = plan.filter((meal) => meal.recipeId === id);
+  const plannedMeal = plannedOccurrences.find((meal) => meal.id === requestedId)
+    ?? (plannedOccurrences.length === 1 ? plannedOccurrences[0] : undefined);
+  const recipe = lookupRecipe(id, savedRecipes, plannedMeal?.recipeVersion);
+  if (!recipe) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 18 }]}>
+        <Pressable onPress={() => router.back()} style={[styles.backButton, { backgroundColor: colors.card }]}><Feather name="arrow-left" size={20} color={colors.foreground} /></Pressable>
+        <View style={styles.unavailable}>
+          <Feather name="alert-circle" size={36} color={colors.destructive} />
+          <Text style={[styles.unavailableTitle, { color: colors.foreground }]}>Recipe unavailable</Text>
+          <Text style={[styles.unavailableBody, { color: colors.mutedForeground }]}>This planned recipe version is no longer saved. The meal plan is preserved and no other recipe was substituted.</Text>
+        </View>
+      </View>
+    );
+  }
   const required = recipe.ingredients.filter((item) => item.required !== false);
   const have = (name: string) => ingredients.some((item) => ingredientIdentitiesMatch(name, item));
   const eligible = recipeMatchesPreferences(recipe, preferences);
-  const requestedId = Array.isArray(requestedPlannedMealId) ? requestedPlannedMealId[0] : requestedPlannedMealId;
-  const plannedOccurrences = plan.filter((meal) => meal.recipeId === recipe.id);
-  const plannedMeal = plannedOccurrences.find((meal) => meal.id === requestedId)
-    ?? (plannedOccurrences.length === 1 ? plannedOccurrences[0] : undefined);
   const servingTarget = plannedMeal?.servings ?? preferences.servings;
   const safety = recipeReadiness(recipe, ingredients, preferences.allergies, servingTarget, reservations, plannedMeal?.id);
   const nutrition = scaledNutrition(recipe, servingTarget);
@@ -59,6 +72,9 @@ export default function RecipeDetailScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 10 },
+  unavailableTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  unavailableBody: { fontSize: 14, lineHeight: 21, textAlign: 'center' },
   heroWrap: { height: 280, position: 'relative' },
   heroImage: { width: '100%', height: '100%' },
   placeholderHero: { alignItems: 'center', justifyContent: 'center', gap: 8 },

@@ -69,6 +69,28 @@ function validModelRecipe() {
   };
 }
 
+async function discoverModelRecipe(modelRecipe: ReturnType<typeof validModelRecipe>, body = requestBody()) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [modelRecipe] }) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return original(input, init);
+  };
+  try {
+    return await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify(body),
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
 test("recipe discovery rejects malformed requests before provider work", async () => {
   const response = await originalFetch(`${baseUrl}/recipes/discover`, {
     method: "POST",
@@ -138,4 +160,50 @@ test("recipe discovery never returns an allergy-conflicting candidate", async ()
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("recipe discovery rejects peanut butter when the AI omits the peanut allergen", async () => {
+  const recipe = validModelRecipe();
+  recipe.ingredients = [...recipe.ingredients, { name: "peanut butter", quantity: 1, unit: "tbsp", required: true }];
+  recipe.allergens = [];
+  const body = requestBody();
+  body.preferences.allergies = ["peanut"];
+  const response = await discoverModelRecipe(recipe, body);
+  assert.equal(response.status, 503);
+});
+
+test("recipe discovery rejects peanut butter when the AI mislabels it as a tree nut", async () => {
+  const recipe = validModelRecipe();
+  recipe.ingredients = [...recipe.ingredients, { name: "peanut butter", quantity: 1, unit: "tbsp", required: true }];
+  recipe.allergens = ["tree nut"];
+  const body = requestBody();
+  body.preferences.allergies = ["peanut"];
+  const response = await discoverModelRecipe(recipe, body);
+  assert.equal(response.status, 503);
+});
+
+test("recipe discovery rejects an ingredient it cannot assess for allergen safety", async () => {
+  const recipe = validModelRecipe();
+  recipe.ingredients = [...recipe.ingredients, { name: "mystery sauce", quantity: 1, unit: "tbsp", required: true }];
+  recipe.allergens = ["egg"];
+  const body = requestBody();
+  body.preferences.allergies = ["peanut"];
+  const response = await discoverModelRecipe(recipe, body);
+  assert.equal(response.status, 503);
+});
+
+test("recipe discovery keeps a genuinely safe recipe for the saved allergy", async () => {
+  const body = requestBody();
+  body.preferences.allergies = ["peanut"];
+  const response = await discoverModelRecipe(validModelRecipe(), body);
+  assert.equal(response.status, 200);
+});
+
+test("recipe discovery removes a substitution that fails the same allergen check", async () => {
+  const recipe = validModelRecipe();
+  recipe.substitutions = [{ from: "spinach", to: "peanut butter", reason: "A creamy alternative." }];
+  const response = await discoverModelRecipe(recipe);
+  assert.equal(response.status, 200);
+  const payload = await response.json() as { recipes: Array<{ substitutions: unknown[] }> };
+  assert.deepEqual(payload.recipes[0]!.substitutions, []);
 });
