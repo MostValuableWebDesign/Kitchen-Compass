@@ -356,11 +356,44 @@ components:
           type: integer
           minimum: 0
         temperature:
-          type: string
+          $ref: "#/components/schemas/RecipeTemperature"
         ingredients:
           type: array
           items: { type: string }
-      required: [order, title, body, ingredients]
+        ingredientAmounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipeStepIngredient"
+        cues:
+          type: array
+          items: { type: string }
+        safetyTemperature:
+          $ref: "#/components/schemas/RecipeSafetyTemperature"
+        mistakes:
+          type: array
+          items: { type: string }
+      required: [order, title, body, ingredients, ingredientAmounts, cues, mistakes]
+    RecipeTemperature:
+      type: object
+      properties:
+        fahrenheit: { type: number }
+        celsius: { type: number }
+      required: [fahrenheit, celsius]
+    RecipeStepIngredient:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        unit: { type: string, minLength: 1 }
+        note: { type: string }
+      required: [name, quantity, unit]
+    RecipeSafetyTemperature:
+      type: object
+      properties:
+        food: { type: string, minLength: 1 }
+        temperature:
+          $ref: "#/components/schemas/RecipeTemperature"
+      required: [food, temperature]
     RecipeNutrition:
       type: object
       properties:
@@ -516,6 +549,12 @@ components:
           type: string
         reheatingInstructions:
           type: string
+        servingSuggestions:
+          type: array
+          items: { type: string }
+        commonMistakes:
+          type: array
+          items: { type: string }
         dietaryTags:
           type: array
           items: { type: string }
@@ -549,6 +588,8 @@ components:
         - allergenInfo
         - storageInstructions
         - reheatingInstructions
+        - servingSuggestions
+        - commonMistakes
         - dietaryTags
         - dislikeTags
         - nutritionTags

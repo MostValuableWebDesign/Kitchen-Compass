@@ -219,6 +219,27 @@ export interface RecipeIngredient {
   required: boolean;
 }
 
+export interface RecipeTemperature {
+  fahrenheit: number;
+  celsius: number;
+}
+
+export interface RecipeStepIngredient {
+  /** @minLength 1 */
+  name: string;
+  /** @exclusiveMinimum 0 */
+  quantity: number;
+  /** @minLength 1 */
+  unit: string;
+  note?: string;
+}
+
+export interface RecipeSafetyTemperature {
+  /** @minLength 1 */
+  food: string;
+  temperature: RecipeTemperature;
+}
+
 export interface RecipeStep {
   /** @minimum 1 */
   order: number;
@@ -228,8 +249,12 @@ export interface RecipeStep {
   body: string;
   /** @minimum 0 */
   duration?: number;
-  temperature?: string;
+  temperature?: RecipeTemperature;
   ingredients: string[];
+  ingredientAmounts: RecipeStepIngredient[];
+  cues: string[];
+  safetyTemperature?: RecipeSafetyTemperature;
+  mistakes: string[];
 }
 
 export type RecipeNutritionStatus = typeof RecipeNutritionStatus[keyof typeof RecipeNutritionStatus];
@@ -408,6 +433,8 @@ export interface DiscoveredRecipe {
   allergenInfo: DiscoveredRecipeAllergenInfo;
   storageInstructions: string;
   reheatingInstructions: string;
+  servingSuggestions: string[];
+  commonMistakes: string[];
   dietaryTags: string[];
   dislikeTags: string[];
   nutritionTags: string[];

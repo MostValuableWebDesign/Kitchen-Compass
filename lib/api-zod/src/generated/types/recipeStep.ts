@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecipeSafetyTemperature } from './recipeSafetyTemperature';
+import type { RecipeStepIngredient } from './recipeStepIngredient';
+import type { RecipeTemperature } from './recipeTemperature';
 
 export interface RecipeStep {
   /** @minimum 1 */
@@ -15,6 +18,10 @@ export interface RecipeStep {
   body: string;
   /** @minimum 0 */
   duration?: number;
-  temperature?: string;
+  temperature?: RecipeTemperature;
   ingredients: string[];
+  ingredientAmounts: RecipeStepIngredient[];
+  cues: string[];
+  safetyTemperature?: RecipeSafetyTemperature;
+  mistakes: string[];
 }

@@ -33,7 +33,13 @@ export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
       amount: `${ingredient.quantity} ${ingredient.unit}`,
     })),
     nutrition: recipe.nutrition as NutritionCalculation,
-    steps: recipe.steps,
+    steps: recipe.steps.map((step, index) => ({
+      ...step,
+      order: step.order ?? index + 1,
+      ingredients: step.ingredients ?? [],
+      cues: [],
+      mistakes: [],
+    })),
     allergens: recipe.allergens,
     allergenInfo: recipe.allergenInfo,
     sourceVersion: recipe.recipeVersion,
@@ -41,6 +47,8 @@ export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
     source: 'server-ai',
     storageInstructions: recipe.storageInstructions,
     reheatingInstructions: recipe.reheatingInstructions,
+    servingSuggestions: recipe.servingSuggestions,
+    commonMistakes: recipe.commonMistakes,
     dietaryTags: recipe.dietaryTags,
     dislikeTags: recipe.dislikeTags,
     nutritionTags: recipe.nutritionTags,
@@ -83,7 +91,14 @@ export function isCacheableRecipe(value: unknown): value is Recipe {
     && typeof item.required === 'boolean',
   );
   const steps = Array.isArray(value.steps) && value.steps.length > 0 && value.steps.every((item) =>
-    isRecord(item) && typeof item.title === 'string' && typeof item.body === 'string',
+    isRecord(item)
+    && typeof item.order === 'number'
+    && typeof item.title === 'string'
+    && typeof item.body === 'string'
+    && Array.isArray(item.ingredients)
+    && Array.isArray(item.ingredientAmounts)
+    && Array.isArray(item.cues)
+    && Array.isArray(item.mistakes),
   );
   return typeof value.id === 'string'
     && typeof value.title === 'string'
