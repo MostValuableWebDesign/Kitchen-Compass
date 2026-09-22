@@ -178,6 +178,18 @@ test('saved preferences exclude unsafe or incompatible discovery results', () =>
   }), false);
 });
 
+test('new-user defaults keep all built-in recipes discoverable', () => {
+  assert.deepEqual(defaultPreferences.cuisines, []);
+  const builtInRecipeSummaries = [
+    { id: 'lemon-herb-chicken', cuisine: 'Mediterranean', cook: 25, difficulty: 'Easy', equipment: ['Stovetop', 'Oven'], ingredients: [{ name: 'chicken' }], allergens: [], allergenInfo: 'complete' as const, nutritionTags: ['More vegetables'] },
+    { id: 'tomato-basil-pasta', cuisine: 'Italian', cook: 18, difficulty: 'Easy', equipment: ['Stovetop'], ingredients: [{ name: 'pasta' }], allergens: ['wheat', 'milk'], allergenInfo: 'complete' as const, nutritionTags: ['More vegetables'] },
+    { id: 'green-egg-toast', cuisine: 'Modern', cook: 8, difficulty: 'Easy', equipment: ['Stovetop'], ingredients: [{ name: 'eggs' }], allergens: ['egg', 'wheat'], allergenInfo: 'complete' as const, nutritionTags: ['More vegetables', 'More protein'] },
+  ];
+  for (const recipe of builtInRecipeSummaries) {
+    assert.equal(recipeMatchesPreferences(recipe, defaultPreferences), true, recipe.id);
+  }
+});
+
 test('v1 migration preserves inventory, preferences, and multiple planned meals', () => {
   const migrated = migrateV1KitchenState(JSON.stringify({
     ingredients: [

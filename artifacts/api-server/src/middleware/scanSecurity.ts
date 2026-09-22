@@ -80,7 +80,7 @@ function verifyScanAccessToken(token: string, now = Date.now()) {
 }
 
 async function getPersistentPool() {
-  if (!process.env.DATABASE_URL) return null;
+  if (!process.env.DATABASE_URL?.trim()) return null;
   if (!persistentPoolPromise) {
     persistentPoolPromise = import("@workspace/db")
       .then(async ({ pool }) => {
@@ -93,34 +93,34 @@ async function getPersistentPool() {
           )
         `);
         return persistentPool;
-      })
-      .catch(() => null);
+      });
   }
   return persistentPoolPromise;
 }
 
-async function consumeQuota(key: string, limit: number, windowMs: number) {
+export async function consumeQuota(key: string, limit: number, windowMs: number) {
+  const persistentQuotaConfigured = Boolean(process.env.DATABASE_URL?.trim());
   const persistentPool = await getPersistentPool();
   if (persistentPool) {
-    try {
-      const result = await persistentPool.query(`
-        INSERT INTO kitchen_scan_quota (bucket_key, window_started_at, request_count)
-        VALUES ($1, NOW(), 1)
-        ON CONFLICT (bucket_key) DO UPDATE SET
-          window_started_at = CASE
-            WHEN EXTRACT(EPOCH FROM (NOW() - kitchen_scan_quota.window_started_at)) * 1000 >= $3 THEN NOW()
-            ELSE kitchen_scan_quota.window_started_at
-          END,
-          request_count = CASE
-            WHEN EXTRACT(EPOCH FROM (NOW() - kitchen_scan_quota.window_started_at)) * 1000 >= $3 THEN 1
-            ELSE kitchen_scan_quota.request_count + 1
-          END
-        RETURNING request_count
-      `, [key, limit, windowMs]);
-      return Number(result.rows[0]?.request_count ?? limit + 1) <= limit;
-    } catch (error) {
-      if (process.env.NODE_ENV === "production") throw error;
-    }
+    const result = await persistentPool.query(`
+      INSERT INTO kitchen_scan_quota (bucket_key, window_started_at, request_count)
+      VALUES ($1, NOW(), 1)
+      ON CONFLICT (bucket_key) DO UPDATE SET
+        window_started_at = CASE
+          WHEN EXTRACT(EPOCH FROM (NOW() - kitchen_scan_quota.window_started_at)) * 1000 >= $2 THEN NOW()
+          ELSE kitchen_scan_quota.window_started_at
+        END,
+        request_count = CASE
+          WHEN EXTRACT(EPOCH FROM (NOW() - kitchen_scan_quota.window_started_at)) * 1000 >= $2 THEN 1
+          ELSE kitchen_scan_quota.request_count + 1
+        END
+      RETURNING request_count
+    `, [key, windowMs]);
+    return Number(result.rows[0]?.request_count ?? limit + 1) <= limit;
+  }
+
+  if (persistentQuotaConfigured) {
+    throw new Error("Persistent scan quota storage is unavailable.");
   }
 
   const now = Date.now();
