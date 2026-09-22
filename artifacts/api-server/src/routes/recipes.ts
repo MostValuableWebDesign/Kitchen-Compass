@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { calculateHealthScore, calculateRecipeNutrition } from "@workspace/recipe-calculations";
+import {
+  assessRecipeAllergens,
+  calculateHealthScore,
+  calculateRecipeNutrition,
+  hasUnknownAllergenInformation,
+  requestedAllergenConflicts,
+} from "@workspace/recipe-calculations";
 import { sendScanError, scanLimits } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
@@ -203,37 +209,16 @@ function stableVersion(recipe: z.infer<typeof aiRecipeSchema>) {
   return createHash("sha256").update(`recipe-contract-v1:${canonicalRecipe(recipe)}`).digest("hex").slice(0, 24);
 }
 
-function hasToken(values: string[], target: string) {
-  return values.map(normalize).includes(normalize(target));
-}
-
 function hasIngredient(recipe: z.infer<typeof aiRecipeSchema>, tokens: string[]) {
   return recipe.ingredients.some((ingredient) => tokens.some((token) => normalize(ingredient.name).includes(normalize(token))));
 }
 
-const allergenGroups: Record<string, string[]> = {
-  egg: ["egg", "eggs"],
-  milk: ["milk", "dairy", "cheese", "butter", "yogurt", "cream", "parmesan"],
-  wheat: ["wheat", "bread", "pasta", "flour", "barley", "rye"],
-  peanut: ["peanut", "peanuts"],
-  "tree nut": ["tree nut", "almond", "cashew", "walnut", "pecan", "pistachio"],
-  fish: ["fish", "salmon", "tuna"],
-  shellfish: ["shellfish", "shrimp", "prawn", "crab", "lobster"],
-  soy: ["soy", "soya", "tofu"],
-  sesame: ["sesame", "tahini"],
-};
-
-function allergenIdentity(value: string) {
-  const normalized = normalize(value);
-  return Object.entries(allergenGroups).find(([, members]) => members.map(normalize).includes(normalized))?.[0] ?? normalized;
-}
-
 function violatesPreferences(recipe: z.infer<typeof aiRecipeSchema>, preferences: z.infer<typeof preferencesSchema>, filters: z.infer<typeof filtersSchema>) {
-  const requestedAllergies = preferences.allergies.map(allergenIdentity);
-  const recipeAllergens = recipe.allergens.map(allergenIdentity);
+  const allergenAssessment = assessRecipeAllergens(recipe.ingredients, recipe.allergens);
   if (recipe.allergenInfo !== "complete") return "allergen information is incomplete";
-  if (requestedAllergies.some((allergy) => recipeAllergens.includes(allergy))) return "it conflicts with a saved allergy";
-  if (requestedAllergies.some((allergy) => recipe.ingredients.some((ingredient) => allergenIdentity(ingredient.name) === allergy))) return "an ingredient conflicts with a saved allergy";
+  if (allergenAssessment.missingDeclaredAllergens.length) return "the allergen declaration does not cover the identified ingredients";
+  if (hasUnknownAllergenInformation(allergenAssessment)) return "an ingredient could not be assessed reliably";
+  if (requestedAllergenConflicts(allergenAssessment, preferences.allergies)) return "it conflicts with a saved allergy";
 
   const restrictions = [...preferences.dietaryRestrictions, ...(filters.dietaryPreference ? [filters.dietaryPreference] : [])].map(normalize);
   if (restrictions.includes("vegetarian") && hasIngredient(recipe, ["chicken", "beef", "pork", "fish", "shellfish"])) return "it conflicts with vegetarian restrictions";

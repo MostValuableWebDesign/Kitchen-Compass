@@ -15,6 +15,7 @@ import {
   replacePlanSlots,
   rankPlanRecipes,
   recipeMatchesPreferences,
+  recipeHasAllergyConflict,
   recipeAvailabilityLabel,
   recipeReadiness,
   scaleNutrition,
@@ -56,6 +57,70 @@ test('allergy conflicts exclude recipes and incomplete information is never safe
   assert.equal(recipeReadiness(recipe, [], ['eggs']).allergenConflict, true);
   assert.equal(recipeReadiness({ ...recipe, allergens: [], allergenInfo: 'incomplete' }, [], []).allergenIncomplete, true);
   assert.equal(recipeReadiness({ ...recipe, allergens: [], allergenInfo: 'incomplete' }, [], []).ready, false);
+});
+
+test('ingredient aliases detect common allergens even when AI metadata is wrong', () => {
+  const aliases = [
+    ['peanut butter', 'peanut'],
+    ['milk', 'milk'],
+    ['bread', 'wheat'],
+    ['flour', 'wheat'],
+    ['tofu', 'soy'],
+    ['tahini', 'sesame'],
+    ['salmon', 'fish'],
+    ['shrimp', 'shellfish'],
+    ['eggs', 'egg'],
+    ['almond meal', 'tree nut'],
+  ] as const;
+  for (const [ingredient, allergy] of aliases) {
+    assert.equal(recipeHasAllergyConflict({
+      ingredients: [{ name: ingredient }],
+      allergens: [],
+      allergenInfo: 'complete',
+    }, [allergy]), true, `${ingredient} should conflict with ${allergy}`);
+  }
+  assert.equal(recipeHasAllergyConflict({
+    ingredients: [{ name: 'peanut butter' }],
+    allergens: ['tree nut'],
+    allergenInfo: 'complete',
+  }, ['peanut']), true);
+});
+
+test('unknown ingredients are not allergy-safe or ready for a user with allergies', () => {
+  const result = recipeReadiness({
+    servings: 1,
+    ingredients: [{ name: 'mystery sauce', quantity: 1, unit: 'tbsp', required: true }],
+    allergens: [],
+    allergenInfo: 'complete',
+  }, [{ name: 'mystery sauce', status: 'fresh', confidence: 'confirmed', quantityValue: 1, unit: 'tbsp', quantityKnown: true }], ['peanut']);
+  assert.equal(result.allergenConflict, false);
+  assert.equal(result.allergenIncomplete, true);
+  assert.equal(result.ready, false);
+});
+
+test('known safe ingredients remain ready and saved recipes are rechecked after allergies change', () => {
+  const recipe = {
+    servings: 1,
+    ingredients: [{ name: 'spinach', quantity: 1, unit: 'cup', required: true }],
+    allergens: [],
+    allergenInfo: 'complete' as const,
+  };
+  const inventory = [{ name: 'spinach', status: 'fresh' as const, confidence: 'confirmed' as const, quantityValue: 1, unit: 'cup', quantityKnown: true }];
+  assert.equal(recipeReadiness(recipe, inventory, ['peanut']).ready, true);
+  const savedRecipe = { ...recipe, ingredients: [{ name: 'peanut butter', quantity: 1, unit: 'tbsp', required: true }] };
+  const savedInventory = [{ ...inventory[0], name: 'peanut butter' }];
+  assert.equal(recipeReadiness(savedRecipe, savedInventory, []).ready, true);
+  assert.equal(recipeReadiness(savedRecipe, savedInventory, ['peanut']).allergenConflict, true);
+  assert.equal(recipeReadiness(savedRecipe, savedInventory, ['peanut']).ready, false);
+});
+
+test('substitutions are checked for the current user allergy as well as ingredients', () => {
+  assert.equal(recipeHasAllergyConflict({
+    ingredients: [{ name: 'spinach' }],
+    substitutions: [{ to: 'peanut butter' }],
+    allergens: [],
+    allergenInfo: 'complete',
+  }, ['peanut']), true);
 });
 
 test('readiness labels distinguish safe, missing, insufficient, and unknown quantities', () => {

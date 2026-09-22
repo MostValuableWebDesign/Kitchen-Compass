@@ -22,10 +22,17 @@ export type ReservationRecord = {
   quantityKnown: boolean;
 };
 
+import {
+  assessRecipeAllergens,
+  hasUnknownAllergenInformation,
+  requestedAllergenConflicts,
+} from '@workspace/recipe-calculations';
+
 export type RecipeSafetyInput = {
   allergens: string[];
   allergenInfo: 'complete' | 'incomplete';
   ingredients?: RecipeIngredientInput[];
+  substitutions?: Array<{ to: string }>;
 };
 
 export type RecipeIngredientInput = {
@@ -68,23 +75,6 @@ const aliases: Record<string, string> = {
 export function normalizeIngredientName(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ');
   return aliases[normalized] ?? normalized;
-}
-
-const allergenGroups: Record<string, string[]> = {
-  egg: ['egg', 'eggs'],
-  milk: ['milk', 'dairy', 'cheese', 'butter', 'yogurt', 'cream', 'parmesan'],
-  wheat: ['wheat', 'bread', 'pasta', 'flour', 'barley', 'rye'],
-  peanut: ['peanut', 'peanuts'],
-  'tree nut': ['tree nut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio'],
-  fish: ['fish', 'salmon', 'tuna'],
-  shellfish: ['shellfish', 'shrimp', 'prawn', 'crab', 'lobster'],
-  soy: ['soy', 'soya', 'tofu'],
-  sesame: ['sesame', 'tahini'],
-};
-
-function allergenIdentity(value: string) {
-  const normalized = normalizeIngredientName(value);
-  return Object.entries(allergenGroups).find(([, members]) => members.map(normalizeIngredientName).includes(normalized))?.[0] ?? normalized;
 }
 
 export function canonicalUnit(value?: string) {
@@ -183,9 +173,8 @@ export function ingredientIdentitiesMatch(recipeName: string, inventory: Invento
 }
 
 export function recipeHasAllergyConflict(recipe: RecipeSafetyInput, allergies: string[]) {
-  const requested = allergies.map(allergenIdentity);
-  return recipe.allergens.some((allergen) => requested.includes(allergenIdentity(allergen)))
-    || recipe.ingredients?.some((ingredient) => requested.includes(allergenIdentity(ingredient.name))) === true;
+  const assessment = assessRecipeAllergens(recipe.ingredients ?? [], recipe.allergens, recipe.substitutions);
+  return requestedAllergenConflicts(assessment, allergies);
 }
 
 export type RecipeReadinessResult = {
@@ -216,13 +205,14 @@ export function recipeReadiness(
   reservations: ReservationRecord[] = [],
   plannedMealId?: string,
 ): RecipeReadinessResult {
+  const allergenAssessment = assessRecipeAllergens(recipe.ingredients, recipe.allergens, recipe.substitutions);
   const result: RecipeReadinessResult = {
     ready: true,
     missingIngredients: [],
     insufficientIngredients: [],
     quantityCheckIngredients: [],
-    allergenConflict: recipeHasAllergyConflict(recipe, allergies),
-    allergenIncomplete: recipe.allergenInfo !== 'complete',
+    allergenConflict: requestedAllergenConflicts(allergenAssessment, allergies),
+    allergenIncomplete: recipe.allergenInfo !== 'complete' || hasUnknownAllergenInformation(allergenAssessment),
   };
   if (result.allergenConflict || result.allergenIncomplete) result.ready = false;
 
@@ -282,13 +272,17 @@ export function recipeMatchesPreferences(
     ingredients: Array<{ name: string }>;
     allergens: string[];
     allergenInfo: 'complete' | 'incomplete';
+    substitutions?: Array<{ to: string }>;
     dietaryTags?: string[];
     dislikeTags?: string[];
     nutritionTags?: string[];
   },
   preferences: RecipePreferenceInput,
 ) {
-  if (recipeHasAllergyConflict(recipe, preferences.allergies) || recipe.allergenInfo !== 'complete') return false;
+  const allergenAssessment = assessRecipeAllergens(recipe.ingredients, recipe.allergens, recipe.substitutions);
+  if (requestedAllergenConflicts(allergenAssessment, preferences.allergies)
+    || recipe.allergenInfo !== 'complete'
+    || hasUnknownAllergenInformation(allergenAssessment)) return false;
   if (preferences.cuisines.length && !preferences.cuisines.some((cuisine) => cuisine.toLowerCase() === recipe.cuisine.toLowerCase())) return false;
   if (recipe.cook > preferences.cookTime) return false;
   if (recipe.equipment.some((item) => !preferences.equipment.includes(item))) return false;

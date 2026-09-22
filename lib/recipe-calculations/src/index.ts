@@ -45,6 +45,17 @@ export type HealthScoreCalculation = {
   factors: ScoreFactor[];
 };
 
+export {
+  assessIngredientAllergens,
+  assessRecipeAllergens,
+  hasUnknownAllergenInformation,
+  normalizeAllergen,
+  requestedAllergenConflicts,
+  type CommonAllergen,
+  type IngredientAllergenAssessment,
+  type RecipeAllergenAssessment,
+} from './allergenSafety';
+
 type Ingredient = {
   name: string;
   quantity: number;
