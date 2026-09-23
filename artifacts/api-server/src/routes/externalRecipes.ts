@@ -4,6 +4,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
+const MAX_PROVIDER_SEARCH_ANCHORS = 10;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
@@ -102,7 +103,7 @@ router.post("/recipes/external", async (req, res) => {
   const searchIngredients = pantry.filter((item) => !commonSeasonings.has(ingredientIdentity(item)));
   const base = `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}`;
   try {
-    const searches = await Promise.all((searchIngredients.length ? searchIngredients : pantry).slice(0, 6).map(async (ingredient) => {
+      const searches = await Promise.all((searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS).map(async (ingredient) => {
       const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
       const response = await providerJson(`${base}/filter.php?i=${value}`);
       return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
