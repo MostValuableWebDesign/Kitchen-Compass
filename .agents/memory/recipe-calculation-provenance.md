@@ -20,3 +20,9 @@ Recipe discovery should validate candidates individually and make one constraine
 **Why:** The provider can return structurally invalid steps or unknown pantry ingredients even under a strict schema request, especially when the inventory prompt is large.
 
 **How to apply:** Discard invalid candidates by index, retry within the request deadline using confirmed inventory and explicit basic ingredients, and keep deterministic allergen and preference checks on the retry output.
+
+The constrained retry must rebuild its prompt from only inventory names the deterministic allergen checker can assess. It must not append corrections to the original full inventory prompt, because scanned sauces, blends, and packaged foods can otherwise be selected again and make every retry candidate fail.
+
+**Why:** Confirmed inventory means the item is present; it does not mean its allergen profile is known. Reusing the full inventory caused valid recipe generation to end in an offline fallback whenever all candidates included an unsupported scanned item.
+
+**How to apply:** Filter retry inventory through the same ingredient allergen assessment used for final validation, preserve the original preferences, and explicitly restrict missing basics to known-safe names.
