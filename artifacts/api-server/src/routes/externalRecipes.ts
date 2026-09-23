@@ -5,6 +5,7 @@ import { sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
+const MAX_COUNTED_MISSING_INGREDIENTS = 5;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
@@ -38,6 +39,17 @@ function ingredientIdentity(value: string) {
 }
 
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
+const nonCountedMissingTerms = [
+  "salt", "pepper", "paprika", "cayenne", "chilli", "chili", "cumin", "coriander",
+  "turmeric", "cinnamon", "nutmeg", "clove", "allspice", "cardamom", "ginger",
+  "oregano", "basil", "thyme", "rosemary", "parsley", "cilantro", "dill", "sage",
+  "mint", "tarragon", "bay leaf", "garam masala", "curry powder", "spice", "herb",
+];
+
+function isNonCountedMissingIngredient(value: string) {
+  const identity = ingredientIdentity(value);
+  return nonCountedMissingTerms.some((term) => identity === term || identity.includes(` ${term}`) || identity.includes(`${term} `));
+}
 
 function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>()) {
   const ids: string[] = [];
@@ -81,6 +93,7 @@ export function normalizeExternalMeal(meal: MealDetail, pantry: string[], allerg
   ingredients.forEach((item) => {
     const identity = ingredientIdentity(item.name);
     const matches = pantryIds.has(identity);
+    if (!matches && isNonCountedMissingIngredient(item.name)) return;
     const list = matches ? matchedIngredients : missingIngredients;
     const seen = matches ? seenMatched : seenMissing;
     if (!seen.has(identity)) {
@@ -128,8 +141,10 @@ router.post("/recipes/external", async (req, res) => {
       const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
       return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
     }));
-    const recipes = details.flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
-      .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length);
+    const recipes = details
+      .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
+      .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
+      .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
     res.json({ recipes, provider: "TheMealDB", safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label." });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");

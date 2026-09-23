@@ -152,6 +152,9 @@ export default function RecipesScreen() {
     ...(item.confidence ? { confidence: item.confidence } : {}),
   })), [ingredients]);
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
+  const visibleExternalRecipes = useMemo(() => externalRecipes
+    .filter((item) => !discardedExternalRecipeIds.includes(item.id))
+    .sort((left, right) => right.matchedIngredients.length - left.matchedIngredients.length || left.missingIngredients.length - right.missingIngredients.length), [discardedExternalRecipeIds, externalRecipes]);
 
   const prepareImages = async (recipes: Recipe[]) => {
     const missing = recipes.filter((recipe) => !recipe.image
@@ -343,11 +346,19 @@ export default function RecipesScreen() {
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
          <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
         {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
-        {externalRecipes.filter((item) => !discardedExternalRecipeIds.includes(item.id)).map((item) => {
+        {externalRecipes.length ? <View style={styles.externalResultsHeader}>
+          <View>
+            <Text style={[styles.externalResultsTitle, { color: colors.foreground }]}>{visibleExternalRecipes.length} recipe{visibleExternalRecipes.length === 1 ? '' : 's'} found</Text>
+            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Best ingredient matches first · Swipe to browse</Text>
+          </View>
+          <Feather name="arrow-right" size={18} color={colors.primary} />
+        </View> : null}
+        {visibleExternalRecipes.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} decelerationRate="fast" snapToInterval={302} contentContainerStyle={styles.externalResults}>
+        {visibleExternalRecipes.map((item) => {
           const saved = savedRecipes.some((recipe) => recipeVersion(recipe) === publishedRecipeVersion(item.id) || recipeTitleKey(recipe) === recipeTitleKey({ title: item.title }));
           return <View key={item.id} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}
-            <View style={{ flex: 1 }}>
+            <View style={styles.externalCardBody}>
               <Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text>
               <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text>
               <Text style={[styles.resultIngredientText, { color: colors.primary }]}>Have: {item.matchedIngredients.join(', ') || 'No matched ingredients listed'}</Text>
@@ -361,6 +372,7 @@ export default function RecipesScreen() {
             </View>
           </View>;
         })}
+        </ScrollView> : null}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}
@@ -437,7 +449,16 @@ export default function RecipesScreen() {
               })}
             </ScrollView> : null}
             {publishedSearchStep === 'manual' ? <Pressable disabled={!publishedDriverIds.length} onPress={() => setPublishedSearchStep('confirm')} style={[styles.autoButton, { borderColor: colors.border, backgroundColor: publishedDriverIds.length ? colors.primary : colors.muted }]}><Text style={[styles.outlineButtonText, { color: publishedDriverIds.length ? colors.primaryForeground : colors.mutedForeground }]}>Review {publishedDriverIds.length} selected</Text></Pressable> : null}
-            {publishedSearchStep === 'confirm' ? <View style={styles.confirmActions}><Pressable onPress={() => setPublishedSearchStep(publishedSelectionMode === 'manual' ? 'manual' : 'choice')} style={[styles.autoButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Back</Text></Pressable><Pressable testID="confirm-published-search" onPress={() => { setPublishedPickerOpen(false); void findPublished(); }} style={[styles.autoButton, { borderColor: colors.primary, backgroundColor: colors.primary }]}><Text style={[styles.outlineButtonText, { color: colors.primaryForeground }]}>Find recipes</Text></Pressable></View> : null}
+            {publishedSearchStep === 'confirm' ? <View style={[styles.confirmActions, { borderTopColor: colors.border }]}>
+              <Pressable onPress={() => setPublishedSearchStep(publishedSelectionMode === 'manual' ? 'manual' : 'choice')} style={({ pressed }) => [styles.confirmBackButton, { borderColor: colors.border, backgroundColor: colors.background }, pressed && styles.pressed]}>
+                <Feather name="arrow-left" size={18} color={colors.primary} />
+                <Text style={[styles.confirmBackText, { color: colors.primary }]}>Back</Text>
+              </Pressable>
+              <Pressable testID="confirm-published-search" onPress={() => { setPublishedPickerOpen(false); void findPublished(); }} style={({ pressed }) => [styles.confirmFindButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}>
+                <Text style={[styles.confirmFindText, { color: colors.primaryForeground }]}>Find recipes</Text>
+                <Feather name="search" size={18} color={colors.primaryForeground} />
+              </Pressable>
+            </View> : null}
           </View>
         </View>
       </Modal>
@@ -480,9 +501,13 @@ const styles = StyleSheet.create({
   progressNote: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 14 },
   cancelButton: { marginTop: 20, minHeight: 44, paddingHorizontal: 20, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   cancelText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
-  externalCard: { borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 10 },
-  externalImage: { width: 64, height: 64, borderRadius: 10 },
-  externalTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  externalResultsHeader: { marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  externalResultsTitle: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  externalResults: { gap: 12, paddingVertical: 12, paddingRight: 20 },
+  externalCard: { width: 290, borderWidth: 1, borderRadius: 20, padding: 12, overflow: 'hidden' },
+  externalImage: { width: '100%', height: 132, borderRadius: 14, marginBottom: 12 },
+  externalCardBody: { flex: 1 },
+  externalTitle: { fontSize: 16, lineHeight: 21, fontFamily: 'Inter_700Bold' },
   searchOptions: { borderWidth: 1, borderRadius: 14, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
   searchOptionsTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   outlineButton: { minHeight: 36, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
@@ -499,7 +524,11 @@ const styles = StyleSheet.create({
   pickerCategory: { fontSize: 13, fontFamily: 'Inter_700Bold' },
   confirmSelection: { gap: 12 },
   selectedChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  confirmActions: { flexDirection: 'row', gap: 10 },
+  confirmActions: { flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, paddingTop: 14, marginTop: 14 },
+  confirmBackButton: { minHeight: 50, minWidth: 104, borderRadius: 16, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  confirmBackText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  confirmFindButton: { flex: 1, minHeight: 50, borderRadius: 16, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
+  confirmFindText: { fontSize: 14, fontFamily: 'Inter_700Bold' },
   resultIngredientText: { fontSize: 11, lineHeight: 16, marginTop: 4 },
   externalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 9 },
 });
