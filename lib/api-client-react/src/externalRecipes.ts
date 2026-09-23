@@ -19,7 +19,14 @@ export type ExternalRecipesResponse = {
   safetyNotice: string;
 };
 
-export function findExternalRecipes(ingredients: string[], allergies: string[], signal?: AbortSignal, searchAnchors?: string[], excludeRecipeIds?: string[]) {
+export function findExternalRecipes(
+  ingredients: string[],
+  allergies: string[],
+  signal?: AbortSignal,
+  searchAnchors?: string[],
+  excludedRecipeIds: string[] = [],
+  excludedRecipeTitles: string[] = [],
+) {
   return customFetch<ExternalRecipesResponse>("/api/recipes/external", {
     method: "POST",
     signal,
@@ -28,7 +35,8 @@ export function findExternalRecipes(ingredients: string[], allergies: string[], 
       ingredients,
       allergies,
       ...(searchAnchors?.length ? { searchAnchors } : {}),
-      ...(excludeRecipeIds?.length ? { excludeRecipeIds } : {}),
+      excludedRecipeIds,
+      excludedRecipeTitles,
     }),
   });
 }

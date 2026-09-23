@@ -9,6 +9,7 @@ import type {
 } from '@/context/KitchenContext';
 import { normalizeConfirmedDate, normalizeIngredientName, parseQuantityText, type ReservationRecord } from '@/lib/kitchenLogic';
 import { parseCachedRecipes } from '@/lib/recipeDiscovery';
+import { parseArchivedRecipes, type ArchivedRecipe } from '@/lib/recipeArchive';
 import type { Recipe } from '@/data/recipes';
 
 export type PersistedKitchenState = {
@@ -20,6 +21,7 @@ export type PersistedKitchenState = {
   leftovers: Leftover[];
   shoppingList: ShoppingListState;
   savedRecipes: Recipe[];
+  archivedRecipes: ArchivedRecipe[];
   favoriteRecipeVersions: string[];
   onboardingComplete: boolean;
   reminders: import('@/lib/reminders').ReminderSettings;
@@ -49,6 +51,7 @@ export function emptyPersistedKitchenState(): PersistedKitchenState {
     leftovers: [],
     shoppingList: { checkedIds: [], manualItems: [] },
     savedRecipes: [],
+    archivedRecipes: [],
     favoriteRecipeVersions: [],
     onboardingComplete: false,
     reminders: { enabled: false, hour: 18, minute: 0 },
@@ -169,6 +172,7 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
       }
       : { checkedIds: [], manualItems: [] },
     savedRecipes: parseCachedRecipes(saved.savedRecipes),
+    archivedRecipes: parseArchivedRecipes(saved.archivedRecipes),
     favoriteRecipeVersions: Array.isArray(saved.favoriteRecipeVersions)
       ? saved.favoriteRecipeVersions.filter((value): value is string => typeof value === 'string')
       : [],

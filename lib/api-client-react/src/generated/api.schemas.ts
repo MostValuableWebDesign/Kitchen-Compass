@@ -209,6 +209,8 @@ export interface RecipeDiscoveryRequest {
   excludeRecipeVersions: string[];
   /** @maxItems 30 */
   excludeRecipeTitles?: string[];
+  /** @maxItems 200 */
+  excludeArchivedRecipeTitles?: string[];
 }
 
 export interface RecipeIngredient {

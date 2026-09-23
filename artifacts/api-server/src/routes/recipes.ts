@@ -51,6 +51,7 @@ const requestSchema = z.object({
   variationSeed: z.string().min(1).max(80),
   excludeRecipeVersions: z.array(z.string().max(160)).max(30),
   excludeRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
+  excludeArchivedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
 });
 
 const ingredientSchema = z.object({
@@ -356,7 +357,7 @@ router.post("/recipes/discover", async (req, res) => {
     return;
   }
 
-  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles } = parsed.data;
+  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles } = parsed.data;
   const usableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
   const allergenAssessableInventory = usableInventory.filter((item) =>
     assessIngredientAllergens([item]).unknownIngredients.length === 0
@@ -382,6 +383,7 @@ router.post("/recipes/discover", async (req, res) => {
     `Variation seed: ${variationSeed}`,
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
     `Do not repeat these existing recipe titles, even with different wording or amounts: ${JSON.stringify(excludeRecipeTitles)}`,
+    `Never suggest these archived recipes again: ${JSON.stringify(excludeArchivedRecipeTitles)}`,
     `Confirmed inventory: ${JSON.stringify(promptInventory)}`,
     `Saved preferences: ${JSON.stringify(preferences)}`,
     `Selected filters: ${JSON.stringify(filters)}`,
@@ -437,6 +439,7 @@ router.post("/recipes/discover", async (req, res) => {
       return false;
     };
     const filterSafeRecipes = (candidates: z.infer<typeof aiRecipeSchema>[]) => {
+      const archivedTitles = new Set(excludeArchivedRecipeTitles.map(recipeTitleKey));
       const seenTitles = new Set(excludeRecipeTitles.map(recipeTitleKey));
       const eligibleRecipes = candidates.filter((recipe) => {
         if (!validateSteps(recipe)) return reject("steps");
@@ -444,6 +447,7 @@ router.post("/recipes/discover", async (req, res) => {
         const preferenceViolation = violatesPreferences(recipe, preferences, filters);
         if (preferenceViolation) return reject(preferenceViolation);
         const title = recipeTitleKey(recipe.title);
+        if (archivedTitles.has(title)) return reject("archived-title");
         if (seenTitles.has(title)) return reject("duplicate-title");
         seenTitles.add(title);
         return true;
@@ -469,11 +473,11 @@ router.post("/recipes/discover", async (req, res) => {
     }
     if (!safeRecipes.length) {
       if (aiRecipes.length && rejectionReasons.size
-        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version")) {
+        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version" || reason === "archived-title")) {
         res.json(responseSchema.parse({
           recipes: [],
           source: "server-ai",
-          warning: "No new recipes were found. Your saved recipes are still available.",
+          warning: "No new recipes were found. Existing and archived recipes were skipped.",
         }));
         return;
       }

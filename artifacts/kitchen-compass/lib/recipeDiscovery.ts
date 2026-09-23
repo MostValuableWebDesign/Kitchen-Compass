@@ -180,6 +180,7 @@ export function buildRecipeDiscoveryRequest(
   variationSeed: string,
   excludeRecipeVersions: string[],
   excludeRecipeTitles: string[] = [],
+  excludeArchivedRecipeTitles: string[] = [],
 ): {
   inventory: RecipeDiscoveryInventory[];
   preferences: RecipeDiscoveryPreferences;
@@ -187,6 +188,7 @@ export function buildRecipeDiscoveryRequest(
   variationSeed: string;
   excludeRecipeVersions: string[];
   excludeRecipeTitles: string[];
+  excludeArchivedRecipeTitles: string[];
 } {
   return {
     inventory,
@@ -202,5 +204,6 @@ export function buildRecipeDiscoveryRequest(
     variationSeed,
     excludeRecipeVersions,
     excludeRecipeTitles,
+    excludeArchivedRecipeTitles,
   };
 }

@@ -13,6 +13,7 @@ import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
 import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients } from '@/lib/publishedRecipeSearch';
+import { isArchivedPublished, isArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import type { Recipe } from '@/data/recipes';
 
 type ResultFilter = 'All' | 'Ready to cook' | 'Almost ready' | 'Check quantities' | 'Quick meals' | 'Use soon' | 'Favorites';
@@ -34,11 +35,15 @@ export default function RecipesScreen() {
     preferences,
     reservations,
     savedRecipes,
+    archivedRecipes,
     favoriteRecipeVersions,
     saveDiscoveredRecipes,
     savePublishedRecipes,
     setDiscoveredRecipeImage,
     toggleFavoriteRecipe,
+    archiveRecipe,
+    archivePublishedRecipe,
+    restoreRecipe,
     hydrated,
   } = useKitchen();
   const [search, setSearch] = useState('');
@@ -65,6 +70,7 @@ export default function RecipesScreen() {
   const [progressClock, setProgressClock] = useState(Date.now());
   const [imageBusy, setImageBusy] = useState(false);
   const [imageMessage, setImageMessage] = useState('');
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const searchGuard = useRef(false);
   const imageJob = useRef(0);
   const pendingImages = useRef(new Set<string>());
@@ -142,6 +148,7 @@ export default function RecipesScreen() {
       return eligible.length === current.length ? current : eligible;
     });
   }, [rankedPublishedIngredients]);
+  const visibleSavedCount = savedRecipes.filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes)).length;
   const inventoryPayload = useMemo(() => ingredients.map((item) => ({
     name: item.name,
     location: item.location,
@@ -157,7 +164,7 @@ export default function RecipesScreen() {
     .sort((left, right) => right.matchedIngredients.length - left.matchedIngredients.length || left.missingIngredients.length - right.missingIngredients.length), [discardedExternalRecipeIds, externalRecipes]);
 
   const prepareImages = async (recipes: Recipe[]) => {
-    const missing = recipes.filter((recipe) => !recipe.image
+    const missing = recipes.filter((recipe) => !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)
       && !pendingImages.current.has(recipeVersion(recipe))
       && !savedRecipes.some((saved) => recipeTitleKey(saved) === recipeTitleKey(recipe) && Boolean(saved.image))).slice(0, 8);
     if (!missing.length) return;
@@ -179,13 +186,14 @@ export default function RecipesScreen() {
   useEffect(() => {
     if (!hydrated) return;
     const recipesMissingImages = savedRecipes
-      .filter((recipe) => recipe.source === 'server-ai' && !recipe.image)
+      .filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes))
       .slice(0, 8);
     if (recipesMissingImages.length) void prepareImages(recipesMissingImages);
-  }, [hydrated]);
+  }, [hydrated, archivedRecipes]);
 
   const discover = async (different = false) => {
-    const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
+    const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations)
+      .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes));
     const controller = new AbortController();
     if (!beginSearch('kitchen', controller)) return;
     setDiscoveryBusy(true);
@@ -202,10 +210,12 @@ export default function RecipesScreen() {
         `${different ? 'different' : 'refresh'}-${nextVariation}`,
         availableRecipes.map(recipeVersion).slice(-30),
         availableRecipes.map((recipe) => recipe.title).slice(-30),
+        archivedRecipes.map((entry) => entry.title).slice(0, 200),
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const recipes = novelRecipes(availableRecipes, result.recipes.map(mapDiscoveredRecipe));
+      const recipes = novelRecipes(availableRecipes, result.recipes.map(mapDiscoveredRecipe))
+        .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes));
       if (recipes.length) saveDiscoveredRecipes(recipes);
       setSearch('');
       setResultFilter('All');
@@ -246,15 +256,20 @@ export default function RecipesScreen() {
         allergies,
         controller.signal,
         searchInput.anchors,
-        [...seenPublishedRecipeIds.current],
+        [
+          ...seenPublishedRecipeIds.current,
+          ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : []),
+        ].slice(0, 200),
+        archivedRecipes.map((entry) => entry.title).slice(0, 200),
       );
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      setExternalRecipes(result.recipes);
+      const visible = result.recipes.filter((recipe) => !isArchivedPublished(recipe, archivedRecipes));
+      setExternalRecipes(visible);
       setDiscardedExternalRecipeIds([]);
-      result.recipes.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
-      setExternalMessage(result.recipes.length
+      visible.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
+      setExternalMessage(visible.length
         ? result.safetyNotice
-        : 'No new published recipes matched these ingredients. Try a different manual selection.');
+        : 'No new published recipes matched these ingredients. Archived recipes remain hidden.');
       setExternalBusy(false);
       finishSearch(controller, true);
     } catch {
@@ -304,6 +319,25 @@ export default function RecipesScreen() {
     );
   };
 
+  const confirmArchiveRecipe = (recipe: Recipe) => Alert.alert(
+    `Archive ${recipe.title}?`,
+    'This hides the recipe from suggestions and future searches. Saved images and existing planned meals stay available. You can restore it from Archived recipes.',
+    [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive recipe', onPress: () => archiveRecipe(recipe) }],
+  );
+  const confirmArchivePublished = (recipe: ExternalRecipe) => Alert.alert(
+    `Archive ${recipe.title}?`,
+    'This hides the published recipe from future searches. You can restore it from Archived recipes.',
+    [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive recipe', onPress: () => {
+      archivePublishedRecipe(recipe);
+      setExternalRecipes((current) => current.filter((item) => item.id !== recipe.id));
+    } }],
+  );
+  const restoreArchived = (entry: ArchivedRecipe) => {
+    restoreRecipe(entry.key);
+    if (entry.externalRecipe) setExternalRecipes((current) => current.some((item) => item.id === entry.externalRecipe?.id)
+      ? current : [entry.externalRecipe!, ...current]);
+  };
+
   const recipeUsesSoonIngredient = (recipe: (typeof availableRecipes)[number]) => recipe.ingredients.some((ingredient) => ingredients.some((item) =>
     ingredientIdentitiesMatch(ingredient.name, item)
     && item.dateConfirmed === true
@@ -311,6 +345,7 @@ export default function RecipesScreen() {
   ));
 
   const filtered = useMemo(() => availableRecipes.filter((recipe) => {
+    if (isArchivedRecipe(recipe, archivedRecipes)) return false;
     const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
     const availability = recipeAvailabilityLabel(safety);
     const totalMinutes = recipe.prep + recipe.cook;
@@ -329,7 +364,7 @@ export default function RecipesScreen() {
       || (resultFilter === 'Favorites' && favoriteRecipeVersions.includes(recipeVersion(recipe)))
       || resultFilter === availability;
     return matchesSavedPreferences && matchesLocalFilters && matchesSearch && matchesResultFilter;
-  }), [availableRecipes, cuisine, dietaryPreference, equipment, favoriteRecipeVersions, ingredients, maxMinutes, mealType, minHealthScore, preferences, reservations, resultFilter, search]);
+  }), [archivedRecipes, availableRecipes, cuisine, dietaryPreference, equipment, favoriteRecipeVersions, ingredients, maxMinutes, mealType, minHealthScore, preferences, reservations, resultFilter, search]);
 
   const statusMessage = discoveryBusy
     ? 'Checking your confirmed kitchen and preparing new ideas…'
@@ -341,6 +376,11 @@ export default function RecipesScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <AppHeader eyebrow="From what you have" title="Recipes" />
+        <Pressable testID="archived-recipes-toggle" onPress={() => setArchiveOpen((open) => !open)} style={[styles.archiveToggle, { backgroundColor: colors.card, borderColor: colors.border }]}><Feather name="archive" size={17} color={colors.primary} /><Text style={[styles.archiveToggleText, { color: colors.foreground }]}>Archived recipes ({archivedRecipes.length})</Text><Feather name={archiveOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedForeground} /></Pressable>
+        {archiveOpen ? <View style={[styles.archivePanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {archivedRecipes.length ? archivedRecipes.map((entry) => <View key={entry.key} style={[styles.archivedRow, { borderBottomColor: colors.border }]}><View style={{ flex: 1 }}><Text style={[styles.archivedTitle, { color: colors.foreground }]}>{entry.title}</Text><Text style={[styles.archivedSource, { color: colors.mutedForeground }]}>{entry.externalRecipe ? 'Published recipe' : 'Saved recipe'} · hidden from discovery</Text></View><Pressable accessibilityLabel={`Restore ${entry.title}`} onPress={() => restoreArchived(entry)} style={[styles.restoreButton, { backgroundColor: colors.secondary }]}><Text style={[styles.restoreText, { color: colors.primary }]}>Restore</Text></Pressable></View>)
+            : <Text style={[styles.serviceText, { color: colors.mutedForeground }]}>No archived recipes yet.</Text>}
+        </View> : null}
         <View style={[styles.search, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="search" size={18} color={colors.mutedForeground} />
           <TextInput value={search} onChangeText={setSearch} placeholder="Search recipes or cuisines" placeholderTextColor={colors.mutedForeground} style={[styles.searchInput, { color: colors.foreground }]} />
@@ -360,7 +400,7 @@ export default function RecipesScreen() {
           </Pressable>
         </View>
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
-        {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
+        {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
          <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
         {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
         {externalRecipes.length ? <View style={styles.externalResultsHeader}>
@@ -385,6 +425,7 @@ export default function RecipesScreen() {
                 <Pressable onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Open source ↗</Text></Pressable>
                 <Pressable disabled={saved} onPress={() => savePublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: saved ? colors.muted : colors.secondary }]}><Text style={[styles.outlineButtonText, { color: saved ? colors.mutedForeground : colors.primary }]}>{saved ? 'Saved' : 'Add recipe'}</Text></Pressable>
                 <Pressable onPress={() => discardPublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.destructive }]}>Discard</Text></Pressable>
+                <Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={[styles.outlineButton, { borderColor: colors.border }]}><Feather name="archive" size={15} color={colors.mutedForeground} /><Text style={[styles.outlineButtonText, { color: colors.mutedForeground }]}>Archive</Text></Pressable>
               </View>
             </View>
           </View>;
@@ -405,14 +446,14 @@ export default function RecipesScreen() {
           {['vegetarian', 'vegan', 'gluten free', 'dairy free'].map((item) => <Chip key={item} label={item} selected={dietaryPreference === item} onPress={() => setDietaryPreference(dietaryPreference === item ? undefined : item)} />)}
         </ScrollView>
         <View style={styles.discoveryHeader}>
-          <View><Text style={[styles.heading, { color: colors.foreground }]}>{resultFilter === 'All' ? 'A good place to start' : resultFilter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{savedRecipes.length ? `${savedRecipes.length} saved discovery${savedRecipes.length === 1 ? '' : 'ies'} available offline` : ingredients.length ? 'Matched against your confirmed kitchen' : 'Add confirmed ingredients to make suggestions personal'}</Text></View>
+          <View><Text style={[styles.heading, { color: colors.foreground }]}>{resultFilter === 'All' ? 'A good place to start' : resultFilter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{visibleSavedCount ? `${visibleSavedCount} saved discover${visibleSavedCount === 1 ? 'y' : 'ies'} available offline` : ingredients.length ? 'Matched against your confirmed kitchen' : 'Add confirmed ingredients to make suggestions personal'}</Text></View>
           <Pressable testID="different-recipes" onPress={() => void discover(true)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
         </View>
         {filtered.length ? filtered.map((recipe) => {
           const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
           const availability = recipeAvailabilityLabel(safety);
           const usesSoon = recipeUsesSoonIngredient(recipe);
-          return <RecipeCard key={recipeVersion(recipe)} recipe={recipe} hasIngredients={safety.ready} statusText={usesSoon ? `${availability} · Use soon` : availability} favorite={favoriteRecipeVersions.includes(recipeVersion(recipe))} onFavorite={() => toggleFavoriteRecipe(recipe)} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
+          return <RecipeCard key={recipeVersion(recipe)} recipe={recipe} hasIngredients={safety.ready} statusText={usesSoon ? `${availability} · Use soon` : availability} favorite={favoriteRecipeVersions.includes(recipeVersion(recipe))} onFavorite={() => toggleFavoriteRecipe(recipe)} onArchive={() => confirmArchiveRecipe(recipe)} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
         }) : <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipes match those filters</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Try a different category, clear a filter, or discover another set of recipes.</Text></View>}
       </ScrollView>
       <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={cancelSearch}>
@@ -560,4 +601,13 @@ const styles = StyleSheet.create({
   confirmFindText: { fontSize: 14, fontFamily: 'Inter_700Bold' },
   resultIngredientText: { fontSize: 11, lineHeight: 16, marginTop: 4 },
   externalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 9 },
+  archiveToggle: { minHeight: 44, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 14 },
+  archiveToggleText: { flex: 1, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  archivePanel: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 14 },
+  archivedRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1 },
+  archivedTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  archivedSource: { fontSize: 11, marginTop: 3 },
+  restoreButton: { minHeight: 36, paddingHorizontal: 12, borderRadius: 11, justifyContent: 'center' },
+  restoreText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  archiveIconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });
