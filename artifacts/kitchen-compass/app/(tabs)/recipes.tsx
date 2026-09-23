@@ -123,6 +123,13 @@ export default function RecipesScreen() {
 
   const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
   const rankedPublishedIngredients = useMemo(() => rankPublishedSearchIngredients(ingredients), [ingredients]);
+  useEffect(() => {
+    const eligibleIds = new Set(rankedPublishedIngredients.map((ingredient) => ingredient.id));
+    setPublishedDriverIds((current) => {
+      const eligible = current.filter((id) => eligibleIds.has(id));
+      return eligible.length === current.length ? current : eligible;
+    });
+  }, [rankedPublishedIngredients]);
   const inventoryPayload = useMemo(() => ingredients.map((item) => ({
     name: item.name,
     location: item.location,
