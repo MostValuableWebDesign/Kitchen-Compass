@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import {
+  assessIngredientAllergens,
   assessRecipeAllergens,
   calculateHealthScore,
   calculateRecipeNutrition,
@@ -351,7 +352,13 @@ router.post("/recipes/discover", async (req, res) => {
 
   const { inventory, preferences, filters, variationSeed, excludeRecipeVersions } = parsed.data;
   const usableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
-  const prompt = [
+  const allergenAssessableInventory = usableInventory.filter((item) =>
+    assessIngredientAllergens([item]).unknownIngredients.length === 0
+  );
+  const buildPrompt = (
+    promptInventory: typeof usableInventory,
+    correctionInstructions: string[] = [],
+  ) => [
     "Generate practical recipe candidates from confirmed kitchen inventory.",
     "Use the confirmed inventory as the primary source. You may include a small number of clearly identified missing ingredients so the app can label the recipe Almost ready or Check quantities.",
     "Never invent an inventory item as if the user owns it. Never claim a required ingredient is available.",
@@ -367,10 +374,12 @@ router.post("/recipes/discover", async (req, res) => {
      "Do not provide health scores or nutrition values. The server calculates both from ingredient quantities and its bundled reference table. Use explicit ingredient names, numeric quantities, and units; do not invent missing quantities.",
     `Variation seed: ${variationSeed}`,
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
-    `Confirmed inventory: ${JSON.stringify(usableInventory)}`,
+    `Confirmed inventory: ${JSON.stringify(promptInventory)}`,
     `Saved preferences: ${JSON.stringify(preferences)}`,
     `Selected filters: ${JSON.stringify(filters)}`,
+    ...correctionInstructions,
   ].join("\n");
+  const prompt = buildPrompt(usableInventory);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), recipeDiscoveryTimeoutMs);
@@ -433,13 +442,14 @@ router.post("/recipes/discover", async (req, res) => {
     let safeRecipes = filterSafeRecipes(aiRecipes);
     if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || aiRecipes.length === 0)) {
       rejectionReasons.clear();
-      aiRecipes = await requestCandidates([
-        prompt,
+      aiRecipes = await requestCandidates(buildPrompt(allergenAssessableInventory, [
         "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
-        "Return recipes using only the confirmed inventory and the explicitly listed basic ingredients. Do not add sauces, broths, spice blends, packaged foods, or other missing ingredients.",
+        "This corrected Confirmed inventory list contains only ingredients the server can assess deterministically. Do not use any ingredient from the earlier attempt that is absent from this corrected list.",
+        "Use only the corrected confirmed inventory and these exact basic ingredients when needed: water, salt, black pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, basil, parsley, cilantro, rosemary, thyme, oregano.",
+        "Do not add sauces, broths, spice blends, packaged foods, garnishes, or other missing ingredients.",
         "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
         "At least one returned recipe must be safe under the server's deterministic allergen check.",
-      ].join("\n"));
+      ]));
       safeRecipes = filterSafeRecipes(aiRecipes);
     }
     if (!safeRecipes.length) {
