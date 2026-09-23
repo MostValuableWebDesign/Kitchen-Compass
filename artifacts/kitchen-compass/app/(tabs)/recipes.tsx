@@ -202,15 +202,24 @@ export default function RecipesScreen() {
   };
 
   const findPublished = async () => {
-    const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
+    const confirmed = [...new Set(ingredients
+      .filter((item) => item.status !== 'used' && item.confidence === 'confirmed' && typeof item.name === 'string')
+      .map((item) => item.name.trim())
+      .filter((name) => name.length > 0 && name.length <= 80))]
+      .slice(0, 30);
     if (!confirmed.length) { setExternalMessage('Add at least one confirmed ingredient first.'); return; }
+    const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
+      .filter((allergy): allergy is string => typeof allergy === 'string')
+      .map((allergy) => allergy.trim())
+      .filter((allergy) => allergy.length > 0 && allergy.length <= 80))]
+      .slice(0, 30);
     const controller = new AbortController();
     if (!beginSearch('published', controller)) return;
     setExternalBusy(true);
     setExternalMessage('');
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies, controller.signal);
+      const result = await findExternalRecipes(confirmed, allergies, controller.signal);
       if (searchRequest.current !== controller || controller.signal.aborted) return;
       setExternalRecipes(result.recipes);
       setExternalMessage(result.recipes.length ? result.safetyNotice : 'No published recipes matched these ingredients. Try confirming more items.');
