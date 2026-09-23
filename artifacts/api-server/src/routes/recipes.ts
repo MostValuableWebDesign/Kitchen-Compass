@@ -8,7 +8,7 @@ import {
   hasUnknownAllergenInformation,
   requestedAllergenConflicts,
 } from "@workspace/recipe-calculations";
-import { sendScanError, scanLimits } from "../middleware/scanSecurity";
+import { sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
 
@@ -168,6 +168,7 @@ const responseSchema = z.object({
 });
 
 const model = "gpt-5.4-mini";
+const recipeDiscoveryTimeoutMs = 180_000;
 
 function normalize(value: string) {
   const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
@@ -372,7 +373,7 @@ router.post("/recipes/discover", async (req, res) => {
   ].join("\n");
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), scanLimits.requestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), recipeDiscoveryTimeoutMs);
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
