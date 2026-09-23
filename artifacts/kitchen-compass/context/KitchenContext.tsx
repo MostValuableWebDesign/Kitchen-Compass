@@ -214,6 +214,16 @@ function normalizeIngredient(ingredient: Ingredient) {
   };
 }
 
+function hasRecoverableKitchenData(state: PersistedKitchenState) {
+  return state.ingredients.length > 0
+    || state.savedRecipes.length > 0
+    || state.savedKidPublishedRecipes.length > 0
+    || state.archivedRecipes.length > 0
+    || state.plan.length > 0
+    || state.completedMeals.length > 0
+    || state.leftovers.length > 0;
+}
+
 export function KitchenProvider({ children }: { children: ReactNode }) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [preferences, setPreferencesState] = useState<Preferences>(defaultPreferences);
@@ -246,6 +256,13 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         if (v2 !== null) {
           try {
             parsed = parsePersistedKitchenState(v2, defaultPreferences);
+            if (backup !== null && !hasRecoverableKitchenData(parsed)) {
+              const backupParsed = parsePersistedKitchenState(backup, defaultPreferences);
+              if (hasRecoverableKitchenData(backupParsed)) {
+                parsed = backupParsed;
+                recoveredFromBackup = true;
+              }
+            }
           } catch (primaryError) {
             if (backup === null) throw primaryError;
             parsed = parsePersistedKitchenState(backup, defaultPreferences);
