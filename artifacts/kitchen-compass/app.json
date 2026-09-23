@@ -18,6 +18,12 @@
       "expo-router",
       "expo-notifications",
       [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#f8f6ef"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Kitchen Compass uses your photos to add ingredients from existing kitchen images.",
@@ -34,9 +40,6 @@
         }
       ]
     ],
-    "splash": {
-      "backgroundColor": "#f8f6ef"
-    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
