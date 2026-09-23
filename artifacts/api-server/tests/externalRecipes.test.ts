@@ -48,6 +48,14 @@ test("published recipes show source attribution and never assert allergy safety"
     assert.equal(payload.recipes[0]?.safetyVerified, false);
     assert.deepEqual(payload.recipes[0]?.matchedIngredients, ["Egg", "Tomato"]);
     assert.deepEqual(payload.recipes[0]?.missingIngredients, []);
+    const nextResponse = await originalFetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Egg", "Peanut butter"], searchAnchors: ["Egg"], excludeRecipeIds: ["1"], allergies: [] }),
+    });
+    assert.equal(nextResponse.status, 200);
+    const nextPayload = await nextResponse.json() as { recipes: Array<{ id: string }> };
+    assert.deepEqual(nextPayload.recipes.map((item) => item.id), ["2"]);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
@@ -55,7 +63,7 @@ test("published recipes show source attribution and never assert allergy safety"
   }
 });
 
-test("published recipes use at most ten provider search anchors", async () => {
+test("published recipes use up to thirty provider search anchors", async () => {
   const oldKey = process.env.THEMEALDB_API_KEY;
   const originalFetchForAnchorTest = globalThis.fetch;
   const filterRequests: string[] = [];
@@ -73,13 +81,13 @@ test("published recipes use at most ten provider search anchors", async () => {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
       body: JSON.stringify({
-        ingredients: Array.from({ length: 15 }, (_, index) => `ingredient-${index + 1}`),
-        searchAnchors: Array.from({ length: 10 }, (_, index) => `ingredient-${index + 1}`),
+        ingredients: Array.from({ length: 30 }, (_, index) => `ingredient-${index + 1}`),
+        searchAnchors: Array.from({ length: 30 }, (_, index) => `ingredient-${index + 1}`),
         allergies: [],
       }),
     });
     assert.equal(response.status, 200);
-    assert.equal(filterRequests.length, 10);
+    assert.equal(filterRequests.length, 30);
   } finally {
     globalThis.fetch = originalFetchForAnchorTest;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;

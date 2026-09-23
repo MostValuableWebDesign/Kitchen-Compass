@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
 import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, publishedIngredientCategory, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -98,6 +98,15 @@ test('published recipe search excludes seasonings and ranks useful ingredients b
     anchors: ['Chicken', 'Rice'],
     ingredients: ['Chicken', 'Rice', 'Salt'],
   });
+  assert.deepEqual(buildPublishedRecipeSearch(ingredients, ['chicken'], { manualSelection: true }), {
+    anchors: ['Chicken'],
+    ingredients: ['Chicken', 'Salt', 'Rice'],
+  });
+  assert.equal(publishedIngredientCategory('chicken breast'), 'Meat & seafood');
+  assert.equal(publishedIngredientCategory('green apple'), 'Fruits');
+  assert.equal(publishedIngredientCategory('broccoli'), 'Vegetables');
+  assert.equal(publishedIngredientCategory('whole milk'), 'Dairy & eggs');
+  assert.equal(publishedIngredientCategory('brown rice'), 'Grains & bakery');
 });
 
 test('published recipes import with source attribution and explicit unverified calculations', () => {

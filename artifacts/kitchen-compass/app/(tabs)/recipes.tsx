@@ -12,7 +12,7 @@ import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes,
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, rankPublishedSearchIngredients } from '@/lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients } from '@/lib/publishedRecipeSearch';
 import type { Recipe } from '@/data/recipes';
 
 type ResultFilter = 'All' | 'Ready to cook' | 'Almost ready' | 'Check quantities' | 'Quick meals' | 'Use soon' | 'Favorites';
@@ -51,6 +51,7 @@ export default function RecipesScreen() {
   const [minHealthScore, setMinHealthScore] = useState<number>();
   const [variation, setVariation] = useState(0);
   const [externalRecipes, setExternalRecipes] = useState<ExternalRecipe[]>([]);
+  const [discardedExternalRecipeIds, setDiscardedExternalRecipeIds] = useState<string[]>([]);
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalMessage, setExternalMessage] = useState('');
   const [publishedPickerOpen, setPublishedPickerOpen] = useState(false);
@@ -69,6 +70,7 @@ export default function RecipesScreen() {
   const pendingImages = useRef(new Set<string>());
   const searchRequest = useRef<AbortController | null>(null);
   const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seenPublishedRecipeIds = useRef(new Set<string>());
 
   useEffect(() => {
     if (!activeSearch || activeSearch.complete) return;
@@ -129,6 +131,10 @@ export default function RecipesScreen() {
 
   const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
   const rankedPublishedIngredients = useMemo(() => rankPublishedSearchIngredients(ingredients), [ingredients]);
+  const groupedPublishedIngredients = useMemo(() => publishedIngredientCategories.map((category) => ({
+    category,
+    ingredients: rankedPublishedIngredients.filter((ingredient) => publishedIngredientCategory(ingredient.name) === category),
+  })).filter((group) => group.ingredients.length), [rankedPublishedIngredients]);
   useEffect(() => {
     const eligibleIds = new Set(rankedPublishedIngredients.map((ingredient) => ingredient.id));
     setPublishedDriverIds((current) => {
@@ -219,7 +225,7 @@ export default function RecipesScreen() {
   };
 
   const findPublished = async () => {
-    const searchInput = buildPublishedRecipeSearch(ingredients, publishedDriverIds);
+    const searchInput = buildPublishedRecipeSearch(ingredients, publishedDriverIds, { manualSelection: publishedSelectionMode === 'manual' });
     if (!searchInput.anchors.length) { setExternalMessage('Add at least one eligible confirmed ingredient first.'); return; }
     const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
       .filter((allergy): allergy is string => typeof allergy === 'string')
@@ -232,14 +238,20 @@ export default function RecipesScreen() {
     setExternalMessage('');
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const result = await findExternalRecipes(searchInput.ingredients, allergies, controller.signal, searchInput.anchors);
+      const result = await findExternalRecipes(
+        searchInput.ingredients,
+        allergies,
+        controller.signal,
+        searchInput.anchors,
+        [...seenPublishedRecipeIds.current],
+      );
       if (searchRequest.current !== controller || controller.signal.aborted) return;
       setExternalRecipes(result.recipes);
-      const fullMatches = result.recipes.filter((recipe) => recipe.missingIngredients.length === 0);
-      if (fullMatches.length) savePublishedRecipes(fullMatches.map(mapPublishedRecipe));
+      setDiscardedExternalRecipeIds([]);
+      result.recipes.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
       setExternalMessage(result.recipes.length
-        ? `${result.safetyNotice}${fullMatches.length ? ` ${fullMatches.length} full ${fullMatches.length === 1 ? 'match was' : 'matches were'} added to your saved recipes.` : ''}`
-        : 'No published recipes matched these ingredients. Try confirming more items.');
+        ? result.safetyNotice
+        : 'No new published recipes matched these ingredients. Try a different manual selection.');
       setExternalBusy(false);
       finishSearch(controller, true);
     } catch {
@@ -266,6 +278,10 @@ export default function RecipesScreen() {
   const savePublishedRecipe = (recipe: ExternalRecipe) => {
     savePublishedRecipes([mapPublishedRecipe(recipe)]);
     setExternalMessage(`“${recipe.title}” was added to your saved recipes. Allergens, nutrition, and cooking safety remain unverified.`);
+  };
+
+  const discardPublishedRecipe = (recipe: ExternalRecipe) => {
+    setDiscardedExternalRecipeIds((current) => current.includes(recipe.id) ? current : [...current, recipe.id]);
   };
 
   const recipeUsesSoonIngredient = (recipe: (typeof availableRecipes)[number]) => recipe.ingredients.some((ingredient) => ingredients.some((item) =>
@@ -327,7 +343,7 @@ export default function RecipesScreen() {
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
          <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
         {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
-        {externalRecipes.map((item) => {
+        {externalRecipes.filter((item) => !discardedExternalRecipeIds.includes(item.id)).map((item) => {
           const saved = savedRecipes.some((recipe) => recipeVersion(recipe) === publishedRecipeVersion(item.id) || recipeTitleKey(recipe) === recipeTitleKey({ title: item.title }));
           return <View key={item.id} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}
@@ -340,6 +356,7 @@ export default function RecipesScreen() {
               <View style={styles.externalActions}>
                 <Pressable onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Open source ↗</Text></Pressable>
                 <Pressable disabled={saved} onPress={() => savePublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: saved ? colors.muted : colors.secondary }]}><Text style={[styles.outlineButtonText, { color: saved ? colors.mutedForeground : colors.primary }]}>{saved ? 'Saved' : 'Add recipe'}</Text></Pressable>
+                <Pressable onPress={() => discardPublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.destructive }]}>Discard</Text></Pressable>
               </View>
             </View>
           </View>;
@@ -388,21 +405,19 @@ export default function RecipesScreen() {
             <View style={styles.pickerHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.progressTitle, { color: colors.foreground }]}>{publishedSearchStep === 'choice' ? 'Choose how to search' : publishedSearchStep === 'manual' ? 'Choose search ingredients' : 'Confirm search ingredients'}</Text>
-                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses the strongest confirmed ingredients. Manual selection lets you choose up to 10 anchors.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} baseline · ${publishedDriverIds.length} anchors`}</Text>
+                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses up to 30 confirmed ingredients. Manual selection starts empty.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} · ${publishedDriverIds.length} ingredients`}</Text>
               </View>
               <Pressable testID="close-published-ingredients" onPress={() => setPublishedPickerOpen(false)} style={[styles.outlineButton, { borderColor: colors.border }]}>
                 <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Close</Text>
               </Pressable>
             </View>
             {publishedSearchStep === 'choice' ? <View style={styles.searchChoiceList}>
-              <Pressable testID="published-ingredients-auto" onPress={chooseAutomaticPublishedSearch} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="zap" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Automatic selection</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Rank known quantities and manual/photo confirmations, then show the top 10 for approval.</Text></View></Pressable>
-              <Pressable testID="published-ingredients-manual" onPress={() => { setPublishedSelectionMode('manual'); setPublishedSearchStep('manual'); }} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.background }]}><Feather name="check-square" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Choose manually</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Select between 1 and 10 ingredients, grouped by kitchen location.</Text></View></Pressable>
+              <Pressable testID="published-ingredients-auto" onPress={chooseAutomaticPublishedSearch} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="zap" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Automatic selection</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Rank known quantities and manual/photo confirmations, then show up to 30 ingredients for approval.</Text></View></Pressable>
+              <Pressable testID="published-ingredients-manual" onPress={() => { setPublishedDriverIds([]); setPublishedSelectionMode('manual'); setPublishedSearchStep('manual'); }} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.background }]}><Feather name="check-square" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Choose manually</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Start with nothing selected, then choose up to 30 ingredients grouped by food type.</Text></View></Pressable>
             </View> : null}
             {publishedSearchStep === 'manual' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
-              {(['Refrigerator', 'Freezer', 'Pantry'] as const).map((location) => {
-                const group = rankedPublishedIngredients.filter((ingredient) => ingredient.location === location);
-                if (!group.length) return null;
-                return <View key={location} style={{ gap: 8 }}><Text style={[styles.pickerCategory, { color: colors.foreground }]}>{location}</Text>{group.map((ingredient) => {
+              {groupedPublishedIngredients.map((group) => {
+                return <View key={group.category} style={{ gap: 8 }}><Text style={[styles.pickerCategory, { color: colors.foreground }]}>{group.category}</Text>{group.ingredients.map((ingredient) => {
                   const selected = publishedDriverIds.includes(ingredient.id);
                   const disabled = !selected && publishedDriverIds.length >= MAX_PUBLISHED_SEARCH_ANCHORS;
                   return <Pressable key={ingredient.id} testID={`published-ingredient-${ingredient.id}`} disabled={disabled} onPress={() => setPublishedDriverIds((current) => selected ? current.filter((id) => id !== ingredient.id) : [...current, ingredient.id])} style={[styles.pickerRow, { borderColor: colors.border, backgroundColor: selected ? colors.secondary : colors.background }, disabled && styles.disabled]}>
@@ -413,10 +428,14 @@ export default function RecipesScreen() {
               })}
               {!rankedPublishedIngredients.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>No eligible confirmed ingredients are available. Common seasonings and used ingredients are excluded from anchors.</Text> : null}
             </ScrollView> : null}
-            {publishedSearchStep === 'confirm' ? <View style={styles.confirmSelection}>
-              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>These ingredients will drive the TheMealDB search. Up to 30 confirmed pantry ingredients are still sent for matched and missing ingredient calculations.</Text>
-              <View style={styles.selectedChips}>{rankedPublishedIngredients.filter((ingredient) => publishedDriverIds.includes(ingredient.id)).map((ingredient) => <Chip key={ingredient.id} label={ingredient.name} selected />)}</View>
-            </View> : null}
+            {publishedSearchStep === 'confirm' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
+              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>These ingredients will drive the TheMealDB search. Up to 30 confirmed pantry ingredients are sent for matching.</Text>
+              {groupedPublishedIngredients.map((group) => {
+                const selected = group.ingredients.filter((ingredient) => publishedDriverIds.includes(ingredient.id));
+                if (!selected.length) return null;
+                return <View key={group.category} style={{ gap: 8 }}><Text style={[styles.pickerCategory, { color: colors.foreground }]}>{group.category}</Text>{selected.map((ingredient) => <View key={ingredient.id} style={[styles.pickerRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="check-square" size={19} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.pickerIngredient, { color: colors.foreground }]}>{ingredient.name}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{ingredient.quantityKnown ? 'Known quantity' : 'Quantity to confirm'}{ingredient.source === 'manual' ? ' · Manual' : ingredient.source === 'scan' ? ' · Photo scan' : ''}</Text></View></View>)}</View>;
+              })}
+            </ScrollView> : null}
             {publishedSearchStep === 'manual' ? <Pressable disabled={!publishedDriverIds.length} onPress={() => setPublishedSearchStep('confirm')} style={[styles.autoButton, { borderColor: colors.border, backgroundColor: publishedDriverIds.length ? colors.primary : colors.muted }]}><Text style={[styles.outlineButtonText, { color: publishedDriverIds.length ? colors.primaryForeground : colors.mutedForeground }]}>Review {publishedDriverIds.length} selected</Text></Pressable> : null}
             {publishedSearchStep === 'confirm' ? <View style={styles.confirmActions}><Pressable onPress={() => setPublishedSearchStep(publishedSelectionMode === 'manual' ? 'manual' : 'choice')} style={[styles.autoButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Back</Text></Pressable><Pressable testID="confirm-published-search" onPress={() => { setPublishedPickerOpen(false); void findPublished(); }} style={[styles.autoButton, { borderColor: colors.primary, backgroundColor: colors.primary }]}><Text style={[styles.outlineButtonText, { color: colors.primaryForeground }]}>Find recipes</Text></Pressable></View> : null}
           </View>
@@ -482,5 +501,5 @@ const styles = StyleSheet.create({
   selectedChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   confirmActions: { flexDirection: 'row', gap: 10 },
   resultIngredientText: { fontSize: 11, lineHeight: 16, marginTop: 4 },
-  externalActions: { flexDirection: 'row', gap: 8, marginTop: 9 },
+  externalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 9 },
 });
