@@ -156,6 +156,60 @@ test("strict schema encodes optional fields as nullable and keeps nested fields 
   assert.deepEqual((schema.properties as Record<string, { anyOf: unknown[] }>).optional.anyOf[1], { type: "null" });
 });
 
+test("recipe discovery keeps valid candidates when another candidate fails validation", async () => {
+  const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [invalid, validModelRecipe()] }) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify(requestBody()),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { recipes: Array<{ title: string }> };
+    assert.deepEqual(payload.recipes.map((recipe) => recipe.title), ["Egg and greens bowl"]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("recipe discovery retries when every first-pass candidate fails validation", async () => {
+  const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
+  const original = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      providerCalls += 1;
+      const recipe = providerCalls === 1 ? invalid : validModelRecipe();
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [recipe] }) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify(requestBody()),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(providerCalls, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("recipe discovery never returns an allergy-conflicting candidate", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
