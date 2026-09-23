@@ -8,7 +8,7 @@ import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, novelRecipes, recipeTitleKey, recipeVersion, reusableRecipes, type RecipeFilterState } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import type { Recipe } from '@/data/recipes';
@@ -57,6 +57,7 @@ export default function RecipesScreen() {
   const [imageMessage, setImageMessage] = useState('');
   const searchGuard = useRef(false);
   const imageJob = useRef(0);
+  const pendingImages = useRef(new Set<string>());
   const searchRequest = useRef<AbortController | null>(null);
   const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -130,21 +131,37 @@ export default function RecipesScreen() {
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
 
   const prepareImages = async (recipes: Recipe[]) => {
-    if (!recipes.length) return;
+    const missing = recipes.filter((recipe) => !recipe.image
+      && !pendingImages.current.has(recipeVersion(recipe))
+      && !savedRecipes.some((saved) => recipeTitleKey(saved) === recipeTitleKey(recipe) && Boolean(saved.image))).slice(0, 8);
+    if (!missing.length) return;
+    missing.forEach((recipe) => pendingImages.current.add(recipeVersion(recipe)));
     const job = ++imageJob.current;
     setImageBusy(true);
     setImageMessage('Preparing recipe images in the background…');
     try {
-      const saved = await loadRecipeImages(recipes, setDiscoveredRecipeImage);
-      if (imageJob.current === job) setImageMessage(saved < recipes.length ? 'Some recipe images could not be loaded. You can retry below.' : '');
+      const saved = await loadRecipeImages(missing, setDiscoveredRecipeImage);
+      if (imageJob.current === job) setImageMessage(saved < missing.length ? 'Some recipe images could not be loaded. You can retry below.' : '');
     } catch {
       if (imageJob.current === job) setImageMessage('Recipe images could not be loaded. You can retry below.');
     } finally {
+      missing.forEach((recipe) => pendingImages.current.delete(recipeVersion(recipe)));
       if (imageJob.current === job) setImageBusy(false);
     }
   };
 
   const discover = async (different = false) => {
+    if (!different) {
+      const reusable = reusableRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
+      if (reusable.length) {
+        setSearch('');
+        setResultFilter('All');
+        setDiscoveryError(false);
+        setDiscoveryWarning('Showing saved recipes that match your kitchen and filters. No new AI request was needed. Use shuffle for different ideas.');
+        void prepareImages(reusable.filter((recipe) => !recipe.image));
+        return;
+      }
+    }
     const controller = new AbortController();
     if (!beginSearch('kitchen', controller)) return;
     setDiscoveryBusy(true);
@@ -159,13 +176,14 @@ export default function RecipesScreen() {
         preferences,
         filterState,
         `${different ? 'different' : 'refresh'}-${nextVariation}`,
-        different ? savedRecipes.map(recipeVersion) : [],
+        availableRecipes.map(recipeVersion).slice(-30),
+        availableRecipes.map((recipe) => recipe.title).slice(-30),
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const recipes = result.recipes.map(mapDiscoveredRecipe);
-      saveDiscoveredRecipes(recipes);
-      setDiscoveryWarning(result.warning);
+      const recipes = novelRecipes(availableRecipes, result.recipes.map(mapDiscoveredRecipe));
+      if (recipes.length) saveDiscoveredRecipes(recipes);
+      setDiscoveryWarning(recipes.length ? result.warning : 'No new recipes were found. Your saved recipes are still available.');
       setDiscoveryBusy(false);
       finishSearch(controller, true);
       void prepareImages(recipes);

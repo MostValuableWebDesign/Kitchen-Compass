@@ -8,6 +8,7 @@ import {
   calculateRecipeNutrition,
   hasUnknownAllergenInformation,
   requestedAllergenConflicts,
+  supportedNutritionInputs,
 } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
 
@@ -49,6 +50,7 @@ const requestSchema = z.object({
   filters: filtersSchema,
   variationSeed: z.string().min(1).max(80),
   excludeRecipeVersions: z.array(z.string().max(160)).max(30),
+  excludeRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
 });
 
 const ingredientSchema = z.object({
@@ -182,6 +184,10 @@ function normalize(value: string) {
     berries: "berry",
     "bell peppers": "bell pepper",
   } as Record<string, string>)[cleaned] ?? singular;
+}
+
+function recipeTitleKey(title: string) {
+  return title.trim().toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function canonicalRecipe(recipe: z.infer<typeof aiRecipeSchema>) {
@@ -350,7 +356,7 @@ router.post("/recipes/discover", async (req, res) => {
     return;
   }
 
-  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions } = parsed.data;
+  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles } = parsed.data;
   const usableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
   const allergenAssessableInventory = usableInventory.filter((item) =>
     assessIngredientAllergens([item]).unknownIngredients.length === 0
@@ -372,8 +378,10 @@ router.post("/recipes/discover", async (req, res) => {
     "Allergen information must be complete. List every allergen known for every ingredient. If uncertain, do not return the recipe.",
     "Only include substitutions that are safe for the supplied allergies, restrictions, dislikes, and equipment. Do not make medical claims.",
      "Do not provide health scores or nutrition values. The server calculates both from ingredient quantities and its bundled reference table. Use explicit ingredient names, numeric quantities, and units; do not invent missing quantities.",
+    `When accurate for the actual ingredient and amount, prefer these nutrition-supported names and units so a health score can be calculated: ${JSON.stringify(supportedNutritionInputs())}. Never rename or omit a real ingredient solely to obtain a score.`,
     `Variation seed: ${variationSeed}`,
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
+    `Do not repeat these existing recipe titles, even with different wording or amounts: ${JSON.stringify(excludeRecipeTitles)}`,
     `Confirmed inventory: ${JSON.stringify(promptInventory)}`,
     `Saved preferences: ${JSON.stringify(preferences)}`,
     `Selected filters: ${JSON.stringify(filters)}`,
@@ -429,11 +437,16 @@ router.post("/recipes/discover", async (req, res) => {
       return false;
     };
     const filterSafeRecipes = (candidates: z.infer<typeof aiRecipeSchema>[]) => {
+      const seenTitles = new Set(excludeRecipeTitles.map(recipeTitleKey));
       const eligibleRecipes = candidates.filter((recipe) => {
         if (!validateSteps(recipe)) return reject("steps");
         if (excludeRecipeVersions.includes(stableVersion(recipe))) return reject("excluded-version");
         const preferenceViolation = violatesPreferences(recipe, preferences, filters);
-        return preferenceViolation ? reject(preferenceViolation) : true;
+        if (preferenceViolation) return reject(preferenceViolation);
+        const title = recipeTitleKey(recipe.title);
+        if (seenTitles.has(title)) return reject("duplicate-title");
+        seenTitles.add(title);
+        return true;
       });
       return eligibleRecipes
         .map((recipe) => makeResponseRecipe(recipe, preferences, filters))

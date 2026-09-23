@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapDiscoveredRecipe, mergeRecipes, parseCachedRecipes, recipeVersion } from '../lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages, reusableRecipes } from '../lib/recipeDiscovery';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -58,6 +58,30 @@ test('refreshing discovery does not replace a saved recipe with a different vers
   const newer = mapDiscoveredRecipe({ ...apiRecipe, id: 'discovered-newer', recipeVersion: 'stable-version-2', title: 'A different bowl' });
   assert.deepEqual(mergeRecipes([first], [first, newer]).map(recipeVersion), ['stable-version-1', 'stable-version-2']);
   assert.deepEqual(mergeRecipes([first], [{ ...newer, recipeVersion: 'stable-version-1', id: 'same-version' }]).map((recipe) => recipe.id), ['discovered-stable']);
+});
+
+test('existing recipe titles and versions are excluded before saving or requesting another image', () => {
+  const first = mapDiscoveredRecipe(apiRecipe);
+  const reworded = mapDiscoveredRecipe({ ...apiRecipe, id: 'another-id', recipeVersion: 'another-version', title: ' EGG & Greens Bowl! ' });
+  const newRecipe = mapDiscoveredRecipe({ ...apiRecipe, id: 'new-id', recipeVersion: 'new-version', title: 'Garlic eggs' });
+  assert.deepEqual(novelRecipes([first], [reworded, newRecipe, newRecipe]).map((recipe) => recipe.id), ['new-id']);
+  const request = buildRecipeDiscoveryRequest([], {
+    allergies: [], dietaryRestrictions: [], dislikes: [], cuisines: [], skill: 'Beginner', cookTime: 30, equipment: [], nutrition: [],
+  }, { mealType: 'Any', cuisine: '' }, 'test', [first.recipeVersion!], [first.title]);
+  assert.deepEqual(request.excludeRecipeTitles, [first.title]);
+  assert.deepEqual(recipesNeedingImages([{ ...first, image: 'file:///saved.jpg' }, newRecipe, newRecipe]).map((recipe) => recipe.id), ['new-id']);
+});
+
+test('saved matching recipes are reusable without another AI request', () => {
+  const recipe = mapDiscoveredRecipe(apiRecipe);
+  const preferences = {
+    allergies: [], dietaryRestrictions: [], dislikes: [], cuisines: [], skill: 'Comfortable' as const,
+    cookTime: 45, equipment: ['Stovetop'], nutrition: [], servings: 1,
+  };
+  const eggs = [{ name: 'eggs', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, quantityValue: 4, unit: 'egg' }];
+  assert.equal(reusableRecipes([recipe], eggs, preferences, { mealType: 'Any', cuisine: '' }, []).length, 1);
+  assert.equal(reusableRecipes([recipe], eggs, preferences, { mealType: 'Any', cuisine: '', minHealthScore: 85 }, []).length, 0);
+  assert.equal(reusableRecipes([recipe], [{ name: 'rice', status: 'fresh', confidence: 'confirmed' }], preferences, { mealType: 'Any', cuisine: '' }, []).length, 0);
 });
 
 test('offline cache accepts only validated recipe-shaped entries', () => {

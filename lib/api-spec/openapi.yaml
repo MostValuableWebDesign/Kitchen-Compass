@@ -362,6 +362,10 @@ components:
           type: array
           maxItems: 30
           items: { type: string }
+        excludeRecipeTitles:
+          type: array
+          maxItems: 30
+          items: { type: string }
       required: [inventory, preferences, filters, variationSeed, excludeRecipeVersions]
     RecipeIngredient:
       type: object

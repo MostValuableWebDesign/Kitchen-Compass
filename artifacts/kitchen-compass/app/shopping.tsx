@@ -1,11 +1,11 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Chip } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen, type PurchaseRow } from '@/context/KitchenContext';
-import { calculateShoppingNeeds } from '@/lib/kitchenLogic';
+import { addKitchenIngredient, calculateShoppingNeeds, canCombineIngredientQuantities, ingredientRowsMatch, parseQuantityText } from '@/lib/kitchenLogic';
 import { useColors } from '@/hooks/useColors';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 
@@ -37,6 +37,30 @@ export default function ShoppingScreen() {
     setPurchaseOpen(true);
   };
   const confirmPurchase = () => {
+    let preview = ingredients.map((item) => ({
+      id: item.id,
+      name: item.name,
+      location: item.location,
+      status: item.status,
+      quantityKnown: item.quantityKnown,
+      quantityValue: item.quantityValue,
+      unit: item.unit,
+    }));
+    for (const [index, row] of purchaseRows.entries()) {
+      if (!row.confirmed) continue;
+      const parsed = parseQuantityText(row.quantity);
+      if (!row.name.trim() || !parsed.quantityKnown) {
+        Alert.alert('Quantity needs review', `Enter a supported quantity and unit for ${row.name || 'the checked item'} before adding it.`);
+        return;
+      }
+      const incoming = { id: `purchase-preview-${index}`, name: row.name.trim(), location: row.location, status: 'fresh' as const, ...parsed };
+      const existing = preview.find((item) => ingredientRowsMatch(item, incoming));
+      if (existing && existing.status !== 'used' && !canCombineIngredientQuantities(existing, incoming)) {
+        Alert.alert('Quantity needs review', `${row.name} is already in your kitchen. Use a compatible unit so the new stock can be combined with it.`);
+        return;
+      }
+      preview = addKitchenIngredient(preview, incoming, true);
+    }
     addPurchasedItems(purchaseRows);
     setPurchaseOpen(false);
   };

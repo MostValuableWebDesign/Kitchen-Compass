@@ -160,6 +160,51 @@ export function ingredientRowsMatch(
     && existing.location === incoming.location;
 }
 
+export function canCombineIngredientQuantities(
+  existing: { quantityKnown?: boolean; quantityValue?: number; unit?: string },
+  incoming: { quantityKnown?: boolean; quantityValue?: number; unit?: string },
+) {
+  if (!existing.quantityKnown || !incoming.quantityKnown
+    || existing.quantityValue === undefined || incoming.quantityValue === undefined
+    || !existing.unit || !incoming.unit) return false;
+  const converted = canonicalUnit(existing.unit) === canonicalUnit(incoming.unit)
+    ? incoming.quantityValue
+    : convertQuantity(incoming.quantityValue, incoming.unit, existing.unit);
+  return converted !== null && Number.isFinite(converted);
+}
+
+export function addKitchenIngredient<T extends {
+  id: string;
+  name: string;
+  normalizedName?: string;
+  location: string;
+  status: 'fresh' | 'low' | 'used';
+  quantity?: string;
+  quantityValue?: number;
+  unit?: string;
+  quantityKnown?: boolean;
+}>(rows: T[], incoming: T, additionalStock = false): T[] {
+  const index = rows.findIndex((row) => ingredientRowsMatch(row, incoming));
+  if (index < 0) return [...rows, incoming];
+  const existing = rows[index];
+  if (existing.status === 'used') {
+    const next = [...rows];
+    next[index] = { ...incoming, id: existing.id };
+    return next;
+  }
+  if (!additionalStock || !canCombineIngredientQuantities(existing, incoming)
+    || existing.quantityValue === undefined || incoming.quantityValue === undefined
+    || !existing.unit || !incoming.unit) return rows;
+  const converted = canonicalUnit(existing.unit) === canonicalUnit(incoming.unit)
+    ? incoming.quantityValue
+    : convertQuantity(incoming.quantityValue, incoming.unit, existing.unit);
+  if (converted === null || !Number.isFinite(converted)) return rows;
+  const total = Number((existing.quantityValue + converted).toFixed(3));
+  const next = [...rows];
+  next[index] = { ...existing, status: 'fresh', quantityValue: total, quantity: `${total} ${existing.unit}` };
+  return next;
+}
+
 export function convertQuantity(quantity: number, fromUnit?: string, toUnit?: string) {
   const from = unitConversion(fromUnit);
   const to = unitConversion(toUnit);

@@ -207,6 +207,8 @@ export interface RecipeDiscoveryRequest {
   variationSeed: string;
   /** @maxItems 30 */
   excludeRecipeVersions: string[];
+  /** @maxItems 30 */
+  excludeRecipeTitles?: string[];
 }
 
 export interface RecipeIngredient {
@@ -453,4 +455,38 @@ export interface RecipeDiscoveryResponse {
   source: RecipeDiscoveryResponseSource;
   warning?: string;
 }
+
+export type RecipeImagesRequestRecipesItem = {
+  recipeVersion: string;
+  title: string;
+  description: string;
+  ingredients: string[];
+};
+
+export interface RecipeImagesRequest {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     */
+  recipes: RecipeImagesRequestRecipesItem[];
+}
+
+export type ResolveRecipeImages200ImagesItemSource = typeof ResolveRecipeImages200ImagesItemSource[keyof typeof ResolveRecipeImages200ImagesItemSource];
+
+
+export const ResolveRecipeImages200ImagesItemSource = {
+  TheMealDB: 'TheMealDB',
+  'AI-generated': 'AI-generated',
+} as const;
+
+export type ResolveRecipeImages200ImagesItem = {
+  recipeVersion: string;
+  imageUrl?: string;
+  imageBase64?: string;
+  source?: ResolveRecipeImages200ImagesItemSource;
+};
+
+export type ResolveRecipeImages200 = {
+  images: ResolveRecipeImages200ImagesItem[];
+};
 

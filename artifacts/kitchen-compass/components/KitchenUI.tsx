@@ -53,18 +53,16 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
     <Pressable testID={`recipe-${recipe.id}`} onPress={onPress} style={({ pressed }) => [styles.recipeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
       {recipe.image ? <Image source={typeof recipe.image === 'string' ? { uri: recipe.image } : recipe.image} contentFit="cover" style={styles.recipeImage} /> : <View style={[styles.recipeImage, { backgroundColor: colors.secondary }]}><Ionicons name="restaurant-outline" size={34} color={colors.primary} /></View>}
       <View style={styles.recipeBody}>
-        <View style={styles.recipeRow}>
-          <View style={{ flex: 1 }}>
-            <View style={styles.titleLine}>
-              <Text style={[styles.recipeTitle, { color: colors.foreground }]}>{recipe.title}</Text>
-              {onFavorite ? <Pressable testID={`favorite-${recipe.id}`} onPress={onFavorite} hitSlop={10}><Ionicons name={favorite ? 'heart' : 'heart-outline'} size={19} color={favorite ? colors.destructive : colors.mutedForeground} /></Pressable> : null}
-            </View>
-            <Text style={[styles.recipeMeta, { color: colors.mutedForeground }]}>{recipe.cuisine} · {recipe.prep + recipe.cook} min · {recipe.difficulty}</Text>
-          </View>
-           <View style={[styles.scoreBadge, { backgroundColor: recipe.healthScore.score !== undefined && recipe.healthScore.score >= 85 ? colors.secondary : colors.accent }]}>
-             <Text style={[styles.scoreText, { color: recipe.healthScore.score !== undefined && recipe.healthScore.score >= 85 ? colors.primary : colors.accentForeground }]}>{recipe.healthScore.score ?? '—'}</Text>
-          </View>
+        <View style={styles.titleLine}>
+          <Text numberOfLines={2} style={[styles.recipeTitle, { color: colors.foreground }]}>{recipe.title}</Text>
+          {onFavorite ? <Pressable testID={`favorite-${recipe.id}`} accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'} onPress={onFavorite} hitSlop={8} style={styles.favoriteButton}><Ionicons name={favorite ? 'heart' : 'heart-outline'} size={20} color={favorite ? colors.destructive : colors.mutedForeground} /></Pressable> : null}
         </View>
+        <Text style={[styles.recipeMeta, { color: colors.mutedForeground }]}>{recipe.cuisine} · {recipe.prep + recipe.cook} min · {recipe.difficulty}</Text>
+        <View style={[styles.healthRow, { backgroundColor: colors.secondary }]}>
+          <Text style={[styles.healthLabel, { color: colors.secondaryForeground }]}>Health score</Text>
+          <Text testID={`health-score-${recipe.id}`} style={[styles.healthValue, { color: colors.primary }]}>{recipe.healthScore.score !== undefined ? `${recipe.healthScore.score}/100` : 'Unavailable'}</Text>
+        </View>
+        {recipe.healthScore.score === undefined ? <Text style={[styles.healthHint, { color: colors.mutedForeground }]} numberOfLines={2}>{recipe.healthScore.note}</Text> : null}
         <Text numberOfLines={2} style={[styles.recipeDescription, { color: colors.mutedForeground }]}>{recipe.description}</Text>
         {recipe.imageSource ? <Text style={[styles.imageCredit, { color: colors.mutedForeground }]}>{recipe.imageSource === 'AI-generated' ? 'Illustrative AI image' : 'Photo: TheMealDB'}</Text> : null}
         <View style={styles.recipeFooter}>
@@ -118,14 +116,17 @@ const styles = StyleSheet.create({
   recipeImage: { width: '100%', height: 168 },
   recipeBody: { padding: 15 },
   recipeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  recipeTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 5 },
-  titleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  recipeTitle: { flex: 1, minWidth: 0, fontSize: 18, fontFamily: 'Inter_700Bold' },
+  titleLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  favoriteButton: { width: 36, height: 36, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
   recipeMeta: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   recipeDescription: { fontSize: 13, lineHeight: 19, marginTop: 10 },
   imageCredit: { fontSize: 10, marginTop: 6 },
   recipeFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
-  scoreBadge: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  scoreText: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  healthRow: { minHeight: 36, borderRadius: 12, marginTop: 10, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  healthLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  healthValue: { fontSize: 14, fontFamily: 'Inter_700Bold', flexShrink: 0 },
+  healthHint: { fontSize: 11, lineHeight: 16, marginTop: 5 },
   statusPill: { borderRadius: 13, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },

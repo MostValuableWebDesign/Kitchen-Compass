@@ -10,7 +10,7 @@ import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-cl
 import { Chip, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
-import { normalizeIngredientName } from '@/lib/kitchenLogic';
+import { canCombineIngredientQuantities, normalizeIngredientName, parseQuantityText } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 
 const MAX_SCAN_PHOTOS = 10;
@@ -199,12 +199,36 @@ export default function ScanScreen() {
       return;
     }
     const reviewedAt = new Date().toISOString();
+    const known = new Set(ingredients.filter((item) => item.status !== 'used')
+      .map((item) => `${normalizeIngredientName(item.name)}|${item.location}`));
+    const acceptedSuggestions = suggestions.filter((suggestion) => {
+      const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+      if (decision === 'same') return false;
+      if (decision === 'correction') return true;
+      const key = `${normalizeIngredientName(suggestion.displayName)}|${suggestion.storageLocation}`;
+      const explicitlyAdditional = Boolean(suggestion.existingInventoryMatch && decision === 'additional');
+      if (known.has(key) && !explicitlyAdditional) return false;
+      known.add(key);
+      return true;
+    });
+    for (const suggestion of acceptedSuggestions) {
+      const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
+      if (!suggestion.existingInventoryMatch || decision !== 'additional') continue;
+      const existing = ingredients.find((item) => item.status !== 'used'
+        && normalizeIngredientName(item.name) === normalizeIngredientName(suggestion.displayName)
+        && item.location === suggestion.storageLocation);
+      if (!existing) continue;
+      const incoming = parseQuantityText(suggestion.quantityKnown && suggestion.quantity !== undefined
+        ? `${suggestion.quantity} ${suggestion.unit ?? ''}` : undefined);
+      if (!canCombineIngredientQuantities(existing, incoming)) {
+        Alert.alert('Quantity needs review', `${suggestion.displayName} is already in your kitchen. To add more stock, enter a quantity with a compatible unit or choose Same item to skip it.`);
+        return;
+      }
+    }
     const retainedPhotos = new Map<string, string>();
     if (keepPhotos) {
       try {
-        for (const suggestion of suggestions) {
-          const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
-          if (decision === 'same') continue;
+        for (const suggestion of acceptedSuggestions) {
           const sourceUri = photoUris[Number(suggestion.sourcePhotoId.replace('photo-', '')) - 1] ?? photoUris[0];
           if (sourceUri) retainedPhotos.set(suggestion.suggestionId, saveScanPhoto(sourceUri));
         }
@@ -214,9 +238,8 @@ export default function ScanScreen() {
         return;
       }
     }
-    for (const suggestion of suggestions) {
+    for (const suggestion of acceptedSuggestions) {
       const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
-      if (decision === 'same') continue;
       const quantityText = suggestion.quantityKnown && suggestion.quantity !== undefined
         ? `${suggestion.quantity} ${suggestion.unit ?? ''}`.trim()
         : undefined;
@@ -252,10 +275,13 @@ export default function ScanScreen() {
         sourceScanId: scanId ?? undefined,
         sourcePhotoId: suggestion.sourcePhotoId,
         reviewedAt,
-      });
+      }, { additionalStock: Boolean(suggestion.existingInventoryMatch && decision === 'additional') });
     }
-    if (name.trim()) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
-    Alert.alert('Added to My Kitchen', 'Every saved suggestion was reviewed on this screen. Quantities were not inferred when the photo could not support them.', [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
+    const manualKey = `${normalizeIngredientName(name)}|${location}`;
+    const manualIsNew = Boolean(name.trim()) && !known.has(manualKey);
+    if (manualIsNew) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
+    const skipped = suggestions.length - acceptedSuggestions.length + (name.trim() && !manualIsNew ? 1 : 0);
+    Alert.alert('Kitchen updated', `${acceptedSuggestions.length + Number(manualIsNew)} reviewed item(s) saved. ${skipped} existing item(s) skipped. Quantities were not inferred when the photo could not support them.`, [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
   };
 
   return (

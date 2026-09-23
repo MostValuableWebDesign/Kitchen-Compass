@@ -97,6 +97,10 @@ const references: ReferenceEntry[] = [
   { names: ['bread'], unit: 'slice', amounts: { calories: 79, protein: 2.7, carbs: 14.3, fat: 1, fiber: 0.8, sodium: 147, addedSugar: 1.4, saturatedFat: 0.3 }, vegetableServings: 0, source: bundledSource },
 ];
 
+export function supportedNutritionInputs() {
+  return references.map((entry) => ({ name: entry.names[0], unit: entry.unit }));
+}
+
 const aliases: Record<string, string> = {
   eggs: 'egg',
   'chicken breast': 'chicken breast',
