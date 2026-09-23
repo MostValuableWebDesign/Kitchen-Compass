@@ -74,7 +74,8 @@ export interface Recipe {
   allergenInfo: 'complete' | 'incomplete';
   sourceVersion: string;
   recipeVersion?: string;
-  source?: 'curated' | 'server-ai';
+  source?: 'curated' | 'server-ai' | 'published';
+  sourceUrl?: string;
   storageInstructions: string;
   reheatingInstructions: string;
   servingSuggestions?: string[];

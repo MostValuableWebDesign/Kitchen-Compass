@@ -160,12 +160,13 @@ export function isCacheableRecipe(value: unknown): value is Recipe {
     && ingredients
     && steps
     && Array.isArray(value.allergens)
-    && value.allergenInfo === 'complete'
+    && (value.allergenInfo === 'complete' || (value.source === 'published' && value.allergenInfo === 'incomplete'))
     && nutrition
     && isRecord(value.healthScore)
     && (value.healthScore.status === 'calculated' || value.healthScore.status === 'insufficient-information')
     && nutrition
-    && (value.source === 'server-ai' || value.source === 'curated' || value.source === undefined);
+    && (value.source === 'server-ai' || value.source === 'published' || value.source === 'curated' || value.source === undefined)
+    && (value.sourceUrl === undefined || typeof value.sourceUrl === 'string');
 }
 
 export function parseCachedRecipes(value: unknown) {

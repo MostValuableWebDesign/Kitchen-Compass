@@ -17,7 +17,7 @@ const commonSeasonings = new Set([
 
 export type PublishedSearchIngredient = Pick<
   Ingredient,
-  'id' | 'name' | 'status' | 'confidence' | 'quantityKnown' | 'quantityValue' | 'source'
+  'id' | 'name' | 'location' | 'status' | 'confidence' | 'quantityKnown' | 'quantityValue' | 'source'
 >;
 
 function normalizeIngredient(value: string) {
@@ -25,11 +25,15 @@ function normalizeIngredient(value: string) {
   return normalized.endsWith('s') && !normalized.endsWith('ss') ? normalized.slice(0, -1) : normalized;
 }
 
-function isEligible(ingredient: PublishedSearchIngredient) {
+function isConfirmedAvailable(ingredient: PublishedSearchIngredient) {
   if (ingredient.status === 'used' || ingredient.confidence !== 'confirmed') return false;
   if (typeof ingredient.name !== 'string') return false;
   const name = normalizeIngredient(ingredient.name);
-  return Boolean(name) && !commonSeasonings.has(name) && ingredient.name.trim().length <= 80;
+  return Boolean(name) && ingredient.name.trim().length <= 80;
+}
+
+function isSearchAnchor(ingredient: PublishedSearchIngredient) {
+  return isConfirmedAvailable(ingredient) && !commonSeasonings.has(normalizeIngredient(ingredient.name));
 }
 
 function scoreIngredient(ingredient: PublishedSearchIngredient) {
@@ -44,7 +48,7 @@ export function rankPublishedSearchIngredients(ingredients: readonly PublishedSe
   const seenNames = new Set<string>();
   return ingredients
     .map((ingredient, index) => ({ ingredient, index }))
-    .filter(({ ingredient }) => isEligible(ingredient))
+    .filter(({ ingredient }) => isSearchAnchor(ingredient))
     .filter(({ ingredient }) => {
       const name = normalizeIngredient(ingredient.name);
       if (seenNames.has(name)) return false;
@@ -55,7 +59,7 @@ export function rankPublishedSearchIngredients(ingredients: readonly PublishedSe
     .map(({ ingredient }) => ingredient);
 }
 
-export function buildPublishedRecipeSearchIngredients(
+export function buildPublishedRecipeSearch(
   ingredients: readonly PublishedSearchIngredient[],
   selectedIds: readonly string[] = [],
 ) {
@@ -66,8 +70,24 @@ export function buildPublishedRecipeSearchIngredients(
     .filter((ingredient): ingredient is PublishedSearchIngredient => Boolean(ingredient));
   const automatic = ranked.filter((ingredient) => !selected.has(ingredient.id));
   const anchors = [...pinned, ...automatic].slice(0, MAX_PUBLISHED_SEARCH_ANCHORS);
-  const anchorIds = new Set(anchors.map((ingredient) => ingredient.id));
-  return [...anchors, ...ranked.filter((ingredient) => !anchorIds.has(ingredient.id))]
+  const anchorNames = new Set(anchors.map((ingredient) => normalizeIngredient(ingredient.name)));
+  const seenNames = new Set<string>();
+  const pantry = ingredients
+    .filter(isConfirmedAvailable)
+    .filter((ingredient) => {
+      const name = normalizeIngredient(ingredient.name);
+      if (seenNames.has(name)) return false;
+      seenNames.add(name);
+      return true;
+    });
+  const orderedPantry = [
+    ...anchors,
+    ...pantry.filter((ingredient) => !anchorNames.has(normalizeIngredient(ingredient.name))),
+  ]
     .slice(0, MAX_PUBLISHED_SEARCH_INGREDIENTS)
     .map((ingredient) => ingredient.name.trim());
+  return {
+    anchors: anchors.map((ingredient) => ingredient.name.trim()),
+    ingredients: orderedPantry,
+  };
 }
