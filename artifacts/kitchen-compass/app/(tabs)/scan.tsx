@@ -1,9 +1,10 @@
 import * as ImagePicker from 'expo-image-picker';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-client-react';
 import { Chip, SectionTitle } from '@/components/KitchenUI';
@@ -13,6 +14,18 @@ import { normalizeIngredientName } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 
 const MAX_SCAN_PHOTOS = 10;
+type ScanPhotoAsset = { uri: string; width: number; height: number };
+
+async function prepareScanPhoto(asset: ScanPhotoAsset, index: number) {
+  for (const [width, quality] of [[1200, 0.6], [900, 0.45], [700, 0.35]]) {
+    const context = ImageManipulator.manipulate(asset.uri);
+    if (asset.width > width) context.resize({ width, height: null });
+    const rendered = await context.renderAsync();
+    const photo = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: quality, base64: true });
+    if (photo.base64 && photo.base64.length * 0.75 <= 700_000) return photo;
+  }
+  throw new Error(`Photo ${index + 1} is too large to upload. Remove it and try again.`);
+}
 
 export default function ScanScreen() {
   const colors = useColors();
@@ -20,7 +33,16 @@ export default function ScanScreen() {
   const router = useRouter();
   const { addIngredient, ingredients, updateIngredient } = useKitchen();
   const [photoUris, setPhotoUris] = useState<string[]>([]);
-  const [pendingCameraAssets, setPendingCameraAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<ScanPhotoAsset[]>([]);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [captureBusy, setCaptureBusy] = useState(false);
+  const cameraRef = useRef<CameraView>(null);
+  const scanScrollRef = useRef<ScrollView>(null);
+  const photoReviewY = useRef(0);
+  const captureGuard = useRef(false);
+  const analysisGuard = useRef(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [scanId, setScanId] = useState<string | null>(null);
   const [scanDecisions, setScanDecisions] = useState<Record<string, 'same' | 'additional' | 'correction'>>({});
@@ -34,8 +56,10 @@ export default function ScanScreen() {
   const [keepPhotos, setKeepPhotos] = useState(false);
 
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
-  const reviewPhotos = async (assets: ImagePicker.ImagePickerAsset[]) => {
-    setPhotoUris([]);
+  const reviewPhotos = async (assets: ScanPhotoAsset[]) => {
+    if (analysisGuard.current || !assets.length || assets.length > MAX_SCAN_PHOTOS) return;
+    analysisGuard.current = true;
+    setPhotoUris(assets.map((asset) => asset.uri));
     setSuggestions([]);
     setScanId(null);
     setScanDecisions({});
@@ -45,12 +69,8 @@ export default function ScanScreen() {
     setRecognitionState('analyzing');
     setRecognitionMessage('');
     try {
-      const normalized = await Promise.all(assets.map(async (asset) => {
-        const context = ImageManipulator.manipulate(asset.uri);
-        if (asset.width > 1600) context.resize({ width: 1600, height: null });
-        const rendered = await context.renderAsync();
-        return rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.75, base64: true });
-      }));
+      const normalized: Awaited<ReturnType<typeof prepareScanPhoto>>[] = [];
+      for (const [index, asset] of assets.entries()) normalized.push(await prepareScanPhoto(asset, index));
       if (normalized.some((photo) => !photo.base64)) throw new Error('An image could not be encoded for recognition.');
       setPhotoUris(normalized.map((photo) => photo.uri));
       const photos = normalized.map((photo, index) => ({
@@ -66,11 +86,14 @@ export default function ScanScreen() {
       setSuggestions(result.suggestions);
       setScanDecisions(Object.fromEntries(result.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion.existingInventoryMatch ? 'same' : 'additional'])));
       setRecognitionState('ready');
+      setPendingPhotos([]);
     } catch (error) {
       setRecognitionState('unavailable');
       const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
       setRecognitionMessage(
-        status === 401
+        error instanceof Error && error.message.includes('too large to upload')
+          ? error.message
+          : status === 401
           ? 'Secure scan access could not be established. Try again later or use manual entry below.'
           : status === 413
             ? 'That photo payload is too large. Choose fewer photos or use smaller images.'
@@ -78,34 +101,66 @@ export default function ScanScreen() {
               ? 'Photo recognition is temporarily rate-limited. Try again in a little while.'
               : 'Recognition is unavailable right now. Your existing kitchen was not changed. Manual entry remains available below.',
       );
+    } finally {
+      analysisGuard.current = false;
     }
   };
   const takePhoto = async () => {
-    if (pendingCameraAssets.length >= MAX_SCAN_PHOTOS) {
+    if (pendingPhotos.length >= MAX_SCAN_PHOTOS) {
       Alert.alert('Photo limit reached', `You can analyze up to ${MAX_SCAN_PHOTOS} photos at once.`);
       return;
     }
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    let permission;
+    try {
+      permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    } catch {
+      Alert.alert('Camera unavailable', 'Camera access could not be requested. Try again later.');
+      return;
+    }
     if (!permission.granted) {
       Alert.alert('Camera access needed', permission.canAskAgain ? 'Allow camera access to photograph ingredients.' : 'Camera access is off for Kitchen Compass. You can enable it in Settings.', permission.canAskAgain ? [{ text: 'Not now', style: 'cancel' }] : [{ text: 'Open Settings', onPress: openSettings }, { text: 'Cancel', style: 'cancel' }]);
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.8, allowsEditing: false });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setPendingCameraAssets((current) => [...current, result.assets[0]]);
+    setCameraReady(false);
+    setCameraOpen(true);
+  };
+  const capturePhoto = async () => {
+    if (!cameraReady || captureGuard.current || pendingPhotos.length >= MAX_SCAN_PHOTOS || !cameraRef.current) return;
+    captureGuard.current = true;
+    setCaptureBusy(true);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+      if (!photo?.uri) throw new Error('Camera did not return a photo.');
+      setPendingPhotos((current) => current.length >= MAX_SCAN_PHOTOS ? current : [...current, { uri: photo.uri, width: photo.width, height: photo.height }]);
+    } catch {
+      Alert.alert('Photo could not be taken', 'Try snapping the photo again.');
+    } finally {
+      captureGuard.current = false;
+      setCaptureBusy(false);
     }
   };
   const analyzeCameraSession = () => {
-    if (pendingCameraAssets.length) void reviewPhotos(pendingCameraAssets);
+    if (pendingPhotos.length) {
+      setCameraOpen(false);
+      void reviewPhotos([...pendingPhotos]);
+    }
+  };
+  const closeCameraForReview = () => {
+    setCameraOpen(false);
+    requestAnimationFrame(() => scanScrollRef.current?.scrollTo({ y: Math.max(0, photoReviewY.current - 16), animated: true }));
   };
   const pickPhoto = async () => {
+    if (pendingPhotos.length >= MAX_SCAN_PHOTOS) {
+      Alert.alert('Photo limit reached', `You can analyze up to ${MAX_SCAN_PHOTOS} photos at once.`);
+      return;
+    }
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Photo access needed', permission.canAskAgain ? 'Allow photo access to choose a kitchen image.' : 'Photo access is off for Kitchen Compass. You can enable it in Settings.', permission.canAskAgain ? [{ text: 'Not now', style: 'cancel' }] : [{ text: 'Open Settings', onPress: openSettings }, { text: 'Cancel', style: 'cancel' }]);
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: MAX_SCAN_PHOTOS, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
-    if (!result.canceled && result.assets.length) void reviewPhotos(result.assets);
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: MAX_SCAN_PHOTOS - pendingPhotos.length, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
+    if (!result.canceled && result.assets.length) setPendingPhotos((current) => [...current, ...result.assets].slice(0, MAX_SCAN_PHOTOS));
   };
   const updateSuggestion = (suggestionId: string, changes: Partial<IngredientSuggestion>) => {
     setSuggestions((current) => current.map((item) => item.suggestionId === suggestionId ? { ...item, ...changes } : item));
@@ -115,8 +170,10 @@ export default function ScanScreen() {
   };
   const resetScan = () => {
     setMode('choose');
+    setCameraOpen(false);
+    setCameraReady(false);
     setPhotoUris([]);
-    setPendingCameraAssets([]);
+    setPendingPhotos([]);
     setSuggestions([]);
     setScanId(null);
     setScanDecisions({});
@@ -203,7 +260,7 @@ export default function ScanScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scanScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.header}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>ADD TO YOUR KITCHEN</Text><Text style={[styles.title, { color: colors.foreground }]}>{mode === 'review' ? 'Review scan' : 'Scan ingredients'}</Text></View>{mode === 'review' ? <Pressable onPress={resetScan}><Feather name="x" size={22} color={colors.foreground} /></Pressable> : null}</View>
         {mode === 'choose' ? (
           <>
@@ -215,14 +272,14 @@ export default function ScanScreen() {
             <SectionTitle title="Choose how to add" />
             <Pressable testID="take-photo" onPress={takePhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
-            <Pressable testID="manual-entry" onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Enter a confirmed ingredient</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
-             {pendingCameraAssets.length ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
-               <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Camera session · {pendingCameraAssets.length} photo{pendingCameraAssets.length === 1 ? '' : 's'}</Text>
-               <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Add another photo or analyze this group together.</Text>
-               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{pendingCameraAssets.map((asset, index) => <Image key={`${asset.uri}-${index}`} source={{ uri: asset.uri }} style={styles.sessionThumbnail} />)}</ScrollView>
+            <Pressable testID="manual-entry" disabled={pendingPhotos.length > 0} onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, pendingPhotos.length > 0 && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{pendingPhotos.length ? 'Review or remove queued photos first' : 'Enter a confirmed ingredient'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+             {pendingPhotos.length ? <View onLayout={(event) => { photoReviewY.current = event.nativeEvent.layout.y; }} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
+               <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Review photos · {pendingPhotos.length}/{MAX_SCAN_PHOTOS}</Text>
+               <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Remove any photo you do not want to upload, or add more before analyzing.</Text>
+               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{pendingPhotos.map((asset, index) => <View key={`${asset.uri}-${index}`}><Image source={{ uri: asset.uri }} style={styles.sessionThumbnail} /><Pressable accessibilityLabel={`Remove photo ${index + 1}`} onPress={() => setPendingPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))} style={[styles.removePhoto, { backgroundColor: colors.destructive }]}><Feather name="x" size={13} color="#fff" /></Pressable></View>)}</ScrollView>
                <View style={styles.sessionActions}>
-                 <Pressable onPress={takePhoto} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.secondary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Take another</Text></Pressable>
-                 <Pressable onPress={analyzeCameraSession} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Analyze photos</Text></Pressable>
+                 <Pressable onPress={() => void takePhoto()} disabled={pendingPhotos.length >= MAX_SCAN_PHOTOS} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.secondary }, pressed && styles.pressed, pendingPhotos.length >= MAX_SCAN_PHOTOS && styles.disabled]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Take another</Text></Pressable>
+                 <Pressable testID="analyze-photos" onPress={analyzeCameraSession} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Analyze photos</Text></Pressable>
                </View>
              </View> : null}
              <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
@@ -233,7 +290,7 @@ export default function ScanScreen() {
             {photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
             <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
             {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
-             {recognitionState === 'unavailable' ? <View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View> : null}
+             {recognitionState === 'unavailable' ? <><View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View>{pendingPhotos.length ? <Pressable onPress={() => setMode('choose')} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 12 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Review photos and try again</Text></Pressable> : null}</> : null}
              {suggestions.map((suggestion) => {
                const matchingRows = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
                const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
@@ -268,6 +325,24 @@ export default function ScanScreen() {
           </>
         )}
       </ScrollView>
+      <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>
+        <View style={styles.cameraScreen}>
+          {cameraOpen ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" onCameraReady={() => setCameraReady(true)} onMountError={() => { setCameraReady(false); Alert.alert('Camera unavailable', 'Close the camera and try again.'); }} /> : null}
+          <View style={[styles.cameraTop, { paddingTop: insets.top + 14 }]}>
+            <Pressable accessibilityLabel="Close camera" onPress={() => setCameraOpen(false)} style={styles.cameraClose}><Feather name="x" size={22} color="#fff" /></Pressable>
+            <Text style={styles.cameraCount}>{pendingPhotos.length}/{MAX_SCAN_PHOTOS} photos</Text>
+          </View>
+          <View style={[styles.cameraBottom, { paddingBottom: insets.bottom + 20 }]}>
+            <Text style={styles.cameraHint}>{pendingPhotos.length >= MAX_SCAN_PHOTOS ? 'Photo limit reached. Review your set.' : 'Tap the shutter to add a photo. Keep snapping without a confirmation step.'}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cameraStrip}>{pendingPhotos.map((asset, index) => <Image key={`${asset.uri}-${index}`} source={{ uri: asset.uri }} style={styles.cameraThumbnail} />)}</ScrollView>
+            <View style={styles.cameraControls}>
+              <View style={styles.cameraControlSide} />
+              <Pressable testID="camera-shutter" accessibilityLabel="Take photo" disabled={!cameraReady || captureBusy || pendingPhotos.length >= MAX_SCAN_PHOTOS} onPress={() => void capturePhoto()} style={[styles.shutter, (!cameraReady || captureBusy || pendingPhotos.length >= MAX_SCAN_PHOTOS) && styles.disabled]}><View style={styles.shutterInner} /></Pressable>
+              <Pressable testID="camera-review" disabled={!pendingPhotos.length || captureBusy} onPress={closeCameraForReview} style={styles.cameraControlSide}><Text style={[styles.cameraDone, !pendingPhotos.length && styles.disabled]}>Review</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -290,6 +365,7 @@ const styles = StyleSheet.create({
   cameraSessionTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
   cameraSessionBody: { fontSize: 12, lineHeight: 17, marginTop: 4 },
   sessionThumbnail: { width: 72, height: 72, borderRadius: 12 },
+  removePhoto: { position: 'absolute', top: -6, right: -6, width: 23, height: 23, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   sessionActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
   sessionButton: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   sessionButtonText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
@@ -331,4 +407,18 @@ const styles = StyleSheet.create({
   saveButton: { height: 53, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginTop: 26 },
   saveText: { fontSize: 15, fontFamily: 'Inter_700Bold' },
   pressed: { opacity: 0.72 },
+  disabled: { opacity: 0.5 },
+  cameraScreen: { flex: 1, backgroundColor: '#111' },
+  cameraTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  cameraClose: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  cameraCount: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold', backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, overflow: 'hidden', paddingHorizontal: 12, paddingVertical: 8 },
+  cameraBottom: { marginTop: 'auto', backgroundColor: 'rgba(0,0,0,0.68)', paddingTop: 14 },
+  cameraHint: { color: '#fff', textAlign: 'center', fontSize: 12, lineHeight: 17, paddingHorizontal: 20 },
+  cameraStrip: { gap: 7, minHeight: 58, paddingHorizontal: 20, paddingVertical: 9 },
+  cameraThumbnail: { width: 46, height: 46, borderRadius: 8 },
+  cameraControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingHorizontal: 22, marginTop: 8 },
+  cameraControlSide: { width: 86, minHeight: 58, alignItems: 'center', justifyContent: 'center' },
+  shutter: { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  shutterInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#fff' },
+  cameraDone: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
 });

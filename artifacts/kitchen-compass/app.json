@@ -21,7 +21,16 @@
         "expo-image-picker",
         {
           "photosPermission": "Kitchen Compass uses your photos to add ingredients from existing kitchen images.",
-          "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review."
+          "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
         }
       ]
     ],

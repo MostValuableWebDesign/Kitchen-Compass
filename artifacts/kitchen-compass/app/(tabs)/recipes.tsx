@@ -1,8 +1,8 @@
 import { Feather } from '@expo/vector-icons';
-import { findExternalRecipes, useDiscoverRecipes, type ExternalRecipe, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
+import { discoverRecipes, findExternalRecipes, type ExternalRecipe, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
@@ -17,6 +17,7 @@ const resultFilters: ResultFilter[] = ['All', 'Ready to cook', 'Almost ready', '
 const mealTypes: RecipeDiscoveryFiltersMealType[] = ['Any', 'Breakfast', 'Lunch', 'Dinner'];
 const timeOptions: Array<number | undefined> = [undefined, 30, 45, 60];
 const healthOptions: Array<number | undefined> = [undefined, 70, 85];
+type ActiveSearch = { kind: 'kitchen' | 'published'; startedAt: number; complete: boolean };
 
 export default function RecipesScreen() {
   const colors = useColors();
@@ -44,8 +45,50 @@ export default function RecipesScreen() {
   const [externalRecipes, setExternalRecipes] = useState<ExternalRecipe[]>([]);
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalMessage, setExternalMessage] = useState('');
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState(false);
+  const [discoveryWarning, setDiscoveryWarning] = useState<string>();
+  const [activeSearch, setActiveSearch] = useState<ActiveSearch | null>(null);
+  const [progressClock, setProgressClock] = useState(Date.now());
+  const searchGuard = useRef(false);
+  const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const discovery = useDiscoverRecipes();
+  useEffect(() => {
+    if (!activeSearch || activeSearch.complete) return;
+    const timer = setInterval(() => setProgressClock(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [activeSearch]);
+  useEffect(() => () => { if (completionTimer.current) clearTimeout(completionTimer.current); }, []);
+
+  const beginSearch = (kind: ActiveSearch['kind']) => {
+    if (searchGuard.current) return false;
+    searchGuard.current = true;
+    Keyboard.dismiss();
+    const startedAt = Date.now();
+    setProgressClock(startedAt);
+    setActiveSearch({ kind, startedAt, complete: false });
+    return true;
+  };
+  const finishSearch = (success: boolean) => {
+    if (success) {
+      setActiveSearch((current) => current ? { ...current, complete: true } : null);
+      completionTimer.current = setTimeout(() => {
+        setActiveSearch(null);
+        searchGuard.current = false;
+        completionTimer.current = null;
+      }, 500);
+    } else {
+      setActiveSearch(null);
+      searchGuard.current = false;
+    }
+  };
+  // The provider does not report work completed. Show elapsed wait as an estimate,
+  // then reserve 100% for a response that has actually been processed.
+  const progressLimitMs = activeSearch?.kind === 'kitchen' ? 180_000 : 30_000;
+  const progressPercent = activeSearch?.complete ? 100 : activeSearch
+    ? Math.min(95, Math.floor(((progressClock - activeSearch.startedAt) / progressLimitMs) * 95))
+    : 0;
+
   const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
   const inventoryPayload = useMemo(() => ingredients.map((item) => ({
     name: item.name,
@@ -58,34 +101,55 @@ export default function RecipesScreen() {
   })), [ingredients]);
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
 
-  const discover = (different = false) => {
-    const nextVariation = variation + 1;
-    setVariation(nextVariation);
-    const request = buildRecipeDiscoveryRequest(
-      inventoryPayload,
-      preferences,
-      filterState,
-      `${different ? 'different' : 'refresh'}-${nextVariation}`,
-      different ? savedRecipes.map(recipeVersion) : [],
-    );
-    discovery.mutate({ data: request }, {
-      onSuccess: (result) => saveDiscoveredRecipes(result.recipes.map(mapDiscoveredRecipe)),
-    });
+  const discover = async (different = false) => {
+    if (!beginSearch('kitchen')) return;
+    setDiscoveryBusy(true);
+    setDiscoveryError(false);
+    setDiscoveryWarning(undefined);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 180_000);
+    try {
+      const nextVariation = variation + 1;
+      setVariation(nextVariation);
+      const request = buildRecipeDiscoveryRequest(
+        inventoryPayload,
+        preferences,
+        filterState,
+        `${different ? 'different' : 'refresh'}-${nextVariation}`,
+        different ? savedRecipes.map(recipeVersion) : [],
+      );
+      const result = await discoverRecipes(request, { signal: controller.signal });
+      saveDiscoveredRecipes(result.recipes.map(mapDiscoveredRecipe));
+      setDiscoveryWarning(result.warning);
+      finishSearch(true);
+    } catch {
+      setDiscoveryError(true);
+      finishSearch(false);
+    } finally {
+      clearTimeout(timeout);
+      setDiscoveryBusy(false);
+    }
   };
 
   const findPublished = async () => {
     const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
     if (!confirmed.length) { setExternalMessage('Add at least one confirmed ingredient first.'); return; }
+    if (!beginSearch('published')) return;
     setExternalBusy(true);
     setExternalMessage('');
     setExternalRecipes([]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies);
+      const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies, controller.signal);
       setExternalRecipes(result.recipes);
       setExternalMessage(result.recipes.length ? result.safetyNotice : 'No published recipes matched these ingredients. Try confirming more items.');
+      finishSearch(true);
     } catch {
       setExternalMessage('Published recipes are unavailable. Check the connection and TheMealDB setup; saved recipes remain available.');
+      finishSearch(false);
     } finally {
+      clearTimeout(timeout);
       setExternalBusy(false);
     }
   };
@@ -117,11 +181,11 @@ export default function RecipesScreen() {
     return matchesSavedPreferences && matchesLocalFilters && matchesSearch && matchesResultFilter;
   }), [availableRecipes, cuisine, dietaryPreference, equipment, favoriteRecipeVersions, ingredients, maxMinutes, mealType, minHealthScore, preferences, reservations, resultFilter, search]);
 
-  const statusMessage = discovery.isPending
+  const statusMessage = discoveryBusy
     ? 'Checking your confirmed kitchen and preparing new ideas…'
-    : discovery.isError
+    : discoveryError
       ? 'Recipe discovery is unavailable. Saved recipes and the built-in examples are still available offline.'
-      : discovery.data?.warning;
+      : discoveryWarning;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
@@ -140,12 +204,12 @@ export default function RecipesScreen() {
             <Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Discover from your kitchen</Text>
             <Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Only confirmed inventory is sent for recipe matching. Allergies and restrictions are applied before results appear.</Text>
           </View>
-          <Pressable testID="discover-recipes" onPress={() => discover(false)} disabled={discovery.isPending || !hydrated} style={({ pressed }) => [styles.discoverButton, { backgroundColor: colors.primary }, pressed && styles.pressed, discovery.isPending && styles.disabled]}>
+          <Pressable testID="discover-recipes" onPress={() => void discover(false)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.discoverButton, { backgroundColor: colors.primary }, pressed && styles.pressed, activeSearch && styles.disabled]}>
             <Feather name="star" size={16} color={colors.primaryForeground} />
-            <Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discovery.isPending ? 'Finding' : 'Find recipes'}</Text>
+            <Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discoveryBusy ? 'Finding' : 'Find recipes'}</Text>
           </Pressable>
         </View>
-        {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discovery.isError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discovery.isError ? 'wifi-off' : 'info'} size={16} color={discovery.isError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
+        {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
         <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Source recipes open on their original site.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={() => void findPublished()} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
         {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
         {externalRecipes.map((item) => <Pressable key={item.id} onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}<View style={{ flex: 1 }}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching ingredients · {item.missingIngredients.length} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></View></Pressable>)}
@@ -165,7 +229,7 @@ export default function RecipesScreen() {
         </ScrollView>
         <View style={styles.discoveryHeader}>
           <View><Text style={[styles.heading, { color: colors.foreground }]}>{resultFilter === 'All' ? 'A good place to start' : resultFilter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{savedRecipes.length ? `${savedRecipes.length} saved discovery${savedRecipes.length === 1 ? '' : 'ies'} available offline` : ingredients.length ? 'Matched against your confirmed kitchen' : 'Add confirmed ingredients to make suggestions personal'}</Text></View>
-          <Pressable testID="different-recipes" onPress={() => discover(true)} disabled={discovery.isPending || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, discovery.isPending && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
+          <Pressable testID="different-recipes" onPress={() => void discover(true)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
         </View>
         {filtered.length ? filtered.map((recipe) => {
           const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
@@ -174,6 +238,18 @@ export default function RecipesScreen() {
           return <RecipeCard key={recipeVersion(recipe)} recipe={recipe} hasIngredients={safety.ready} statusText={usesSoon ? `${availability} · Use soon` : availability} favorite={favoriteRecipeVersions.includes(recipeVersion(recipe))} onFavorite={() => toggleFavoriteRecipe(recipe)} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
         }) : <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipes match those filters</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Try a different category, clear a filter, or discover another set of recipes.</Text></View>}
       </ScrollView>
+      <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={() => undefined}>
+        <View style={styles.progressBackdrop}>
+          <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : 'Finding recipes from your kitchen'}</Text>
+            <Text style={[styles.progressPercent, { color: colors.primary }]}>{progressPercent}%</Text>
+            <View testID="recipe-search-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated recipe search progress" accessibilityValue={{ min: 0, max: 100, now: progressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
+              <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${progressPercent}%` }]} />
+            </View>
+            <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>{activeSearch?.complete ? 'Recipes are ready.' : 'Estimated progress while we wait for the recipe response. You can continue when this finishes.'}</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -204,6 +280,13 @@ const styles = StyleSheet.create({
   emptyBody: { fontSize: 13, marginTop: 7, textAlign: 'center', lineHeight: 19 },
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.6 },
+  progressBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.62)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  progressCard: { width: '100%', maxWidth: 390, borderRadius: 22, padding: 24, alignItems: 'center' },
+  progressTitle: { fontSize: 17, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  progressPercent: { fontSize: 34, fontFamily: 'Inter_700Bold', marginTop: 18 },
+  progressTrack: { width: '100%', height: 12, borderRadius: 6, overflow: 'hidden', marginTop: 14 },
+  progressFill: { height: '100%', borderRadius: 6 },
+  progressNote: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 14 },
   externalCard: { borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 10 },
   externalImage: { width: 64, height: 64, borderRadius: 10 },
   externalTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
