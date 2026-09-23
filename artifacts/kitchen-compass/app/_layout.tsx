@@ -65,17 +65,17 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <KitchenProvider>
+      <QueryClientProvider client={queryClient}>
+        <KitchenProvider>
+          <ErrorBoundary>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <RootLayoutNav />
               </KeyboardProvider>
             </GestureHandlerRootView>
-          </KitchenProvider>
-        </QueryClientProvider>
-      </ErrorBoundary>
+          </ErrorBoundary>
+        </KitchenProvider>
+      </QueryClientProvider>
     </SafeAreaProvider>
   );
 }
