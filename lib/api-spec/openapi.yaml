@@ -102,6 +102,44 @@ paths:
           description: Discovery rate limit exceeded
         "503":
           description: Recipe discovery is unavailable or returned no safe recipes
+  /recipes/images:
+    post:
+      operationId: resolveRecipeImages
+      tags: [recipes]
+      summary: Find a matching recipe photo or generate an illustrative image
+      security:
+        - ScanAccess: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecipeImagesRequest"
+      responses:
+        "200":
+          description: Recipe images; entries without an image indicate provider failure
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  images:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        recipeVersion: { type: string }
+                        imageUrl: { type: string, format: uri }
+                        imageBase64: { type: string }
+                        source: { type: string, enum: [TheMealDB, AI-generated] }
+                      required: [recipeVersion]
+                required: [images]
+        "400":
+          description: Invalid image request
+        "401":
+          description: Missing or invalid scan credential
+        "429":
+          description: Installation rate limit exceeded
 components:
   securitySchemes:
     ScanAccess:
@@ -607,4 +645,21 @@ components:
         warning:
           type: string
       required: [recipes, source]
-
+    RecipeImagesRequest:
+      type: object
+      properties:
+        recipes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              recipeVersion: { type: string }
+              title: { type: string }
+              description: { type: string }
+              ingredients:
+                type: array
+                items: { type: string }
+            required: [recipeVersion, title, description, ingredients]
+      required: [recipes]

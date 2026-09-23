@@ -10,6 +10,8 @@ import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
+import { loadRecipeImages } from '@/lib/loadRecipeImages';
+import type { Recipe } from '@/data/recipes';
 
 type ResultFilter = 'All' | 'Ready to cook' | 'Almost ready' | 'Check quantities' | 'Quick meals' | 'Use soon' | 'Favorites';
 
@@ -30,6 +32,7 @@ export default function RecipesScreen() {
     savedRecipes,
     favoriteRecipeVersions,
     saveDiscoveredRecipes,
+    setDiscoveredRecipeImage,
     toggleFavoriteRecipe,
     hydrated,
   } = useKitchen();
@@ -50,7 +53,11 @@ export default function RecipesScreen() {
   const [discoveryWarning, setDiscoveryWarning] = useState<string>();
   const [activeSearch, setActiveSearch] = useState<ActiveSearch | null>(null);
   const [progressClock, setProgressClock] = useState(Date.now());
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageMessage, setImageMessage] = useState('');
   const searchGuard = useRef(false);
+  const imageJob = useRef(0);
+  const searchRequest = useRef<AbortController | null>(null);
   const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -58,18 +65,24 @@ export default function RecipesScreen() {
     const timer = setInterval(() => setProgressClock(Date.now()), 500);
     return () => clearInterval(timer);
   }, [activeSearch]);
-  useEffect(() => () => { if (completionTimer.current) clearTimeout(completionTimer.current); }, []);
+  useEffect(() => () => {
+    searchRequest.current?.abort();
+    if (completionTimer.current) clearTimeout(completionTimer.current);
+  }, []);
 
-  const beginSearch = (kind: ActiveSearch['kind']) => {
+  const beginSearch = (kind: ActiveSearch['kind'], controller: AbortController) => {
     if (searchGuard.current) return false;
     searchGuard.current = true;
+    searchRequest.current = controller;
     Keyboard.dismiss();
     const startedAt = Date.now();
     setProgressClock(startedAt);
     setActiveSearch({ kind, startedAt, complete: false });
     return true;
   };
-  const finishSearch = (success: boolean) => {
+  const finishSearch = (controller: AbortController, success: boolean) => {
+    if (searchRequest.current !== controller) return;
+    searchRequest.current = null;
     if (success) {
       setActiveSearch((current) => current ? { ...current, complete: true } : null);
       completionTimer.current = setTimeout(() => {
@@ -80,6 +93,21 @@ export default function RecipesScreen() {
     } else {
       setActiveSearch(null);
       searchGuard.current = false;
+    }
+  };
+  const cancelSearch = () => {
+    if (!activeSearch || activeSearch.complete) return;
+    searchRequest.current?.abort();
+    searchRequest.current = null;
+    searchGuard.current = false;
+    setActiveSearch(null);
+    setDiscoveryBusy(false);
+    setExternalBusy(false);
+    if (activeSearch.kind === 'kitchen') {
+      setDiscoveryError(false);
+      setDiscoveryWarning('Recipe search cancelled. Your saved recipes are unchanged.');
+    } else {
+      setExternalMessage('Online recipe search cancelled.');
     }
   };
   // The provider does not report work completed. Show elapsed wait as an estimate,
@@ -101,12 +129,27 @@ export default function RecipesScreen() {
   })), [ingredients]);
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
 
+  const prepareImages = async (recipes: Recipe[]) => {
+    if (!recipes.length) return;
+    const job = ++imageJob.current;
+    setImageBusy(true);
+    setImageMessage('Preparing recipe images in the background…');
+    try {
+      const saved = await loadRecipeImages(recipes, setDiscoveredRecipeImage);
+      if (imageJob.current === job) setImageMessage(saved < recipes.length ? 'Some recipe images could not be loaded. You can retry below.' : '');
+    } catch {
+      if (imageJob.current === job) setImageMessage('Recipe images could not be loaded. You can retry below.');
+    } finally {
+      if (imageJob.current === job) setImageBusy(false);
+    }
+  };
+
   const discover = async (different = false) => {
-    if (!beginSearch('kitchen')) return;
+    const controller = new AbortController();
+    if (!beginSearch('kitchen', controller)) return;
     setDiscoveryBusy(true);
     setDiscoveryError(false);
     setDiscoveryWarning(undefined);
-    const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 180_000);
     try {
       const nextVariation = variation + 1;
@@ -119,38 +162,45 @@ export default function RecipesScreen() {
         different ? savedRecipes.map(recipeVersion) : [],
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
-      saveDiscoveredRecipes(result.recipes.map(mapDiscoveredRecipe));
+      if (searchRequest.current !== controller || controller.signal.aborted) return;
+      const recipes = result.recipes.map(mapDiscoveredRecipe);
+      saveDiscoveredRecipes(recipes);
       setDiscoveryWarning(result.warning);
-      finishSearch(true);
+      setDiscoveryBusy(false);
+      finishSearch(controller, true);
+      void prepareImages(recipes);
     } catch {
+      if (searchRequest.current !== controller) return;
       setDiscoveryError(true);
-      finishSearch(false);
+      setDiscoveryBusy(false);
+      finishSearch(controller, false);
     } finally {
       clearTimeout(timeout);
-      setDiscoveryBusy(false);
     }
   };
 
   const findPublished = async () => {
     const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
     if (!confirmed.length) { setExternalMessage('Add at least one confirmed ingredient first.'); return; }
-    if (!beginSearch('published')) return;
+    const controller = new AbortController();
+    if (!beginSearch('published', controller)) return;
     setExternalBusy(true);
     setExternalMessage('');
-    setExternalRecipes([]);
-    const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies, controller.signal);
+      if (searchRequest.current !== controller || controller.signal.aborted) return;
       setExternalRecipes(result.recipes);
       setExternalMessage(result.recipes.length ? result.safetyNotice : 'No published recipes matched these ingredients. Try confirming more items.');
-      finishSearch(true);
+      setExternalBusy(false);
+      finishSearch(controller, true);
     } catch {
+      if (searchRequest.current !== controller) return;
       setExternalMessage('Published recipes are unavailable. Check the connection and TheMealDB setup; saved recipes remain available.');
-      finishSearch(false);
+      setExternalBusy(false);
+      finishSearch(controller, false);
     } finally {
       clearTimeout(timeout);
-      setExternalBusy(false);
     }
   };
 
@@ -210,6 +260,7 @@ export default function RecipesScreen() {
           </Pressable>
         </View>
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
+        {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
         <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Source recipes open on their original site.</Text></View><Pressable testID="find-published-recipes" disabled={externalBusy} onPress={() => void findPublished()} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View>
         {externalMessage ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{externalMessage}</Text> : null}
         {externalRecipes.map((item) => <Pressable key={item.id} onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}<View style={{ flex: 1 }}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching ingredients · {item.missingIngredients.length} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></View></Pressable>)}
@@ -238,7 +289,7 @@ export default function RecipesScreen() {
           return <RecipeCard key={recipeVersion(recipe)} recipe={recipe} hasIngredients={safety.ready} statusText={usesSoon ? `${availability} · Use soon` : availability} favorite={favoriteRecipeVersions.includes(recipeVersion(recipe))} onFavorite={() => toggleFavoriteRecipe(recipe)} onPress={() => router.push(`/recipe/${recipe.id}`)} />;
         }) : <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipes match those filters</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Try a different category, clear a filter, or discover another set of recipes.</Text></View>}
       </ScrollView>
-      <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={() => undefined}>
+      <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={cancelSearch}>
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : 'Finding recipes from your kitchen'}</Text>
@@ -246,7 +297,8 @@ export default function RecipesScreen() {
             <View testID="recipe-search-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated recipe search progress" accessibilityValue={{ min: 0, max: 100, now: progressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
               <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${progressPercent}%` }]} />
             </View>
-            <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>{activeSearch?.complete ? 'Recipes are ready.' : 'Estimated progress while we wait for the recipe response. You can continue when this finishes.'}</Text>
+            <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>{activeSearch?.complete ? 'Recipes are ready. Images may continue to appear.' : 'Estimated progress while we wait for the recipe response.'}</Text>
+            {!activeSearch?.complete ? <Pressable testID="cancel-recipe-search" accessibilityRole="button" onPress={cancelSearch} style={[styles.cancelButton, { borderColor: colors.border }]}><Text style={[styles.cancelText, { color: colors.foreground }]}>Cancel search</Text></Pressable> : null}
           </View>
         </View>
       </Modal>
@@ -287,6 +339,8 @@ const styles = StyleSheet.create({
   progressTrack: { width: '100%', height: 12, borderRadius: 6, overflow: 'hidden', marginTop: 14 },
   progressFill: { height: '100%', borderRadius: 6 },
   progressNote: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 14 },
+  cancelButton: { marginTop: 20, minHeight: 44, paddingHorizontal: 20, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   externalCard: { borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 10 },
   externalImage: { width: 64, height: 64, borderRadius: 10 },
   externalTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },

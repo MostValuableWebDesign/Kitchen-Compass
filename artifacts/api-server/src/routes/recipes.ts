@@ -383,6 +383,8 @@ router.post("/recipes/discover", async (req, res) => {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), recipeDiscoveryTimeoutMs);
+  const onClose = () => controller.abort();
+  res.once("close", onClose);
   try {
     const requestCandidates = async (requestPrompt: string) => {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -465,15 +467,16 @@ router.post("/recipes/discover", async (req, res) => {
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
     req.log.error({
-      reason: isTimeout ? "timeout" : "provider_or_validation_failure",
+      reason: res.destroyed ? "client_cancelled" : isTimeout ? "timeout" : "provider_or_validation_failure",
       errorType: error instanceof Error ? error.name : typeof error,
       ...(error instanceof z.ZodError
         ? { issues: error.issues.slice(0, 8).map((issue) => `${issue.path.join(".") || "response"}:${issue.code}`) }
         : {}),
     }, "Recipe discovery failed");
-    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery could not be completed. Previously saved recipes remain available.");
+    if (!res.destroyed) sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery could not be completed. Previously saved recipes remain available.");
   } finally {
     clearTimeout(timeout);
+    res.off("close", onClose);
   }
 });
 

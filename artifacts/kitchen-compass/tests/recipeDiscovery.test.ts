@@ -63,5 +63,7 @@ test('refreshing discovery does not replace a saved recipe with a different vers
 test('offline cache accepts only validated recipe-shaped entries', () => {
   const recipe = mapDiscoveredRecipe(apiRecipe);
   assert.equal(parseCachedRecipes([recipe, { id: 'broken', title: 'No safety data' }]).length, 1);
+  const withImage = { ...recipe, image: 'file:///recipe-photo.jpg', imageSource: 'AI-generated' as const };
+  assert.equal(parseCachedRecipes([withImage])[0]?.image, withImage.image);
   assert.equal(parseCachedRecipes(undefined).length, 0);
 });

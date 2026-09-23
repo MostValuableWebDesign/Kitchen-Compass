@@ -168,6 +168,7 @@ interface KitchenContextValue {
   planLeftover: (day: string, meal: MealType, leftoverId: string, portions?: number) => boolean;
   setShoppingList: (changes: Partial<ShoppingListState>) => void;
   saveDiscoveredRecipes: (nextRecipes: Recipe[]) => void;
+  setDiscoveredRecipeImage: (version: string, image: string, source: 'TheMealDB' | 'AI-generated') => void;
   toggleFavoriteRecipe: (recipe: Recipe) => void;
   previewCook: (plannedMealId: string, actualServings?: number) => CookPreview | null;
   completeCook: (input: {
@@ -426,6 +427,9 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setOnboardingComplete(false);
     },
     saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => mergeRecipes(current, nextRecipes).filter((recipe) => recipe.source === 'server-ai')),
+    setDiscoveredRecipeImage: (version, image, source) => setSavedRecipes((current) => current.map((recipe) =>
+      recipeVersion(recipe) === version ? { ...recipe, image, imageSource: source } : recipe,
+    )),
     toggleFavoriteRecipe: (recipe) => setFavoriteRecipeVersions((current) => {
       const version = recipeVersion(recipe);
       return current.includes(version) ? current.filter((item) => item !== version) : [...current, version];

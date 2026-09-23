@@ -48,6 +48,7 @@ app.use(cors());
 app.use("/api/scan/analyze", scanAccess);
 app.use("/api/recipes/discover", scanAccess);
 app.use("/api/recipes/external", scanAccess);
+app.use("/api/recipes/images", scanAccess);
 app.use(express.json({ limit: `${scanLimits.maxBodyBytes}b` }));
 app.use(express.urlencoded({ extended: true }));
 
