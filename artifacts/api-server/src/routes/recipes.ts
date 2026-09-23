@@ -149,8 +149,8 @@ const aiRecipeSchema = z.object({
   substitutions: z.array(substitutionSchema).max(20),
 });
 
-const aiResponseSchema = z.object({
-  recipes: z.array(aiRecipeSchema).max(8),
+const aiResponseEnvelopeSchema = z.object({
+  recipes: z.array(z.unknown()).max(8),
 });
 
 const recipeSchema = aiRecipeSchema.extend({
@@ -393,7 +393,22 @@ router.post("/recipes/discover", async (req, res) => {
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const rawContent = payload.choices?.[0]?.message?.content;
     if (!rawContent) throw new Error("Recipe discovery returned no content.");
-    const aiResult = aiResponseSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
+    const parsedEnvelope = aiResponseEnvelopeSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
+    const invalidRecipeIssues: string[] = [];
+    const aiRecipes = parsedEnvelope.recipes.flatMap((candidate, index) => {
+      const parsedRecipe = aiRecipeSchema.safeParse(candidate);
+      if (parsedRecipe.success) return [parsedRecipe.data];
+      const issue = parsedRecipe.error.issues[0];
+      invalidRecipeIssues.push(`${index}:${issue?.path.join(".") || "recipe"}:${issue?.code || "invalid"}`);
+      return [];
+    });
+    if (invalidRecipeIssues.length) {
+      req.log.warn({
+        invalidRecipeCount: invalidRecipeIssues.length,
+        issues: invalidRecipeIssues.slice(0, 8),
+      }, "Recipe discovery discarded invalid candidates");
+    }
+    const aiResult = { recipes: aiRecipes };
     const rejectionReasons = new Map<string, number>();
     const reject = (reason: string) => {
       rejectionReasons.set(reason, (rejectionReasons.get(reason) ?? 0) + 1);
@@ -423,6 +438,9 @@ router.post("/recipes/discover", async (req, res) => {
     req.log.error({
       reason: isTimeout ? "timeout" : "provider_or_validation_failure",
       errorType: error instanceof Error ? error.name : typeof error,
+      ...(error instanceof z.ZodError
+        ? { issues: error.issues.slice(0, 8).map((issue) => `${issue.path.join(".") || "response"}:${issue.code}`) }
+        : {}),
     }, "Recipe discovery failed");
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery could not be completed. Previously saved recipes remain available.");
   } finally {
