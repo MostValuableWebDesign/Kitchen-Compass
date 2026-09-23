@@ -8,7 +8,8 @@
     "scheme": "kitchen-compass",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mostvaluablewebdesign.kitchencompass"
     },
     "android": {},
     "web": {
