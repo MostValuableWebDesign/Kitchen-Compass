@@ -93,6 +93,11 @@ export default function TodayScreen() {
         <View style={[styles.modalBackdrop, { backgroundColor: 'rgba(32,53,44,0.35)' }]}>
           <View style={[styles.settingsSheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 18 }]}>
             <View style={styles.sheetHeader}><Text style={[styles.sheetTitle, { color: colors.foreground }]}>Your preferences</Text><Pressable onPress={() => setSettingsOpen(false)}><Feather name="x" size={22} color={colors.foreground} /></Pressable></View>
+             <ScrollView
+               contentContainerStyle={styles.settingsScroll}
+               keyboardShouldPersistTaps="handled"
+               showsVerticalScrollIndicator
+             >
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Household size</Text>
             <TextInput value={String(preferences.householdSize)} keyboardType="number-pad" onChangeText={(value) => setPreferences({ householdSize: Math.max(1, Number(value) || 1) })} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Default servings</Text>
@@ -123,6 +128,7 @@ export default function TodayScreen() {
              <Pressable onPress={confirmPhotoDelete} style={[styles.dataButton, { borderColor: colors.border }]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.dataButtonText, { color: colors.foreground }]}>Delete saved scan photos</Text></Pressable>
              <Pressable onPress={confirmErase} style={[styles.dataButton, { borderColor: colors.destructive }]}><Feather name="trash-2" size={16} color={colors.destructive} /><Text style={[styles.dataButtonText, { color: colors.destructive }]}>Erase all local data</Text></Pressable>
             <Pressable onPress={() => setSettingsOpen(false)} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveButtonText, { color: colors.primaryForeground }]}>Save preferences</Text></Pressable>
+             </ScrollView>
           </View>
         </View>
       </Modal>
@@ -153,7 +159,8 @@ const styles = StyleSheet.create({
   emptyBody: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 4, textAlign: 'center' },
   pressed: { opacity: 0.72 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end' },
-  settingsSheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 20 },
+  settingsSheet: { maxHeight: '92%', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 20 },
+  settingsScroll: { paddingBottom: 4 },
   sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
   sheetTitle: { fontSize: 21, fontFamily: 'Inter_700Bold' },
   fieldLabel: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 8, marginTop: 12 },
