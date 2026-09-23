@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
+import { buildPublishedRecipeSearchIngredients, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -82,6 +83,17 @@ test('saved matching recipes remain available alongside newly discovered recipes
   assert.equal(matchingSavedRecipes([recipe], eggs, preferences, { mealType: 'Any', cuisine: '' }, []).length, 1);
   assert.equal(matchingSavedRecipes([recipe], eggs, preferences, { mealType: 'Any', cuisine: '', minHealthScore: 85 }, []).length, 0);
   assert.equal(matchingSavedRecipes([recipe], [{ name: 'rice', status: 'fresh', confidence: 'confirmed' }], preferences, { mealType: 'Any', cuisine: '' }, []).length, 0);
+});
+
+test('published recipe search excludes seasonings and ranks useful ingredients before the full payload', () => {
+  const ingredients = [
+    { id: 'salt', name: 'Salt', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
+    { id: 'rice', name: 'Rice', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const },
+    { id: 'chicken', name: 'Chicken', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: false, source: 'scan' as const },
+    { id: 'used', name: 'Beans', status: 'used' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
+  ];
+  assert.deepEqual(rankPublishedSearchIngredients(ingredients).map((item) => item.name), ['Rice', 'Chicken']);
+  assert.deepEqual(buildPublishedRecipeSearchIngredients(ingredients, ['chicken']), ['Chicken', 'Rice']);
 });
 
 test('offline cache accepts only validated recipe-shaped entries', () => {

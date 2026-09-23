@@ -54,3 +54,31 @@ test("published recipes show source attribution and never assert allergy safety"
     else process.env.THEMEALDB_API_KEY = oldKey;
   }
 });
+
+test("published recipes use at most ten provider search anchors", async () => {
+  const oldKey = process.env.THEMEALDB_API_KEY;
+  const originalFetchForAnchorTest = globalThis.fetch;
+  const filterRequests: string[] = [];
+  process.env.THEMEALDB_API_KEY = "test-key";
+  globalThis.fetch = async (input) => {
+    const target = String(input);
+    if (target.includes("themealdb.com") && target.includes("filter.php")) {
+      filterRequests.push(target);
+      return new Response(JSON.stringify({ meals: [] }), { status: 200 });
+    }
+    return originalFetchForAnchorTest(input);
+  };
+  try {
+    const response = await originalFetchForAnchorTest(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: Array.from({ length: 15 }, (_, index) => `ingredient-${index + 1}`), allergies: [] }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(filterRequests.length, 10);
+  } finally {
+    globalThis.fetch = originalFetchForAnchorTest;
+    if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
+    else process.env.THEMEALDB_API_KEY = oldKey;
+  }
+});
