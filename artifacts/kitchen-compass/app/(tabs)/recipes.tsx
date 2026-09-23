@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { discoverRecipes, findExternalRecipes, type ExternalRecipe, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
@@ -287,6 +287,23 @@ export default function RecipesScreen() {
     setDiscardedExternalRecipeIds((current) => current.includes(recipe.id) ? current : [...current, recipe.id]);
   };
 
+  const confirmPublishedSearch = () => {
+    Alert.alert(
+      'Find recipes now?',
+      'Your selected confirmed ingredients will be sent to the online recipe search service.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Find recipes',
+          onPress: () => {
+            setPublishedPickerOpen(false);
+            void findPublished();
+          },
+        },
+      ],
+    );
+  };
+
   const recipeUsesSoonIngredient = (recipe: (typeof availableRecipes)[number]) => recipe.ingredients.some((ingredient) => ingredients.some((item) =>
     ingredientIdentitiesMatch(ingredient.name, item)
     && item.dateConfirmed === true
@@ -448,13 +465,22 @@ export default function RecipesScreen() {
                 return <View key={group.category} style={{ gap: 8 }}><Text style={[styles.pickerCategory, { color: colors.foreground }]}>{group.category}</Text>{selected.map((ingredient) => <View key={ingredient.id} style={[styles.pickerRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="check-square" size={19} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.pickerIngredient, { color: colors.foreground }]}>{ingredient.name}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{ingredient.quantityKnown ? 'Known quantity' : 'Quantity to confirm'}{ingredient.source === 'manual' ? ' · Manual' : ingredient.source === 'scan' ? ' · Photo scan' : ''}</Text></View></View>)}</View>;
               })}
             </ScrollView> : null}
-            {publishedSearchStep === 'manual' ? <Pressable disabled={!publishedDriverIds.length} onPress={() => setPublishedSearchStep('confirm')} style={[styles.autoButton, { borderColor: colors.border, backgroundColor: publishedDriverIds.length ? colors.primary : colors.muted }]}><Text style={[styles.outlineButtonText, { color: publishedDriverIds.length ? colors.primaryForeground : colors.mutedForeground }]}>Review {publishedDriverIds.length} selected</Text></Pressable> : null}
+            {publishedSearchStep === 'manual' ? <View style={styles.manualActions}>
+              <Pressable onPress={() => setPublishedSearchStep('choice')} style={({ pressed }) => [styles.manualBackButton, { borderColor: colors.border, backgroundColor: colors.background }, pressed && styles.pressed]}>
+                <Feather name="arrow-left" size={17} color={colors.primary} />
+                <Text style={[styles.confirmBackText, { color: colors.primary }]}>Back</Text>
+              </Pressable>
+              <Pressable disabled={!publishedDriverIds.length} onPress={() => setPublishedSearchStep('confirm')} style={({ pressed }) => [styles.manualReviewButton, { backgroundColor: publishedDriverIds.length ? colors.primary : colors.muted }, pressed && styles.pressed]}>
+                <Text style={[styles.outlineButtonText, { color: publishedDriverIds.length ? colors.primaryForeground : colors.mutedForeground }]}>Review {publishedDriverIds.length} selected</Text>
+                <Feather name="arrow-right" size={17} color={publishedDriverIds.length ? colors.primaryForeground : colors.mutedForeground} />
+              </Pressable>
+            </View> : null}
             {publishedSearchStep === 'confirm' ? <View style={[styles.confirmActions, { borderTopColor: colors.border }]}>
               <Pressable onPress={() => setPublishedSearchStep(publishedSelectionMode === 'manual' ? 'manual' : 'choice')} style={({ pressed }) => [styles.confirmBackButton, { borderColor: colors.border, backgroundColor: colors.background }, pressed && styles.pressed]}>
                 <Feather name="arrow-left" size={18} color={colors.primary} />
                 <Text style={[styles.confirmBackText, { color: colors.primary }]}>Back</Text>
               </Pressable>
-              <Pressable testID="confirm-published-search" onPress={() => { setPublishedPickerOpen(false); void findPublished(); }} style={({ pressed }) => [styles.confirmFindButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}>
+              <Pressable testID="confirm-published-search" onPress={confirmPublishedSearch} style={({ pressed }) => [styles.confirmFindButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}>
                 <Text style={[styles.confirmFindText, { color: colors.primaryForeground }]}>Find recipes</Text>
                 <Feather name="search" size={18} color={colors.primaryForeground} />
               </Pressable>
@@ -525,6 +551,9 @@ const styles = StyleSheet.create({
   confirmSelection: { gap: 12 },
   selectedChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   confirmActions: { flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, paddingTop: 14, marginTop: 14 },
+  manualActions: { flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, paddingTop: 14, marginTop: 14 },
+  manualBackButton: { minHeight: 48, minWidth: 96, borderRadius: 15, borderWidth: 1, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  manualReviewButton: { flex: 1, minHeight: 48, borderRadius: 15, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   confirmBackButton: { minHeight: 50, minWidth: 104, borderRadius: 16, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   confirmBackText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   confirmFindButton: { flex: 1, minHeight: 50, borderRadius: 16, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
