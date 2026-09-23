@@ -1,0 +1,89 @@
+{
+  "id": "bbc28b36-12e5-4839-8263-e46ac6c20108",
+  "createdAt": "2026-09-22T21:44:26.359Z",
+  "runtimeVersion": "exposdk:57.0.0",
+  "launchAsset": {
+    "key": "bundle-1790113466359-19347",
+    "contentType": "application/javascript",
+    "url": "https://48adb0e9-ec43-4370-9b6d-61afe88185c3-00-1bejl1nx3wkzl.janeway.replit.dev/1790113466359-19347/_expo/static/js/ios/bundle.js"
+  },
+  "assets": [],
+  "metadata": {},
+  "extra": {
+    "eas": {},
+    "expoClient": {
+      "name": "Kitchen Compass",
+      "slug": "kitchen-compass",
+      "version": "1.0.0",
+      "orientation": "portrait",
+      "icon": "./assets/images/icon_2.png",
+      "scheme": "kitchen-compass",
+      "userInterfaceStyle": "automatic",
+      "ios": {
+        "supportsTablet": false
+      },
+      "android": {
+        "permissions": [
+          "android.permission.RECORD_AUDIO"
+        ]
+      },
+      "web": {
+        "favicon": "./assets/images/icon.png"
+      },
+      "plugins": [
+        "expo-router",
+        [
+          "expo-image-picker",
+          {
+            "photosPermission": "Kitchen Compass uses your photos to add ingredients from existing kitchen images.",
+            "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review."
+          }
+        ]
+      ],
+      "splash": {
+        "backgroundColor": "#f8f6ef"
+      },
+      "experiments": {
+        "typedRoutes": true,
+        "reactCompiler": true
+      },
+      "_internal": {
+        "isDebug": false,
+        "projectRoot": "/home/runner/workspace/artifacts/kitchen-compass",
+        "dynamicConfigPath": {},
+        "staticConfigPath": "/home/runner/workspace/artifacts/kitchen-compass/app.json",
+        "packageJsonPath": "/home/runner/workspace/artifacts/kitchen-compass/package.json",
+        "pluginHistory": {
+          "expo-image-picker": {
+            "name": "expo-image-picker",
+            "version": "57.0.19"
+          }
+        }
+      },
+      "sdkVersion": "57.0.0",
+      "platforms": [
+        "ios",
+        "android",
+        "web"
+      ],
+      "extra": {
+        "router": {}
+      },
+      "iconUrl": "http://127.0.0.1:8082/assets/./assets/images/icon_2.png",
+      "hostUri": "48adb0e9-ec43-4370-9b6d-61afe88185c3-00-1bejl1nx3wkzl.janeway.replit.dev/ios"
+    },
+    "expoGo": {
+      "debuggerHost": "48adb0e9-ec43-4370-9b6d-61afe88185c3-00-1bejl1nx3wkzl.janeway.replit.dev/ios",
+      "developer": {
+        "tool": "expo-cli",
+        "projectRoot": "/home/runner/workspace/artifacts/kitchen-compass"
+      },
+      "packagerOpts": {
+        "dev": false
+      },
+      "mainModuleName": "artifacts/kitchen-compass/node_modules/expo-router/entry",
+      "username": "replit-private-48adb0e9-ec43-4370-9b6d-61afe88185c3"
+    },
+    "scopeKey": "@anonymous/kitchen-compass-23bef580-c694-464d-bf21-6c5a4a99f009"
+  }
+}
