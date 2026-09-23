@@ -14,7 +14,7 @@ export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, preferences, plan, reservations, savedRecipes, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData } = useKitchen();
+  const { ingredients, preferences, plan, reservations, savedRecipes, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData, theme, setTheme } = useKitchen();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
@@ -116,6 +116,8 @@ export default function TodayScreen() {
              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Daily meal reminders</Text>
              <View style={styles.chipWrap}><Chip label="Off" selected={!reminders.enabled} onPress={() => void setReminderSettings({ enabled: false })} /><Chip label="On" selected={reminders.enabled} onPress={async () => { const enabled = await setReminderSettings({ enabled: true }); if (!enabled) Alert.alert('Notifications remain off', 'Kitchen Compass could not get notification permission. You can enable it later in iPhone Settings.'); }} /></View>
              {reminders.enabled ? <><Text style={[styles.reminderHint, { color: colors.mutedForeground }]}>Reminder time · {reminderTimeLabel}</Text><View style={styles.chipWrap}>{[7, 8, 12, 18, 20].map((hour) => <Chip key={hour} label={`${hour % 12 || 12}${hour >= 12 ? ' PM' : ' AM'}`} selected={reminders.hour === hour} onPress={() => void setReminderSettings({ hour })} />)}</View></> : null}
+              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Appearance</Text>
+              <View style={styles.chipWrap}><Chip label="Light" selected={theme === 'light'} onPress={() => setTheme('light')} /><Chip label="Dark" selected={theme === 'dark'} onPress={() => setTheme('dark')} /></View>
              <View style={[styles.offlineNote, { backgroundColor: colors.muted }]}><Ionicons name="phone-portrait-outline" size={17} color={colors.primary} /><Text style={[styles.offlineText, { color: colors.mutedForeground }]}>Inventory, saved recipes, preferences, and your current plan stay on this device and remain readable offline. Scanning and recipe discovery need internet.</Text></View>
              <View style={[styles.offlineNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={17} color={colors.primary} /><Text style={[styles.offlineText, { color: colors.mutedForeground }]}>A scan photo is sent to the Kitchen Compass server and external AI service only when you ask for recognition. Kitchen Compass keeps a lasting local copy only if you choose that option. Photos already in your iPhone library remain there.</Text></View>
              <Pressable onPress={confirmPhotoDelete} style={[styles.dataButton, { borderColor: colors.border }]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.dataButtonText, { color: colors.foreground }]}>Delete saved scan photos</Text></Pressable>

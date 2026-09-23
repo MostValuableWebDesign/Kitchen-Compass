@@ -5,6 +5,7 @@ import type {
   PlannedMeal,
   Preferences,
   ShoppingListState,
+  ThemePreference,
 } from '@/context/KitchenContext';
 import { normalizeConfirmedDate, normalizeIngredientName, parseQuantityText, type ReservationRecord } from '@/lib/kitchenLogic';
 import { parseCachedRecipes } from '@/lib/recipeDiscovery';
@@ -22,6 +23,7 @@ export type PersistedKitchenState = {
   favoriteRecipeVersions: string[];
   onboardingComplete: boolean;
   reminders: import('@/lib/reminders').ReminderSettings;
+  theme: ThemePreference;
 };
 
 export const defaultPreferences: Preferences = {
@@ -50,6 +52,7 @@ export function emptyPersistedKitchenState(): PersistedKitchenState {
     favoriteRecipeVersions: [],
     onboardingComplete: false,
     reminders: { enabled: false, hour: 18, minute: 0 },
+    theme: 'light',
   };
 }
 
@@ -177,6 +180,7 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
         minute: typeof (saved.reminders as { minute?: unknown }).minute === 'number' ? Math.max(0, Math.min(59, (saved.reminders as { minute: number }).minute)) : 0,
       }
       : { enabled: false, hour: 18, minute: 0 },
+    theme: saved.theme === 'dark' ? 'dark' : 'light',
   };
 }
 
