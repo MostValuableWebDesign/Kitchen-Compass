@@ -14,3 +14,9 @@ Recipe discovery must also keep an explicit, conservative known-safe ingredient 
 **Why:** Valid AI recipe structure is not enough for allergy safety. Common staples such as cooking oils and pepper need explicit reference coverage or otherwise cause every generated candidate to be discarded.
 
 **How to apply:** Expand the allowlist only for ingredients with a defensible allergen profile, keep allergen aliases ahead of the safe check, and preserve rejection for unknown ingredients.
+
+Recipe discovery should validate candidates individually and make one constrained correction attempt when the entire first batch is malformed or unsafe; one bad generated candidate must not turn into an offline fallback when a valid retry is possible.
+
+**Why:** The provider can return structurally invalid steps or unknown pantry ingredients even under a strict schema request, especially when the inventory prompt is large.
+
+**How to apply:** Discard invalid candidates by index, retry within the request deadline using confirmed inventory and explicit basic ingredients, and keep deterministic allergen and preference checks on the retry output.

@@ -357,7 +357,7 @@ router.post("/recipes/discover", async (req, res) => {
     "Never invent an inventory item as if the user owns it. Never claim a required ingredient is available.",
     "Every returned recipe must satisfy all saved allergies, dietary restrictions, dislikes, cuisines, skill, cooking-time, equipment, and selected-filter requirements. Return at least one recipe that satisfies them.",
     "Use only the equipment listed in Saved preferences and Selected filters. Do not require an appliance or specialized tool that is not listed.",
-    "Use common ingredient names with reliable allergen information. Do not include an ingredient when its allergen status is uncertain; omit it or choose a known-safe alternative.",
+    "Use only confirmed inventory ingredients or basic ingredients with an unambiguous allergen profile such as water, salt, pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, and common fresh herbs. Do not add a missing ingredient with uncertain allergen status.",
     "Return varied candidates, not minor title changes. The variation seed selects a different direction.",
     "All ingredient amounts must be numeric and paired with a unit. Mark pantry garnish or optional additions required=false.",
     "All steps must be ordered from 1 with no gaps. Every step must include exact ingredientAmounts with numeric quantities and units, at least one sensory cue, and at least one common mistake to avoid.",
@@ -375,58 +375,76 @@ router.post("/recipes/discover", async (req, res) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), recipeDiscoveryTimeoutMs);
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        max_completion_tokens: 12000,
-        response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(responseSchemaForOpenAi) } },
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!response.ok) {
-      req.log.error({ status: response.status }, "Recipe discovery AI request failed");
-      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery is temporarily unavailable. Previously saved recipes remain available.");
-      return;
-    }
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const rawContent = payload.choices?.[0]?.message?.content;
-    if (!rawContent) throw new Error("Recipe discovery returned no content.");
-    const parsedEnvelope = aiResponseEnvelopeSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
-    const invalidRecipeIssues: string[] = [];
-    const aiRecipes = parsedEnvelope.recipes.flatMap((candidate, index) => {
-      const parsedRecipe = aiRecipeSchema.safeParse(candidate);
-      if (parsedRecipe.success) return [parsedRecipe.data];
-      const issue = parsedRecipe.error.issues[0];
-      invalidRecipeIssues.push(`${index}:${issue?.path.join(".") || "recipe"}:${issue?.code || "invalid"}`);
-      return [];
-    });
-    if (invalidRecipeIssues.length) {
-      req.log.warn({
-        invalidRecipeCount: invalidRecipeIssues.length,
-        issues: invalidRecipeIssues.slice(0, 8),
-      }, "Recipe discovery discarded invalid candidates");
-    }
-    const aiResult = { recipes: aiRecipes };
+    const requestCandidates = async (requestPrompt: string) => {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          max_completion_tokens: 12000,
+          response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(responseSchemaForOpenAi) } },
+          messages: [{ role: "user", content: requestPrompt }],
+        }),
+      });
+      if (!response.ok) {
+        req.log.error({ status: response.status }, "Recipe discovery AI request failed");
+        throw new Error(`Recipe discovery provider returned ${response.status}.`);
+      }
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const rawContent = payload.choices?.[0]?.message?.content;
+      if (!rawContent) throw new Error("Recipe discovery returned no content.");
+      const parsedEnvelope = aiResponseEnvelopeSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
+      const invalidRecipeIssues: string[] = [];
+      const aiRecipes = parsedEnvelope.recipes.flatMap((candidate, index) => {
+        const parsedRecipe = aiRecipeSchema.safeParse(candidate);
+        if (parsedRecipe.success) return [parsedRecipe.data];
+        const issue = parsedRecipe.error.issues[0];
+        invalidRecipeIssues.push(`${index}:${issue?.path.join(".") || "recipe"}:${issue?.code || "invalid"}`);
+        return [];
+      });
+      if (invalidRecipeIssues.length) {
+        req.log.warn({
+          invalidRecipeCount: invalidRecipeIssues.length,
+          issues: invalidRecipeIssues.slice(0, 8),
+        }, "Recipe discovery discarded invalid candidates");
+      }
+      return aiRecipes;
+    };
+
     const rejectionReasons = new Map<string, number>();
     const reject = (reason: string) => {
       rejectionReasons.set(reason, (rejectionReasons.get(reason) ?? 0) + 1);
       return false;
     };
-    const eligibleRecipes = aiResult.recipes.filter((recipe) => {
-      if (!validateSteps(recipe)) return reject("steps");
-      if (excludeRecipeVersions.includes(stableVersion(recipe))) return reject("excluded-version");
-      const preferenceViolation = violatesPreferences(recipe, preferences, filters);
-      return preferenceViolation ? reject(preferenceViolation) : true;
-    });
-    const safeRecipes = eligibleRecipes
-      .map((recipe) => makeResponseRecipe(recipe, preferences, filters))
-      .map((recipe) => recipeSchema.parse(recipe));
+    const filterSafeRecipes = (candidates: z.infer<typeof aiRecipeSchema>[]) => {
+      const eligibleRecipes = candidates.filter((recipe) => {
+        if (!validateSteps(recipe)) return reject("steps");
+        if (excludeRecipeVersions.includes(stableVersion(recipe))) return reject("excluded-version");
+        const preferenceViolation = violatesPreferences(recipe, preferences, filters);
+        return preferenceViolation ? reject(preferenceViolation) : true;
+      });
+      return eligibleRecipes
+        .map((recipe) => makeResponseRecipe(recipe, preferences, filters))
+        .map((recipe) => recipeSchema.parse(recipe));
+    };
+
+    let aiRecipes = await requestCandidates(prompt);
+    let safeRecipes = filterSafeRecipes(aiRecipes);
+    if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || aiRecipes.length === 0)) {
+      rejectionReasons.clear();
+      aiRecipes = await requestCandidates([
+        prompt,
+        "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
+        "Return recipes using only the confirmed inventory and the explicitly listed basic ingredients. Do not add sauces, broths, spice blends, packaged foods, or other missing ingredients.",
+        "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
+        "At least one returned recipe must be safe under the server's deterministic allergen check.",
+      ].join("\n"));
+      safeRecipes = filterSafeRecipes(aiRecipes);
+    }
     if (!safeRecipes.length) {
       req.log.warn({
-        candidateCount: aiResult.recipes.length,
+        candidateCount: aiRecipes.length,
         rejectionReasons: Object.fromEntries(rejectionReasons),
       }, "Recipe discovery returned no safe candidates");
       sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery did not return a safe recipe for these preferences. Previously saved recipes remain available.");
