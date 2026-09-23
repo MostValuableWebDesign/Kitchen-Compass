@@ -150,6 +150,14 @@ export default function RecipesScreen() {
     }
   };
 
+  useEffect(() => {
+    if (!hydrated) return;
+    const recipesMissingImages = savedRecipes
+      .filter((recipe) => recipe.source === 'server-ai' && !recipe.image)
+      .slice(0, 8);
+    if (recipesMissingImages.length) void prepareImages(recipesMissingImages);
+  }, [hydrated]);
+
   const discover = async (different = false) => {
     if (!different) {
       const reusable = reusableRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
