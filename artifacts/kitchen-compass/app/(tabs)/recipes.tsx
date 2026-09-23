@@ -144,6 +144,14 @@ export default function RecipesScreen() {
     }
   };
 
+  useEffect(() => {
+    if (!hydrated) return;
+    const recipesMissingImages = savedRecipes
+      .filter((recipe) => recipe.source === 'server-ai' && !recipe.image)
+      .slice(0, 8);
+    if (recipesMissingImages.length) void prepareImages(recipesMissingImages);
+  }, [hydrated]);
+
   const discover = async (different = false) => {
     const controller = new AbortController();
     if (!beginSearch('kitchen', controller)) return;
