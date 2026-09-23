@@ -182,15 +182,36 @@ test("recipe discovery keeps valid candidates when another candidate fails valid
   }
 });
 
-test("recipe discovery retries when every first-pass candidate fails validation", async () => {
+test("recipe discovery retry excludes confirmed inventory the allergen validator cannot assess", async () => {
   const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
+  const unsafe = validModelRecipe();
+  unsafe.ingredients = [...unsafe.ingredients, { name: "mystery sauce", quantity: 1, unit: "tbsp", required: true }];
+  const body = requestBody();
+  body.inventory.push({
+    name: "mystery sauce",
+    location: "Pantry",
+    quantityValue: 1,
+    unit: "bottle",
+    quantityKnown: true,
+    status: "fresh",
+    confidence: "confirmed",
+  });
   const original = globalThis.fetch;
   let providerCalls = 0;
   globalThis.fetch = async (input, init) => {
     if (String(input).includes("api.openai.com")) {
       providerCalls += 1;
-      const recipe = providerCalls === 1 ? invalid : validModelRecipe();
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [recipe] }) } }] }), {
+      const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const prompt = request.messages[0]!.content;
+      if (providerCalls === 1) {
+        assert.match(prompt, /mystery sauce/);
+      } else {
+        const confirmedInventory = prompt.match(/Confirmed inventory: (.+)\nSaved preferences:/)?.[1] ?? "";
+        assert.doesNotMatch(confirmedInventory, /mystery sauce/);
+        assert.match(confirmedInventory, /eggs/);
+      }
+      const recipes = providerCalls === 1 ? [invalid, unsafe] : [validModelRecipe()];
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes }) } }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -201,7 +222,7 @@ test("recipe discovery retries when every first-pass candidate fails validation"
     const response = await originalFetch(`${baseUrl}/recipes/discover`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
-      body: JSON.stringify(requestBody()),
+      body: JSON.stringify(body),
     });
     assert.equal(response.status, 200);
     assert.equal(providerCalls, 2);
