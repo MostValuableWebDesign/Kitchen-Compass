@@ -14,12 +14,14 @@ test('onboarding preferences and reminder settings persist through the local sta
     preferences: { ...defaultPreferences, householdSize: 4, servings: 3, allergies: ['peanuts'], cuisines: [] },
     onboardingComplete: true,
     reminders: { enabled: true, hour: 7, minute: 30 },
+    theme: 'dark' as const,
   };
   const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
   assert.equal(restored.onboardingComplete, true);
   assert.equal(restored.preferences.householdSize, 4);
   assert.deepEqual(restored.preferences.allergies, ['peanuts']);
   assert.deepEqual(restored.reminders, { enabled: true, hour: 7, minute: 30 });
+    assert.equal(restored.theme, 'dark');
   assert.deepEqual(restored.preferences.cuisines, []);
 });
 
