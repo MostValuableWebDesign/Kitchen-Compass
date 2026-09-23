@@ -12,6 +12,8 @@ import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { canCombineIngredientQuantities, normalizeIngredientName, parseQuantityText } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
+import { deleteTemporarySpaceScanFiles, saveSpaceScanModel } from '@/lib/spaceScanFiles';
+import { openSpaceModel, startSpaceScan, supportsSpaceScan } from '@/modules/space-scan/src/SpaceScanModule';
 
 const MAX_SCAN_PHOTOS = 10;
 type ScanPhotoAsset = { uri: string; width: number; height: number };
@@ -31,7 +33,9 @@ export default function ScanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addIngredient, ingredients, updateIngredient } = useKitchen();
+  const { addIngredient, ingredients, updateIngredient, spaceScans, saveSpaceScan, deleteSpaceScan } = useKitchen();
+  const [pendingModelUri, setPendingModelUri] = useState<string | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [pendingPhotos, setPendingPhotos] = useState<ScanPhotoAsset[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -42,6 +46,7 @@ export default function ScanScreen() {
   const photoReviewY = useRef(0);
   const captureGuard = useRef(false);
   const analysisGuard = useRef(false);
+  const saveGuard = useRef(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -73,8 +78,12 @@ export default function ScanScreen() {
       ? 'Uploading and recognizing ingredients…'
       : 'Finishing your scan…';
 
+  useEffect(() => () => {
+    if (pendingModelUri) deleteTemporarySpaceScanFiles(pendingModelUri, []);
+  }, [pendingModelUri]);
+
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
-  const reviewPhotos = async (assets: ScanPhotoAsset[]) => {
+  const reviewPhotos = async (assets: ScanPhotoAsset[], scanLocation?: StorageLocation) => {
     if (analysisGuard.current || !assets.length || assets.length > MAX_SCAN_PHOTOS) return;
     analysisGuard.current = true;
     setPhotoUris(assets.map((asset) => asset.uri));
@@ -104,8 +113,15 @@ export default function ScanScreen() {
         existingIngredients: ingredients.map((item) => ({ name: item.name, location: item.location })),
       });
       setScanId(result.scanId);
-      setSuggestions(result.suggestions);
-      setScanDecisions(Object.fromEntries(result.suggestions.map((suggestion) => [suggestion.suggestionId, suggestion.existingInventoryMatch ? 'same' : 'additional'])));
+      const reviewedSuggestions = scanLocation
+        ? result.suggestions.map((item) => ({ ...item, storageLocation: scanLocation }))
+        : result.suggestions;
+      setSuggestions(reviewedSuggestions);
+      setScanDecisions(Object.fromEntries(reviewedSuggestions.map((suggestion) => {
+        const sameLocation = ingredients.some((item) => item.status !== 'used' && item.location === suggestion.storageLocation
+          && normalizeIngredientName(item.name) === suggestion.existingInventoryMatch);
+        return [suggestion.suggestionId, sameLocation ? 'same' : 'additional'];
+      })));
       setRecognitionState('ready');
       setPendingPhotos([]);
     } catch (error) {
@@ -125,6 +141,35 @@ export default function ScanScreen() {
     } finally {
       analysisGuard.current = false;
     }
+  };
+  const scanSpace = async () => {
+    if (scanBusy || pendingPhotos.length) return;
+    if (!supportsSpaceScan()) {
+      Alert.alert('3D scan unavailable', 'Use an iPhone 16 Pro with a Kitchen Compass development or store build. Expo Go cannot run the LiDAR module.');
+      return;
+    }
+    let permission;
+    try { permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission(); }
+    catch { Alert.alert('Camera unavailable', 'Camera access could not be requested.'); return; }
+    if (!permission.granted) {
+      Alert.alert('Camera access needed', 'Allow camera access to scan this space.');
+      return;
+    }
+    setScanBusy(true);
+    try {
+      const result = await startSpaceScan();
+      if (!result) return;
+      setPendingModelUri(result.modelUri);
+      try { await reviewPhotos(result.photos.slice(0, MAX_SCAN_PHOTOS), location); }
+      finally { deleteTemporarySpaceScanFiles(undefined, result.photos.map((photo) => photo.uri)); }
+    } catch {
+      Alert.alert('3D scan unavailable', 'The space could not be scanned. Try again in better light.');
+    } finally { setScanBusy(false); }
+  };
+  const viewModel = async (uri: string) => {
+    try {
+      if (!await openSpaceModel(uri)) Alert.alert('Model unavailable', 'This 3D model could not be opened.');
+    } catch { Alert.alert('Model unavailable', 'This 3D model could not be opened.'); }
   };
   const takePhoto = async () => {
     if (pendingPhotos.length >= MAX_SCAN_PHOTOS) {
@@ -190,6 +235,9 @@ export default function ScanScreen() {
     setSuggestions((current) => current.filter((item) => item.suggestionId !== suggestionId));
   };
   const resetScan = () => {
+    saveGuard.current = false;
+    deleteTemporarySpaceScanFiles(pendingModelUri ?? undefined, []);
+    setPendingModelUri(null);
     setMode('choose');
     setCameraOpen(false);
     setCameraReady(false);
@@ -207,6 +255,7 @@ export default function ScanScreen() {
     setKeepPhotos(false);
   };
   const saveIngredient = () => {
+    if (saveGuard.current || recognitionState === 'analyzing') return;
     if (!name.trim() && !suggestions.length) {
       Alert.alert('Review an ingredient first', 'Confirm at least one recognized item or add an ingredient manually.');
       return;
@@ -247,6 +296,7 @@ export default function ScanScreen() {
         return;
       }
     }
+    saveGuard.current = true;
     const retainedPhotos = new Map<string, string>();
     if (keepPhotos) {
       try {
@@ -256,7 +306,18 @@ export default function ScanScreen() {
         }
       } catch {
         deleteScanPhotos([...retainedPhotos.values()]);
+        saveGuard.current = false;
         Alert.alert('Photo could not be kept', 'Nothing was saved. Try again without keeping photos.');
+        return;
+      }
+    }
+    let savedModelUri: string | undefined;
+    if (pendingModelUri) {
+      try { savedModelUri = saveSpaceScanModel(pendingModelUri); }
+      catch {
+        deleteScanPhotos([...retainedPhotos.values()]);
+        saveGuard.current = false;
+        Alert.alert('Model could not be saved', 'Nothing was added. Try saving again.');
         return;
       }
     }
@@ -302,6 +363,11 @@ export default function ScanScreen() {
     const manualKey = `${normalizeIngredientName(name)}|${location}`;
     const manualIsNew = Boolean(name.trim()) && !known.has(manualKey);
     if (manualIsNew) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
+    if (savedModelUri) {
+      saveSpaceScan({ id: `space-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        location, modelUri: savedModelUri, createdAt: reviewedAt,
+        ingredientNames: [...new Set([...suggestions.map((item) => item.displayName.trim()), name.trim()].filter(Boolean))] });
+    }
     const skipped = suggestions.length - acceptedSuggestions.length + (name.trim() && !manualIsNew ? 1 : 0);
     Alert.alert('Kitchen updated', `${acceptedSuggestions.length + Number(manualIsNew)} reviewed item(s) saved. ${skipped} existing item(s) skipped. Quantities were not inferred when the photo could not support them.`, [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
   };
@@ -320,6 +386,9 @@ export default function ScanScreen() {
             <SectionTitle title="Choose how to add" />
             <Pressable testID="take-photo" onPress={takePhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            <Pressable testID="scan-3d-space" disabled={scanBusy || pendingPhotos.length > 0} onPress={() => void scanSpace()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (scanBusy || pendingPhotos.length > 0) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="cube-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan 3D space</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{scanBusy ? 'Preparing ingredient review…' : supportsSpaceScan() ? 'Move around an open shelf · up to 10 views' : 'Requires iPhone 16 Pro and a native app build'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            <Text style={[styles.label, { color: colors.foreground }]}>Space to scan</Text>
+            <View style={[styles.chips, { marginBottom: 14 }]}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
             <Pressable testID="manual-entry" disabled={pendingPhotos.length > 0} onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, pendingPhotos.length > 0 && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{pendingPhotos.length ? 'Review or remove queued photos first' : 'Enter a confirmed ingredient'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
              {pendingPhotos.length ? <View onLayout={(event) => { photoReviewY.current = event.nativeEvent.layout.y; }} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
                <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Review photos · {pendingPhotos.length}/{MAX_SCAN_PHOTOS}</Text>
@@ -331,11 +400,13 @@ export default function ScanScreen() {
                </View>
              </View> : null}
              <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
-              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photo is sent to the Kitchen Compass server and an external AI service. Ingredients are added only after your review; keeping a photo copy is optional.</Text></View>
+              {spaceScans.length ? <><SectionTitle title="Saved 3D spaces" />{spaceScans.slice().reverse().map((scan) => <View key={scan.id} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{scan.location} · {new Date(scan.createdAt).toLocaleDateString()}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>{scan.ingredientNames.length ? scan.ingredientNames.join(', ') : 'No ingredients confirmed'}</Text><View style={styles.sessionActions}><Pressable onPress={() => void viewModel(scan.modelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View 3D model</Text></Pressable><Pressable onPress={() => Alert.alert('Delete 3D scan?', 'This removes the saved model. Kitchen ingredients remain.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteSpaceScan(scan.id) }])} style={[styles.sessionButton, { backgroundColor: colors.muted }]}><Text style={[styles.sessionButtonText, { color: colors.destructive }]}>Delete</Text></Pressable></View></View>)}</> : null}
+              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photos are sent to the Kitchen Compass server and an external AI service. Ingredients are added only after review. Photo copies are optional; a saved 3D surface model stays on this device until you delete it.</Text></View>
           </>
         ) : (
           <>
             {photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
+            {pendingModelUri ? <Pressable onPress={() => void viewModel(pendingModelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 16 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View rotatable 3D model</Text></Pressable> : null}
             <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
             {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
              {recognitionState === 'unavailable' ? <><View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View>{pendingPhotos.length ? <Pressable onPress={() => setMode('choose')} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 12 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Review photos and try again</Text></Pressable> : null}</> : null}
@@ -369,7 +440,7 @@ export default function ScanScreen() {
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
                  {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
-            <Pressable testID="save-ingredient" onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
+            <Pressable testID="save-ingredient" disabled={recognitionState === 'analyzing'} onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, recognitionState === 'analyzing' && styles.disabled]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
           </>
         )}
       </ScrollView>

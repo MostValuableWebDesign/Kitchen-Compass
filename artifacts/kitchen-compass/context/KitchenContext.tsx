@@ -28,6 +28,8 @@ import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
 import { defaultReminderSettings, syncDailyReminder, type ReminderScheduler, type ReminderSettings } from '@/lib/reminders';
 import { SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
 import { deleteScanPhoto, deleteScanPhotos } from '@/lib/scanPhotos';
+import type { SavedSpaceScan } from '@/lib/spaceScans';
+import { deleteSpaceScanModel } from '@/lib/spaceScanFiles';
 
 const reminderScheduler: ReminderScheduler = {
   getPermissionsAsync: Notifications.getPermissionsAsync,
@@ -136,6 +138,9 @@ export type CookPreview = {
 
 interface KitchenContextValue {
   ingredients: Ingredient[];
+  spaceScans: SavedSpaceScan[];
+  saveSpaceScan: (scan: SavedSpaceScan) => void;
+  deleteSpaceScan: (id: string) => void;
   preferences: Preferences;
   plan: PlannedMeal[];
   reservations: ReservationRecord[];
@@ -226,6 +231,7 @@ function hasRecoverableKitchenData(state: PersistedKitchenState) {
 
 export function KitchenProvider({ children }: { children: ReactNode }) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [spaceScans, setSpaceScans] = useState<SavedSpaceScan[]>([]);
   const [preferences, setPreferencesState] = useState<Preferences>(defaultPreferences);
   const [plan, setPlan] = useState<PlannedMeal[]>([]);
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
@@ -277,6 +283,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
             ? migrateV1KitchenState(v1, defaultPreferences)
             : {
               ingredients: [],
+              spaceScans: [],
               preferences: defaultPreferences,
               plan: [],
               reservations: [],
@@ -301,6 +308,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         }
         if (!active) return;
         setIngredients(parsed.ingredients.map(normalizeIngredient));
+        setSpaceScans(parsed.spaceScans);
         setPreferencesState(parsed.preferences);
         setPlan(parsed.plan);
         setReservations(parsed.reservations);
@@ -337,6 +345,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     if (!hydrated || storageError) return;
     const payload = JSON.stringify({
       ingredients,
+      spaceScans,
       preferences,
       plan,
       reservations,
@@ -361,7 +370,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         const message = error instanceof Error ? error.message : 'Saved kitchen data could not be written.';
         setStorageError(message);
       });
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, archivedRecipes, savedKidPublishedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
+  }, [hydrated, ingredients, spaceScans, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, archivedRecipes, savedKidPublishedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
 
   useEffect(() => {
     if (!hydrated || !reminders.enabled) return;
@@ -377,6 +386,16 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<KitchenContextValue>(() => ({
     ingredients,
+    spaceScans,
+    saveSpaceScan: (scan) => setSpaceScans((current) => {
+      const next = [...current, scan];
+      next.slice(0, -20).forEach((old) => deleteSpaceScanModel(old.modelUri));
+      return next.slice(-20);
+    }),
+    deleteSpaceScan: (id) => setSpaceScans((current) => {
+      deleteSpaceScanModel(current.find((scan) => scan.id === id)?.modelUri);
+      return current.filter((scan) => scan.id !== id);
+    }),
     preferences,
     plan,
     reservations,
@@ -457,8 +476,10 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     eraseAllData: async () => {
       await syncDailyReminder({ ...defaultReminderSettings, enabled: false }, reminderScheduler, false);
       deleteScanPhotos(ingredients.map((item) => item.photoUri));
+      spaceScans.forEach((scan) => deleteSpaceScanModel(scan.modelUri));
       await AsyncStorage.multiRemove([STORAGE_KEY, BACKUP_STORAGE_KEY, LEGACY_STORAGE_KEY, SCAN_ACCESS_TOKEN_STORAGE_KEY]);
       setIngredients([]);
+      setSpaceScans([]);
       setPreferencesState(defaultPreferences);
       setPlan([]);
       setReservations([]);
@@ -634,7 +655,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [archivedRecipes, completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedKidPublishedRecipes, savedRecipes, shoppingList, storageError, theme]);
+  }), [archivedRecipes, completedMeals, favoriteRecipeVersions, hydrated, ingredients, spaceScans, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedKidPublishedRecipes, savedRecipes, shoppingList, storageError, theme]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }

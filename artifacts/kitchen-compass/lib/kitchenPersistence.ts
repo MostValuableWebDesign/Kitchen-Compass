@@ -12,9 +12,11 @@ import { parseCachedRecipes } from '@/lib/recipeDiscovery';
 import { parseArchivedRecipes, parseExternalRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import type { Recipe } from '@/data/recipes';
 import type { ExternalRecipe } from '@workspace/api-client-react';
+import { parseSavedSpaceScans, type SavedSpaceScan } from '@/lib/spaceScans';
 
 export type PersistedKitchenState = {
   ingredients: Ingredient[];
+  spaceScans: SavedSpaceScan[];
   preferences: Preferences;
   plan: PlannedMeal[];
   reservations: ReservationRecord[];
@@ -46,6 +48,7 @@ export const defaultPreferences: Preferences = {
 export function emptyPersistedKitchenState(): PersistedKitchenState {
   return {
     ingredients: [],
+    spaceScans: [],
     preferences: defaultPreferences,
     plan: [],
     reservations: [],
@@ -163,6 +166,7 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
     .map(normalizeStoredIngredient);
   return {
     ingredients,
+    spaceScans: parseSavedSpaceScans(saved.spaceScans),
     preferences,
     plan: normalizePlan(saved.plan ?? [], preferences.servings),
     reservations: Array.isArray(saved.reservations) ? saved.reservations as ReservationRecord[] : [],
