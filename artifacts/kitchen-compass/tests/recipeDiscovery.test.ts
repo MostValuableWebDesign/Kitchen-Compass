@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
-import { buildPublishedRecipeSearchIngredients, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
+import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
+import { buildPublishedRecipeSearch, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -87,13 +88,36 @@ test('saved matching recipes remain available alongside newly discovered recipes
 
 test('published recipe search excludes seasonings and ranks useful ingredients before the full payload', () => {
   const ingredients = [
-    { id: 'salt', name: 'Salt', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
-    { id: 'rice', name: 'Rice', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const },
-    { id: 'chicken', name: 'Chicken', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: false, source: 'scan' as const },
-    { id: 'used', name: 'Beans', status: 'used' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
+    { id: 'salt', name: 'Salt', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
+    { id: 'rice', name: 'Rice', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const },
+    { id: 'chicken', name: 'Chicken', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: false, source: 'scan' as const },
+    { id: 'used', name: 'Beans', location: 'Pantry' as const, status: 'used' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
   ];
   assert.deepEqual(rankPublishedSearchIngredients(ingredients).map((item) => item.name), ['Rice', 'Chicken']);
-  assert.deepEqual(buildPublishedRecipeSearchIngredients(ingredients, ['chicken']), ['Chicken', 'Rice']);
+  assert.deepEqual(buildPublishedRecipeSearch(ingredients, ['chicken']), {
+    anchors: ['Chicken', 'Rice'],
+    ingredients: ['Chicken', 'Rice', 'Salt'],
+  });
+});
+
+test('published recipes import with source attribution and explicit unverified calculations', () => {
+  const imported = mapPublishedRecipe({
+    id: 'meal-1',
+    title: 'Tomato rice',
+    provider: 'TheMealDB',
+    sourceUrl: 'https://example.com/tomato-rice',
+    imageUrl: 'https://www.themealdb.com/images/test.jpg',
+    ingredients: [{ name: 'Rice', measure: '1 cup' }, { name: 'Tomato', measure: '2' }],
+    instructions: 'Cook the rice.\nAdd the tomato.',
+    matchedIngredients: ['Rice', 'Tomato'],
+    missingIngredients: [],
+    safetyVerified: false,
+  });
+  assert.equal(imported.source, 'published');
+  assert.equal(imported.allergenInfo, 'incomplete');
+  assert.equal(imported.nutrition.status, 'insufficient-information');
+  assert.equal(imported.steps.length, 2);
+  assert.equal(parseCachedRecipes([imported]).length, 1);
 });
 
 test('offline cache accepts only validated recipe-shaped entries', () => {

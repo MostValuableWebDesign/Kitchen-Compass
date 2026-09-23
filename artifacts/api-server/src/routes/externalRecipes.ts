@@ -8,6 +8,7 @@ const MAX_PROVIDER_SEARCH_ANCHORS = 10;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
+  searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -72,8 +73,20 @@ export function normalizeExternalMeal(meal: MealDetail, pantry: string[], allerg
   })).filter((item) => item.name);
   if (!ingredients.length || requestedAllergenConflicts(assessRecipeAllergens(ingredients.map((item) => item.name), []), allergies)) return null;
   const pantryIds = new Set(pantry.map(ingredientIdentity));
-  const matchedIngredients = ingredients.filter((item) => pantryIds.has(ingredientIdentity(item.name))).map((item) => item.name);
-  const missingIngredients = ingredients.filter((item) => !pantryIds.has(ingredientIdentity(item.name))).map((item) => item.name);
+  const matchedIngredients: string[] = [];
+  const missingIngredients: string[] = [];
+  const seenMatched = new Set<string>();
+  const seenMissing = new Set<string>();
+  ingredients.forEach((item) => {
+    const identity = ingredientIdentity(item.name);
+    const matches = pantryIds.has(identity);
+    const list = matches ? matchedIngredients : missingIngredients;
+    const seen = matches ? seenMatched : seenMissing;
+    if (!seen.has(identity)) {
+      seen.add(identity);
+      list.push(item.name);
+    }
+  });
   return {
     id: meal.idMeal,
     title: meal.strMeal,
@@ -103,7 +116,8 @@ router.post("/recipes/external", async (req, res) => {
   const searchIngredients = pantry.filter((item) => !commonSeasonings.has(ingredientIdentity(item)));
   const base = `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}`;
   try {
-      const searches = await Promise.all((searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS).map(async (ingredient) => {
+    const anchors = parsed.data.searchAnchors ?? (searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS);
+    const searches = await Promise.all(anchors.map(async (ingredient) => {
       const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
       const response = await providerJson(`${base}/filter.php?i=${value}`);
       return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
