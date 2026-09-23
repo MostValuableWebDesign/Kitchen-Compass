@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Appearance } from 'react-native';
 import {
   buildReservations,
   applyCookingTransaction,
@@ -43,6 +43,7 @@ const reminderScheduler: ReminderScheduler = {
 
 export type StorageLocation = 'Refrigerator' | 'Freezer' | 'Pantry';
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
+export type ThemePreference = 'light' | 'dark';
 
 export interface Ingredient {
   id: string;
@@ -144,6 +145,8 @@ interface KitchenContextValue {
   favoriteRecipeVersions: string[];
   onboardingComplete: boolean;
   reminders: ReminderSettings;
+  theme: ThemePreference;
+  setTheme: (theme: ThemePreference) => void;
   hydrated: boolean;
   storageError: string | null;
   retryHydration: () => void;
@@ -209,6 +212,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [favoriteRecipeVersions, setFavoriteRecipeVersions] = useState<string[]>([]);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [reminders, setReminders] = useState<ReminderSettings>(defaultReminderSettings);
+  const [theme, setThemeState] = useState<ThemePreference>('light');
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -254,6 +258,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setFavoriteRecipeVersions(parsed.favoriteRecipeVersions);
         setOnboardingComplete(parsed.onboardingComplete);
         setReminders(parsed.reminders);
+        setThemeState(parsed.theme);
+        Appearance.setColorScheme(parsed.theme);
         setStorageError(null);
         setHydrated(true);
       } catch (error) {
@@ -286,8 +292,9 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       favoriteRecipeVersions,
       onboardingComplete,
       reminders,
+      theme,
     })).catch(() => undefined);
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, storageError]);
+  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
 
   useEffect(() => {
     if (!hydrated || !reminders.enabled) return;
@@ -314,6 +321,11 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     favoriteRecipeVersions,
     onboardingComplete,
     reminders,
+    theme,
+    setTheme: (nextTheme) => {
+      setThemeState(nextTheme);
+      Appearance.setColorScheme(nextTheme);
+    },
     hydrated,
     storageError,
     retryHydration: () => setLoadAttempt((attempt) => attempt + 1),
