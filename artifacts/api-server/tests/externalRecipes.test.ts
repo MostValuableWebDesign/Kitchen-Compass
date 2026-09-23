@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
+import { kidFriendlyScore } from "../src/routes/kidFriendly";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "external-recipes-test-session";
@@ -13,6 +14,12 @@ const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
 beforeEach(() => resetScanRateLimiter());
 after(() => server.close());
+
+test("familiar meal formats are ranked as kid ideas without claiming every child likes them", () => {
+  assert.equal(kidFriendlyScore("Tomato pasta", ["tomato", "pasta"]), 1);
+  assert.equal(kidFriendlyScore("Spicy chicken tenders", ["chicken", "cayenne"]), 0);
+  assert.equal(kidFriendlyScore("Egg and tomato bowl", ["egg", "tomato"]), 0);
+});
 
 test("published recipes require confirmed ingredients and an access token", async () => {
   const unauthorized = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ingredients: ["egg"], allergies: [] }) });
@@ -56,6 +63,41 @@ test("published recipes show source attribution and never assert allergy safety"
     assert.equal(nextResponse.status, 200);
     const nextPayload = await nextResponse.json() as { recipes: Array<{ id: string }> };
     assert.deepEqual(nextPayload.recipes.map((item) => item.id), ["2"]);
+
+    const excluded = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Egg", "Tomato"], searchAnchors: ["Egg"], allergies: ["peanut"], excludedRecipeIds: ["1"], excludedRecipeTitles: ["Egg and tomato bowl"] }) });
+    assert.equal(excluded.status, 200);
+    assert.deepEqual((await excluded.json() as { recipes: unknown[] }).recipes, []);
+
+    const kids = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Egg"], allergies: ["peanut"], audience: "kids" }) });
+    assert.equal(kids.status, 200);
+    assert.deepEqual((await kids.json() as { recipes: unknown[] }).recipes, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
+    else process.env.THEMEALDB_API_KEY = oldKey;
+  }
+});
+
+test("kid published search keeps familiar mild pantry matches", async () => {
+  const oldKey = process.env.THEMEALDB_API_KEY;
+  process.env.THEMEALDB_API_KEY = "test-key";
+  globalThis.fetch = async (input, init) => {
+    const target = String(input);
+    if (target.includes("themealdb.com") && target.includes("filter.php")) return new Response(JSON.stringify({ meals: [{ idMeal: "1", strMeal: "Tomato pasta" }, { idMeal: "2", strMeal: "Spicy pasta" }] }), { status: 200 });
+    if (target.includes("themealdb.com") && target.includes("lookup.php")) {
+      const spicy = target.endsWith("=2");
+      return new Response(JSON.stringify({ meals: [{
+        idMeal: spicy ? "2" : "1", strMeal: spicy ? "Spicy pasta" : "Tomato pasta",
+        strInstructions: "Cook thoroughly.", strIngredient1: "Pasta", strMeasure1: "1 cup",
+        strIngredient2: spicy ? "Cayenne" : "Tomato", strMeasure2: "1 tsp",
+      }] }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], allergies: [], audience: "kids" }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json() as { recipes: Array<{ title: string }> }).recipes.map((recipe) => recipe.title), ["Tomato pasta"]);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;

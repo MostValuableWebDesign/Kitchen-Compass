@@ -8,6 +8,7 @@
 import type { RecipeDiscoveryFilters } from './recipeDiscoveryFilters';
 import type { RecipeDiscoveryInventory } from './recipeDiscoveryInventory';
 import type { RecipeDiscoveryPreferences } from './recipeDiscoveryPreferences';
+import type { RecipeDiscoveryRequestAudience } from './recipeDiscoveryRequestAudience';
 
 export interface RecipeDiscoveryRequest {
   /** @maxItems 100 */
@@ -23,4 +24,7 @@ export interface RecipeDiscoveryRequest {
   excludeRecipeVersions: string[];
   /** @maxItems 30 */
   excludeRecipeTitles?: string[];
+  /** @maxItems 200 */
+  excludeArchivedRecipeTitles?: string[];
+  audience?: RecipeDiscoveryRequestAudience;
 }

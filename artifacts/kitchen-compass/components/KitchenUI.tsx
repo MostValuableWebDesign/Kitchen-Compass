@@ -47,7 +47,7 @@ export function Chip({ label, selected, onPress, icon }: { label: string; select
   );
 }
 
-export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFavorite, onPress }: { recipe: Recipe; hasIngredients?: boolean; statusText?: string; favorite?: boolean; onFavorite?: () => void; onPress: () => void }) {
+export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFavorite, onArchive, onPress }: { recipe: Recipe; hasIngredients?: boolean; statusText?: string; favorite?: boolean; onFavorite?: () => void; onArchive?: () => void; onPress: () => void }) {
   const colors = useColors();
   return (
     <Pressable testID={`recipe-${recipe.id}`} onPress={onPress} style={({ pressed }) => [styles.recipeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
@@ -70,7 +70,10 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
             <View style={[styles.statusDot, { backgroundColor: hasIngredients ? colors.primary : colors.mutedForeground }]} />
             <Text style={[styles.statusText, { color: hasIngredients ? colors.primary : colors.mutedForeground }]}>{statusText ?? (hasIngredients ? 'Ready with your kitchen' : 'Check ingredients')}</Text>
           </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+          <View style={styles.recipeFooterActions}>
+            {onArchive ? <Pressable testID={`archive-${recipe.id}`} accessibilityLabel={`Archive ${recipe.title}`} onPress={(event) => { event.stopPropagation(); onArchive(); }} style={styles.archiveButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable> : null}
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+          </View>
         </View>
       </View>
     </Pressable>
@@ -123,6 +126,8 @@ const styles = StyleSheet.create({
   recipeDescription: { fontSize: 13, lineHeight: 19, marginTop: 10 },
   imageCredit: { fontSize: 10, marginTop: 6 },
   recipeFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
+  recipeFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  archiveButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   healthRow: { minHeight: 36, borderRadius: 12, marginTop: 10, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   healthLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   healthValue: { fontSize: 14, fontFamily: 'Inter_700Bold', flexShrink: 0 },

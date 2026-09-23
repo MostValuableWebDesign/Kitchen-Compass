@@ -366,6 +366,13 @@ components:
           type: array
           maxItems: 30
           items: { type: string }
+        excludeArchivedRecipeTitles:
+          type: array
+          maxItems: 200
+          items: { type: string }
+        audience:
+          type: string
+          enum: [general, kids]
       required: [inventory, preferences, filters, variationSeed, excludeRecipeVersions]
     RecipeIngredient:
       type: object

@@ -68,7 +68,7 @@ export function matchingSavedRecipes(
   });
 }
 
-export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
+export function mapDiscoveredRecipe(recipe: DiscoveredRecipe, audience: 'general' | 'kids' = 'general'): Recipe {
   return {
     id: recipe.id,
     title: recipe.title,
@@ -98,6 +98,7 @@ export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
     sourceVersion: recipe.recipeVersion,
     recipeVersion: recipe.recipeVersion,
     source: 'server-ai',
+    audience,
     storageInstructions: recipe.storageInstructions,
     reheatingInstructions: recipe.reheatingInstructions,
     servingSuggestions: recipe.servingSuggestions,
@@ -180,6 +181,8 @@ export function buildRecipeDiscoveryRequest(
   variationSeed: string,
   excludeRecipeVersions: string[],
   excludeRecipeTitles: string[] = [],
+  excludeArchivedRecipeTitles: string[] = [],
+  audience: 'general' | 'kids' = 'general',
 ): {
   inventory: RecipeDiscoveryInventory[];
   preferences: RecipeDiscoveryPreferences;
@@ -187,6 +190,8 @@ export function buildRecipeDiscoveryRequest(
   variationSeed: string;
   excludeRecipeVersions: string[];
   excludeRecipeTitles: string[];
+  excludeArchivedRecipeTitles: string[];
+  audience: 'general' | 'kids';
 } {
   return {
     inventory,
@@ -202,5 +207,7 @@ export function buildRecipeDiscoveryRequest(
     variationSeed,
     excludeRecipeVersions,
     excludeRecipeTitles,
+    excludeArchivedRecipeTitles,
+    audience,
   };
 }

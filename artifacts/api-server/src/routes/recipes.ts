@@ -11,6 +11,7 @@ import {
   supportedNutritionInputs,
 } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
+import { kidFriendlyScore } from "./kidFriendly";
 
 const router: IRouter = Router();
 
@@ -51,6 +52,8 @@ const requestSchema = z.object({
   variationSeed: z.string().min(1).max(80),
   excludeRecipeVersions: z.array(z.string().max(160)).max(30),
   excludeRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
+  excludeArchivedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
+  audience: z.enum(["general", "kids"]).default("general"),
 });
 
 const ingredientSchema = z.object({
@@ -356,7 +359,7 @@ router.post("/recipes/discover", async (req, res) => {
     return;
   }
 
-  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles } = parsed.data;
+  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience } = parsed.data;
   const usableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
   const allergenAssessableInventory = usableInventory.filter((item) =>
     assessIngredientAllergens([item]).unknownIngredients.length === 0
@@ -366,6 +369,11 @@ router.post("/recipes/discover", async (req, res) => {
     correctionInstructions: string[] = [],
   ) => [
     "Generate practical recipe candidates from confirmed kitchen inventory.",
+    ...(audience === "kids" ? [
+      "These candidates are for young, selective eaters. Prefer familiar, mild meal formats such as simple pasta, mac and cheese, quesadillas, mini pizzas, pancakes, egg dishes, rice bowls, chicken bites, meatballs, or sandwiches when the actual inventory and restrictions permit. These are examples, not a claim that every child likes them.",
+      "Keep ingredients recognizable; give optional vegetables or sauces on the side rather than hiding them. Use gentle flavors, manageable portions, and straightforward steps. Do not label a food universally safe for children.",
+      "Include age-appropriate cutting or texture guidance in the steps where relevant. Avoid whole grapes, whole nuts, hard rounds, and other common choking shapes; never omit standard cooking temperatures for proteins.",
+    ] : []),
     "Use the confirmed inventory as the primary source. You may include a small number of clearly identified missing ingredients so the app can label the recipe Almost ready or Check quantities.",
     "Never invent an inventory item as if the user owns it. Never claim a required ingredient is available.",
     "Every returned recipe must satisfy all saved allergies, dietary restrictions, dislikes, cuisines, skill, cooking-time, equipment, and selected-filter requirements. Return at least one recipe that satisfies them.",
@@ -382,6 +390,7 @@ router.post("/recipes/discover", async (req, res) => {
     `Variation seed: ${variationSeed}`,
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
     `Do not repeat these existing recipe titles, even with different wording or amounts: ${JSON.stringify(excludeRecipeTitles)}`,
+    `Never suggest these archived recipes again: ${JSON.stringify(excludeArchivedRecipeTitles)}`,
     `Confirmed inventory: ${JSON.stringify(promptInventory)}`,
     `Saved preferences: ${JSON.stringify(preferences)}`,
     `Selected filters: ${JSON.stringify(filters)}`,
@@ -437,13 +446,16 @@ router.post("/recipes/discover", async (req, res) => {
       return false;
     };
     const filterSafeRecipes = (candidates: z.infer<typeof aiRecipeSchema>[]) => {
+      const archivedTitles = new Set(excludeArchivedRecipeTitles.map(recipeTitleKey));
       const seenTitles = new Set(excludeRecipeTitles.map(recipeTitleKey));
       const eligibleRecipes = candidates.filter((recipe) => {
         if (!validateSteps(recipe)) return reject("steps");
         if (excludeRecipeVersions.includes(stableVersion(recipe))) return reject("excluded-version");
         const preferenceViolation = violatesPreferences(recipe, preferences, filters);
         if (preferenceViolation) return reject(preferenceViolation);
+        if (audience === "kids" && !kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name))) return reject("not-kid-friendly");
         const title = recipeTitleKey(recipe.title);
+        if (archivedTitles.has(title)) return reject("archived-title");
         if (seenTitles.has(title)) return reject("duplicate-title");
         seenTitles.add(title);
         return true;
@@ -455,7 +467,7 @@ router.post("/recipes/discover", async (req, res) => {
 
     let aiRecipes = await requestCandidates(prompt);
     let safeRecipes = filterSafeRecipes(aiRecipes);
-    if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || aiRecipes.length === 0)) {
+    if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || rejectionReasons.has("not-kid-friendly") || aiRecipes.length === 0)) {
       rejectionReasons.clear();
       aiRecipes = await requestCandidates(buildPrompt(allergenAssessableInventory, [
         "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
@@ -464,16 +476,17 @@ router.post("/recipes/discover", async (req, res) => {
         "Do not add sauces, broths, spice blends, packaged foods, garnishes, or other missing ingredients.",
         "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
         "At least one returned recipe must be safe under the server's deterministic allergen check.",
+        ...(audience === "kids" ? ["At least one recipe title must clearly describe a familiar mild format such as pasta, quesadilla, pancake, scrambled eggs, chicken bites, meatballs, rice bowl, or sandwich. Avoid spicy ingredients."] : []),
       ]));
       safeRecipes = filterSafeRecipes(aiRecipes);
     }
     if (!safeRecipes.length) {
       if (aiRecipes.length && rejectionReasons.size
-        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version")) {
+        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version" || reason === "archived-title")) {
         res.json(responseSchema.parse({
           recipes: [],
           source: "server-ai",
-          warning: "No new recipes were found. Your saved recipes are still available.",
+          warning: "No new recipes were found. Existing and archived recipes were skipped.",
         }));
         return;
       }

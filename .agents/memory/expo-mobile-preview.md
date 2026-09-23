@@ -20,3 +20,9 @@ The Expo web bundle can fail even when a native package is declared in the app m
 **Why:** Metro reports the missing module as an app import failure, but the source and lockfile can already contain the dependency.
 
 **How to apply:** Check the package's workspace node_modules link and restart Expo after a targeted workspace install; rebuild stale workspace declaration output if typechecking then reports missing exports.
+
+Expo SDK 57 rejects the old top-level splash configuration, even when Metro still starts. Keep the splash background in the splash-screen plugin configuration and use Expo Doctor to validate the app config.
+
+**Why:** Native launch troubleshooting revealed that web and native bundles could succeed while the config schema still failed validation.
+
+**How to apply:** For phone-loading issues, distinguish stale Metro errors from current bundle failures, request the manifest's actual native launch asset, and run Expo Doctor before changing app logic.

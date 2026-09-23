@@ -9,7 +9,9 @@ import type {
 } from '@/context/KitchenContext';
 import { normalizeConfirmedDate, normalizeIngredientName, parseQuantityText, type ReservationRecord } from '@/lib/kitchenLogic';
 import { parseCachedRecipes } from '@/lib/recipeDiscovery';
+import { parseArchivedRecipes, parseExternalRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import type { Recipe } from '@/data/recipes';
+import type { ExternalRecipe } from '@workspace/api-client-react';
 
 export type PersistedKitchenState = {
   ingredients: Ingredient[];
@@ -20,6 +22,8 @@ export type PersistedKitchenState = {
   leftovers: Leftover[];
   shoppingList: ShoppingListState;
   savedRecipes: Recipe[];
+  archivedRecipes: ArchivedRecipe[];
+  savedKidPublishedRecipes: ExternalRecipe[];
   favoriteRecipeVersions: string[];
   onboardingComplete: boolean;
   reminders: import('@/lib/reminders').ReminderSettings;
@@ -49,6 +53,8 @@ export function emptyPersistedKitchenState(): PersistedKitchenState {
     leftovers: [],
     shoppingList: { checkedIds: [], manualItems: [] },
     savedRecipes: [],
+    archivedRecipes: [],
+    savedKidPublishedRecipes: [],
     favoriteRecipeVersions: [],
     onboardingComplete: false,
     reminders: { enabled: false, hour: 18, minute: 0 },
@@ -169,6 +175,10 @@ export function parsePersistedKitchenState(value: string, defaults: Preferences)
       }
       : { checkedIds: [], manualItems: [] },
     savedRecipes: parseCachedRecipes(saved.savedRecipes),
+    archivedRecipes: parseArchivedRecipes(saved.archivedRecipes),
+    savedKidPublishedRecipes: Array.isArray(saved.savedKidPublishedRecipes)
+      ? saved.savedKidPublishedRecipes.flatMap((item) => { const recipe = parseExternalRecipe(item); return recipe ? [recipe] : []; }).slice(0, 100)
+      : [],
     favoriteRecipeVersions: Array.isArray(saved.favoriteRecipeVersions)
       ? saved.favoriteRecipeVersions.filter((value): value is string => typeof value === 'string')
       : [],

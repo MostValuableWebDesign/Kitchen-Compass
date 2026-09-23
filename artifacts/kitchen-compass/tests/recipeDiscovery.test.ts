@@ -3,6 +3,8 @@ import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
 import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
 import { buildPublishedRecipeSearch, publishedIngredientCategory, rankPublishedSearchIngredients } from '../lib/publishedRecipeSearch';
+import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, parseArchivedRecipes, restoreArchivedRecipe } from '../lib/recipeArchive';
+import { isKidFriendlyRecipe, publishedRecipeAllowed } from '../lib/kidFriendly';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -53,6 +55,32 @@ test('server recipes map to the app shape with a stable version and numeric disp
   assert.equal(recipeVersion(recipe), 'stable-version-1');
   assert.equal(recipe.ingredients[0]?.amount, '2 egg');
   assert.equal(recipe.meal, 'Breakfast');
+});
+
+test('kid discoveries keep their section in the offline recipe cache', () => {
+  const kids = mapDiscoveredRecipe(apiRecipe, 'kids');
+  const general = mapDiscoveredRecipe({ ...apiRecipe, recipeVersion: 'general-v2' });
+  assert.equal(isKidFriendlyRecipe(kids), true);
+  assert.equal(isKidFriendlyRecipe(general), false);
+  assert.equal(isKidFriendlyRecipe({ ...general, title: 'Tomato pasta' }), true);
+  assert.equal(isKidFriendlyRecipe({ ...general, title: 'Spicy chicken tenders' }), false);
+  assert.equal(isKidFriendlyRecipe(parseCachedRecipes([kids])[0]!), true);
+  const request = buildRecipeDiscoveryRequest([], {
+    allergies: [], dietaryRestrictions: [], dislikes: [], cuisines: [], skill: 'Beginner', cookTime: 30, equipment: [], nutrition: [],
+  }, { mealType: 'Any', cuisine: '' }, 'kids-test', [], [], [], 'kids');
+  assert.equal(request.audience, 'kids');
+});
+
+test('saved published ideas are rechecked when allergies or dislikes change', () => {
+  const recipe = {
+    id: 'meal-1', title: 'Peanut pasta', provider: 'TheMealDB' as const,
+    sourceUrl: 'https://www.themealdb.com/meal/meal-1',
+    ingredients: [{ name: 'Peanut butter', measure: '1 tbsp' }, { name: 'Pasta', measure: '1 cup' }],
+    instructions: 'Cook.', matchedIngredients: ['Pasta'], missingIngredients: ['Peanut butter'], safetyVerified: false as const,
+  };
+  assert.equal(publishedRecipeAllowed(recipe, [], []), true);
+  assert.equal(publishedRecipeAllowed(recipe, ['peanut'], []), false);
+  assert.equal(publishedRecipeAllowed(recipe, [], ['pasta']), false);
 });
 
 test('refreshing discovery does not replace a saved recipe with a different version', () => {
@@ -135,4 +163,27 @@ test('offline cache accepts only validated recipe-shaped entries', () => {
   const withImage = { ...recipe, image: 'file:///recipe-photo.jpg', imageSource: 'AI-generated' as const };
   assert.equal(parseCachedRecipes([withImage])[0]?.image, withImage.image);
   assert.equal(parseCachedRecipes(undefined).length, 0);
+});
+
+test('archiving hides a recipe without deleting its saved version or image and restores it later', () => {
+  const recipe = { ...mapDiscoveredRecipe(apiRecipe), image: 'file:///saved.jpg', imageSource: 'AI-generated' as const };
+  const archived = archiveLocalRecipe([], recipe, '2026-09-23T00:00:00.000Z');
+  assert.equal(isArchivedRecipe(recipe, archived), true);
+  assert.equal(isArchivedRecipe({ ...recipe, recipeVersion: 'another-version' }, archived), true);
+  assert.equal(archived[0]?.recipeVersion, recipe.recipeVersion);
+  assert.equal(recipe.image, 'file:///saved.jpg');
+  assert.equal(parseArchivedRecipes(JSON.parse(JSON.stringify(archived)))[0]?.key, archived[0]?.key);
+  assert.equal(isArchivedRecipe(recipe, restoreArchivedRecipe(archived, archived[0]!.key)), false);
+});
+
+test('published recipes can be archived and restored from a saved snapshot', () => {
+  const published = {
+    id: 'meal-1', title: 'Egg and greens bowl', provider: 'TheMealDB' as const,
+    sourceUrl: 'https://example.com/meal', ingredients: [{ name: 'egg', measure: '2' }],
+    instructions: 'Cook.', matchedIngredients: ['egg'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], published);
+  assert.equal(isArchivedPublished(published, archived), true);
+  assert.equal(parseArchivedRecipes(JSON.parse(JSON.stringify(archived)))[0]?.externalRecipe?.sourceUrl, published.sourceUrl);
+  assert.equal(isArchivedPublished(published, restoreArchivedRecipe(archived, archived[0]!.key)), false);
 });

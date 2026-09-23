@@ -351,6 +351,17 @@ test('partial regeneration preserves unselected meals and recalculates week shop
   assert.equal(needs.find((item) => item.normalizedName === 'egg')?.quantity, 1);
 });
 
+test('archived planned meals still reserve stock when a new plan uses only active candidates', () => {
+  const archived = { ...eggBreakfastRecipe, id: 'archived-eggs' };
+  const active = { ...eggBreakfastRecipe, id: 'active-eggs' };
+  const existing = [{ id: 'Monday-Breakfast', day: 'Monday', meal: 'Breakfast' as const, recipeId: archived.id, servings: 1 }];
+  const stock = [{ id: 'stock-eggs', name: 'eggs', status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, quantityValue: 1, unit: 'egg' }];
+  const next = generatePlanIncrementally(existing, ['Tuesday'], ['Breakfast'], [active], stock, defaultPreferences, 1, [], [archived, active]);
+  assert.equal(next.find((meal) => meal.day === 'Monday')?.recipeId, archived.id);
+  assert.equal(next.find((meal) => meal.day === 'Tuesday')?.recipeId, active.id);
+  assert.match(next.find((meal) => meal.day === 'Tuesday')?.shortageReasons?.join(' ') ?? '', /eggs/);
+});
+
 test('a planned meal can use its own reservation, while other meals remain unavailable', () => {
   const plan = [{ id: 'monday-breakfast', recipeId: 'eggs-only', servings: 1 }];
   const inventory = [{ id: 'egg-row', name: 'eggs', quantityValue: 2, unit: 'egg', quantityKnown: true, status: 'fresh' as const, confidence: 'confirmed' as const }];

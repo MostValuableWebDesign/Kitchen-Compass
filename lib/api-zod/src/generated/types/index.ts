@@ -24,6 +24,7 @@ export * from './recipeDiscoveryInventoryStatus';
 export * from './recipeDiscoveryPreferences';
 export * from './recipeDiscoveryPreferencesSkill';
 export * from './recipeDiscoveryRequest';
+export * from './recipeDiscoveryRequestAudience';
 export * from './recipeDiscoveryResponse';
 export * from './recipeDiscoveryResponseSource';
 export * from './recipeHealthScore';

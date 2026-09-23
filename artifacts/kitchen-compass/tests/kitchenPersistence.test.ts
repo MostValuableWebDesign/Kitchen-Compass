@@ -46,7 +46,21 @@ test('full local-data reset starts onboarding again and has no offline records',
   assert.deepEqual(reset.ingredients, []);
   assert.deepEqual(reset.plan, []);
   assert.deepEqual(reset.savedRecipes, []);
+  assert.deepEqual(reset.archivedRecipes, []);
+  assert.deepEqual(reset.savedKidPublishedRecipes, []);
   assert.deepEqual(reset.reminders, { enabled: false, hour: 18, minute: 0 });
+});
+
+test('published kid recipes and their original images survive reload', () => {
+  const published = {
+    id: 'meal-1', title: 'Tomato pasta', provider: 'TheMealDB' as const,
+    sourceUrl: 'https://www.themealdb.com/meal/meal-1', imageUrl: 'https://www.themealdb.com/pasta.jpg',
+    ingredients: [{ name: 'Pasta', measure: '1 cup' }], instructions: 'Cook the pasta.',
+    matchedIngredients: ['Pasta'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const state = { ...emptyPersistedKitchenState(), savedKidPublishedRecipes: [published] };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.deepEqual(restored.savedKidPublishedRecipes, [published]);
 });
 
 test('persisted kitchen records remain readable without a network', () => {
@@ -60,4 +74,14 @@ test('persisted kitchen records remain readable without a network', () => {
   const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
   assert.equal(restored.ingredients[0]?.name, 'rice');
   assert.equal(restored.ingredients[0]?.quantityKnown, false);
+  assert.deepEqual(restored.archivedRecipes, []);
+});
+
+test('archived recipe exclusions survive a local state reload', () => {
+  const state = {
+    ...emptyPersistedKitchenState(),
+    archivedRecipes: [{ key: 'egg bowl', title: 'Egg Bowl', archivedAt: '2026-09-23T00:00:00.000Z', recipeVersion: 'saved-v1' }],
+  };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.deepEqual(restored.archivedRecipes, state.archivedRecipes);
 });

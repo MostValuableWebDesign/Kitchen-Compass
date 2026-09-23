@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
+import { kidFriendlyScore } from "./kidFriendly";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
@@ -11,6 +12,9 @@ const requestSchema = z.object({
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
   searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
   excludeRecipeIds: z.array(z.string().trim().min(1).max(80)).max(120).optional(),
+  excludedRecipeIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
+  excludedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
+  audience: z.enum(["general", "kids"]).default("general"),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -51,13 +55,18 @@ function isNonCountedMissingIngredient(value: string) {
   return nonCountedMissingTerms.some((term) => identity === term || identity.includes(` ${term}`) || identity.includes(`${term} `));
 }
 
-function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>()) {
+function titleKey(title: string) {
+  return title.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>(), excludedTitles = new Set<string>()) {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; ids.length < limit && searches.some((results) => index < results.length); index += 1) {
     for (const results of searches) {
       const id = results[index]?.idMeal;
-      if (id && !seen.has(id) && !excludedIds.has(id)) { ids.push(id); seen.add(id); }
+      if (id && !seen.has(id) && !excludedIds.has(id)
+        && (!results[index]?.strMeal || !excludedTitles.has(titleKey(results[index].strMeal!)))) { ids.push(id); seen.add(id); }
       if (ids.length >= limit) break;
     }
   }
@@ -127,6 +136,8 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const pantry = [...new Set(parsed.data.ingredients.map((item) => item.trim()))];
+  const excludedIds = new Set([...(parsed.data.excludeRecipeIds ?? []), ...parsed.data.excludedRecipeIds]);
+  const excludedTitles = new Set(parsed.data.excludedRecipeTitles.map(titleKey));
   const searchIngredients = pantry.filter((item) => !commonSeasonings.has(ingredientIdentity(item)));
   const base = `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}`;
   try {
@@ -136,7 +147,7 @@ router.post("/recipes/external", async (req, res) => {
       const response = await providerJson(`${base}/filter.php?i=${value}`);
       return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
     }));
-    const ids = interleaveMealIds(searches, 30, new Set(parsed.data.excludeRecipeIds ?? []));
+    const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles);
     const details = await Promise.all(ids.map(async (id) => {
       const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
       return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
@@ -144,7 +155,10 @@ router.post("/recipes/external", async (req, res) => {
     const recipes = details
       .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
       .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
+      .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
+      .filter((recipe) => parsed.data.audience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
       .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+    if (parsed.data.audience === "kids") recipes.splice(12);
     res.json({ recipes, provider: "TheMealDB", safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label." });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
