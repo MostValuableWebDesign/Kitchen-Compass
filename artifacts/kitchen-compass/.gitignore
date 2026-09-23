@@ -10,7 +10,10 @@ web-build/
 expo-env.d.ts
 
 # Native
-/ios/
+# Keep the generated iOS project available for native Xcode builds.
+ios/Pods/
+ios/**/xcuserdata/
+ios/*.xcworkspace/xcuserdata/
 /android/
 *.orig.*
 *.jks
