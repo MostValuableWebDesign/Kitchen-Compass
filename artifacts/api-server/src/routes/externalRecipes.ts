@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
+import { kidFriendlyScore } from "./kidFriendly";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
@@ -13,6 +14,7 @@ const requestSchema = z.object({
   excludeRecipeIds: z.array(z.string().trim().min(1).max(80)).max(120).optional(),
   excludedRecipeIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
   excludedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
+  audience: z.enum(["general", "kids"]).default("general"),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -154,7 +156,9 @@ router.post("/recipes/external", async (req, res) => {
       .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
       .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
       .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
+      .filter((recipe) => parsed.data.audience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
       .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+    if (parsed.data.audience === "kids") recipes.splice(12);
     res.json({ recipes, provider: "TheMealDB", safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label." });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");

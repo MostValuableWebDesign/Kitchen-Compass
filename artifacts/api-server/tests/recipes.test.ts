@@ -156,6 +156,36 @@ test("strict schema encodes optional fields as nullable and keeps nested fields 
   assert.deepEqual((schema.properties as Record<string, { anyOf: unknown[] }>).optional.anyOf[1], { type: "null" });
 });
 
+test("kid discovery asks for familiar meals and returns a validated familiar candidate", async () => {
+  const original = globalThis.fetch;
+  let prompt = "";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      prompt = (JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }).messages[0]!.content;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [{ ...validModelRecipe(), title: "Scrambled eggs and greens" }] }) } }] }), { status: 200 });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify({ ...requestBody(), audience: "kids" }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(prompt, /young, selective eaters/);
+    assert.match(prompt, /age-appropriate cutting or texture/);
+    assert.deepEqual((await response.json() as { recipes: Array<{ title: string }> }).recipes.map((recipe) => recipe.title), ["Scrambled eggs and greens"]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("kid discovery does not label an unrelated generated meal as kid-friendly", async () => {
+  const response = await discoverModelRecipe(validModelRecipe(), { ...requestBody(), audience: "kids" });
+  assert.equal(response.status, 503);
+});
+
 test("recipe discovery keeps valid candidates when another candidate fails validation", async () => {
   const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
   const original = globalThis.fetch;

@@ -26,6 +26,7 @@ export function findExternalRecipes(
   searchAnchors?: string[],
   excludedRecipeIds: string[] = [],
   excludedRecipeTitles: string[] = [],
+  audience: "general" | "kids" = "general",
 ) {
   return customFetch<ExternalRecipesResponse>("/api/recipes/external", {
     method: "POST",
@@ -37,6 +38,7 @@ export function findExternalRecipes(
       ...(searchAnchors?.length ? { searchAnchors } : {}),
       excludedRecipeIds,
       excludedRecipeTitles,
+      audience,
     }),
   });
 }

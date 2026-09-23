@@ -22,8 +22,8 @@ import {
 import type { Recipe } from '@/data/recipes';
 import type { ExternalRecipe } from '@workspace/api-client-react';
 import { defaultPreferences, migrateV1KitchenState, parsePersistedKitchenState, type PersistedKitchenState } from '@/lib/kitchenPersistence';
-import { novelRecipes, recipeVersion } from '@/lib/recipeDiscovery';
-import { archiveLocalRecipe, archivePublishedRecipe, isArchivedRecipe, restoreArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
+import { novelRecipes, recipeTitleKey, recipeVersion } from '@/lib/recipeDiscovery';
+import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, restoreArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
 import { defaultReminderSettings, syncDailyReminder, type ReminderScheduler, type ReminderSettings } from '@/lib/reminders';
 import { SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
@@ -145,6 +145,7 @@ interface KitchenContextValue {
   shoppingList: ShoppingListState;
   savedRecipes: Recipe[];
   archivedRecipes: ArchivedRecipe[];
+  savedKidPublishedRecipes: ExternalRecipe[];
   favoriteRecipeVersions: string[];
   onboardingComplete: boolean;
   reminders: ReminderSettings;
@@ -175,6 +176,7 @@ interface KitchenContextValue {
   archiveRecipe: (recipe: Recipe) => void;
   archivePublishedRecipe: (recipe: ExternalRecipe) => void;
   restoreRecipe: (key: string) => void;
+  saveKidPublishedRecipes: (recipes: ExternalRecipe[]) => void;
   setDiscoveredRecipeImage: (version: string, image: string, source: 'TheMealDB' | 'AI-generated') => void;
   toggleFavoriteRecipe: (recipe: Recipe) => void;
   previewCook: (plannedMealId: string, actualServings?: number) => CookPreview | null;
@@ -222,6 +224,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [shoppingList, setShoppingListState] = useState<ShoppingListState>({ checkedIds: [], manualItems: [] });
   const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
   const [archivedRecipes, setArchivedRecipes] = useState<ArchivedRecipe[]>([]);
+  const [savedKidPublishedRecipes, setSavedKidPublishedRecipes] = useState<ExternalRecipe[]>([]);
   const [favoriteRecipeVersions, setFavoriteRecipeVersions] = useState<string[]>([]);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [reminders, setReminders] = useState<ReminderSettings>(defaultReminderSettings);
@@ -253,6 +256,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
               shoppingList: { checkedIds: [], manualItems: [] },
                savedRecipes: [],
                archivedRecipes: [],
+               savedKidPublishedRecipes: [],
                favoriteRecipeVersions: [],
                onboardingComplete: false,
                reminders: defaultReminderSettings,
@@ -271,6 +275,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setShoppingListState(parsed.shoppingList);
         setSavedRecipes(parsed.savedRecipes);
         setArchivedRecipes(parsed.archivedRecipes);
+        setSavedKidPublishedRecipes(parsed.savedKidPublishedRecipes);
         setFavoriteRecipeVersions(parsed.favoriteRecipeVersions);
         setOnboardingComplete(parsed.onboardingComplete);
         setReminders(parsed.reminders);
@@ -306,12 +311,13 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       shoppingList,
       savedRecipes,
       archivedRecipes,
+      savedKidPublishedRecipes,
       favoriteRecipeVersions,
       onboardingComplete,
       reminders,
       theme,
     })).catch(() => undefined);
-  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, archivedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
+  }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, archivedRecipes, savedKidPublishedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
 
   useEffect(() => {
     if (!hydrated || !reminders.enabled) return;
@@ -336,6 +342,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     shoppingList,
     savedRecipes,
     archivedRecipes,
+    savedKidPublishedRecipes,
     favoriteRecipeVersions,
     onboardingComplete,
     reminders,
@@ -417,6 +424,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setShoppingListState({ checkedIds: [], manualItems: [] });
       setSavedRecipes([]);
       setArchivedRecipes([]);
+      setSavedKidPublishedRecipes([]);
       setFavoriteRecipeVersions([]);
       setReminders(defaultReminderSettings);
       setThemeState('light');
@@ -434,6 +442,17 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     archiveRecipe: (recipe) => setArchivedRecipes((current) => archiveLocalRecipe(current, recipe)),
     archivePublishedRecipe: (recipe) => setArchivedRecipes((current) => archivePublishedRecipe(current, recipe)),
     restoreRecipe: (key) => setArchivedRecipes((current) => restoreArchivedRecipe(current, key)),
+    saveKidPublishedRecipes: (recipes) => setSavedKidPublishedRecipes((current) => {
+      const seen = new Set(current.map((recipe) => recipe.id));
+      const seenTitles = new Set(current.map(recipeTitleKey));
+      return [...current, ...recipes.filter((recipe) => {
+        const title = recipeTitleKey(recipe);
+        if (seen.has(recipe.id) || seenTitles.has(title) || isArchivedPublished(recipe, archivedRecipes)) return false;
+        seen.add(recipe.id);
+        seenTitles.add(title);
+        return true;
+      })].slice(-100);
+    }),
     setDiscoveredRecipeImage: (version, image, source) => setSavedRecipes((current) => current.map((recipe) =>
       recipeVersion(recipe) === version ? { ...recipe, image, imageSource: source } : recipe,
     )),
@@ -571,7 +590,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [archivedRecipes, completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedRecipes, shoppingList, storageError, theme]);
+  }), [archivedRecipes, completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedKidPublishedRecipes, savedRecipes, shoppingList, storageError, theme]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }

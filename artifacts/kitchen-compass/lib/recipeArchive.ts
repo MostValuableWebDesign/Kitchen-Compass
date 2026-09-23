@@ -42,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
 }
 
-function parseExternalRecipe(value: unknown): ExternalRecipe | undefined {
+export function parseExternalRecipe(value: unknown): ExternalRecipe | undefined {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.title !== 'string'
     || value.provider !== 'TheMealDB' || typeof value.sourceUrl !== 'string'
     || !value.sourceUrl.startsWith('https://') || typeof value.instructions !== 'string'
