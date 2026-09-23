@@ -218,6 +218,17 @@ test("recipe discovery keeps a genuinely safe recipe for the saved allergy", asy
   assert.equal(response.status, 200);
 });
 
+test("recipe discovery accepts common pantry staples with known allergen status", async () => {
+  const recipe = validModelRecipe();
+  recipe.ingredients = [
+    ...recipe.ingredients,
+    { name: "black pepper", quantity: 0.25, unit: "tsp", required: false },
+    { name: "vegetable oil", quantity: 1, unit: "tbsp", required: false },
+  ];
+  const response = await discoverModelRecipe(recipe);
+  assert.equal(response.status, 200);
+});
+
 test("recipe discovery removes a substitution that fails the same allergen check", async () => {
   const recipe = validModelRecipe();
   recipe.substitutions = [{ from: "spinach", to: "peanut butter", reason: "A creamy alternative." }];
