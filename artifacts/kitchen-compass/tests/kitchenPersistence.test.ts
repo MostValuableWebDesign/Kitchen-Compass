@@ -44,11 +44,22 @@ test('full local-data reset starts onboarding again and has no offline records',
   const reset = emptyPersistedKitchenState();
   assert.equal(reset.onboardingComplete, false);
   assert.deepEqual(reset.ingredients, []);
+  assert.deepEqual(reset.spaceScans, []);
   assert.deepEqual(reset.plan, []);
   assert.deepEqual(reset.savedRecipes, []);
   assert.deepEqual(reset.archivedRecipes, []);
   assert.deepEqual(reset.savedKidPublishedRecipes, []);
   assert.deepEqual(reset.reminders, { enabled: false, hour: 18, minute: 0 });
+});
+
+test('3D scan model and confirmed ingredient list survive reload', () => {
+  const scan = { id: 'scan-1', location: 'Pantry' as const,
+    modelUri: 'file:///Documents/kitchen-compass-space-1.obj',
+    createdAt: '2026-09-23T12:00:00.000Z', ingredientNames: ['Pasta', 'Tomatoes'] };
+  const state = { ...emptyPersistedKitchenState(), spaceScans: [scan] };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.deepEqual(restored.spaceScans, [scan]);
+  assert.deepEqual(parsePersistedKitchenState(JSON.stringify({ ...state, spaceScans: [{ ...scan, modelUri: 'https://example.com/other.obj' }] }), defaultPreferences).spaceScans, []);
 });
 
 test('published kid recipes and their original images survive reload', () => {
