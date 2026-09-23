@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Appearance, Platform } from 'react-native';
 import {
   buildReservations,
@@ -191,6 +191,7 @@ interface KitchenContextValue {
 }
 
 export const STORAGE_KEY = 'kitchen-compass-state-v2';
+export const BACKUP_STORAGE_KEY = 'kitchen-compass-state-backup-v1';
 export const LEGACY_STORAGE_KEY = 'kitchen-compass-state-v1';
 const KitchenContext = createContext<KitchenContextValue | null>(null);
 
@@ -232,16 +233,27 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const persistQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
     setHydrated(false);
     const load = async () => {
       try {
-        const v2 = await AsyncStorage.getItem(STORAGE_KEY);
         let parsed: PersistedKitchenState;
+        let recoveredFromBackup = false;
+        const [[, v2], [, backup]] = await AsyncStorage.multiGet([STORAGE_KEY, BACKUP_STORAGE_KEY]);
         if (v2 !== null) {
-          parsed = parsePersistedKitchenState(v2, defaultPreferences);
+          try {
+            parsed = parsePersistedKitchenState(v2, defaultPreferences);
+          } catch (primaryError) {
+            if (backup === null) throw primaryError;
+            parsed = parsePersistedKitchenState(backup, defaultPreferences);
+            recoveredFromBackup = true;
+          }
+        } else if (backup !== null) {
+          parsed = parsePersistedKitchenState(backup, defaultPreferences);
+          recoveredFromBackup = true;
         } else {
           const v1 = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
           parsed = v1
@@ -263,7 +275,12 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
                 theme: 'light',
             };
           // Keep v1 as a recovery copy. The migration is complete only after v2 is written.
-          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+          const initialPayload = JSON.stringify(parsed);
+          await AsyncStorage.multiSet([[STORAGE_KEY, initialPayload], [BACKUP_STORAGE_KEY, initialPayload]]);
+        }
+        if (recoveredFromBackup) {
+          const recoveredPayload = JSON.stringify(parsed);
+          await AsyncStorage.setItem(STORAGE_KEY, recoveredPayload);
         }
         if (!active) return;
         setIngredients(parsed.ingredients.map(normalizeIngredient));
@@ -301,7 +318,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated || storageError) return;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+    const payload = JSON.stringify({
       ingredients,
       preferences,
       plan,
@@ -316,7 +333,17 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       onboardingComplete,
       reminders,
       theme,
-    })).catch(() => undefined);
+    });
+    persistQueue.current = persistQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        await AsyncStorage.setItem(STORAGE_KEY, payload);
+        await AsyncStorage.setItem(BACKUP_STORAGE_KEY, payload);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'Saved kitchen data could not be written.';
+        setStorageError(message);
+      });
   }, [hydrated, ingredients, preferences, plan, reservations, completedMeals, leftovers, shoppingList, savedRecipes, archivedRecipes, savedKidPublishedRecipes, favoriteRecipeVersions, onboardingComplete, reminders, theme, storageError]);
 
   useEffect(() => {
@@ -413,7 +440,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     eraseAllData: async () => {
       await syncDailyReminder({ ...defaultReminderSettings, enabled: false }, reminderScheduler, false);
       deleteScanPhotos(ingredients.map((item) => item.photoUri));
-      await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_STORAGE_KEY, SCAN_ACCESS_TOKEN_STORAGE_KEY]);
+      await AsyncStorage.multiRemove([STORAGE_KEY, BACKUP_STORAGE_KEY, LEGACY_STORAGE_KEY, SCAN_ACCESS_TOKEN_STORAGE_KEY]);
       setIngredients([]);
       setPreferencesState(defaultPreferences);
       setPlan([]);
