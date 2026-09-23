@@ -3,7 +3,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-client-react';
@@ -54,6 +54,24 @@ export default function ScanScreen() {
   const [location, setLocation] = useState<StorageLocation>('Refrigerator');
   const [mode, setMode] = useState<'choose' | 'review'>('choose');
   const [keepPhotos, setKeepPhotos] = useState(false);
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const [analysisProgressClock, setAnalysisProgressClock] = useState(Date.now());
+
+  useEffect(() => {
+    if (recognitionState !== 'analyzing') return;
+    const timer = setInterval(() => setAnalysisProgressClock(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [recognitionState]);
+
+  const analysisProgressLimitMs = 120_000;
+  const analysisProgressPercent = recognitionState === 'analyzing' && analysisStartedAt
+    ? Math.min(95, Math.floor(((analysisProgressClock - analysisStartedAt) / analysisProgressLimitMs) * 95))
+    : recognitionState === 'ready' ? 100 : 0;
+  const analysisStage = analysisProgressPercent < 25
+    ? 'Preparing your photos…'
+    : analysisProgressPercent < 85
+      ? 'Uploading and recognizing ingredients…'
+      : 'Finishing your scan…';
 
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
   const reviewPhotos = async (assets: ScanPhotoAsset[]) => {
@@ -66,6 +84,9 @@ export default function ScanScreen() {
     setCorrectionTargets({});
     setName('');
     setMode('review');
+    const startedAt = Date.now();
+    setAnalysisProgressClock(startedAt);
+    setAnalysisStartedAt(startedAt);
     setRecognitionState('analyzing');
     setRecognitionMessage('');
     try {
@@ -179,6 +200,7 @@ export default function ScanScreen() {
     setScanDecisions({});
     setCorrectionTargets({});
     setRecognitionState('idle');
+    setAnalysisStartedAt(null);
     setRecognitionMessage('');
     setName('');
     setQuantity('');
@@ -351,6 +373,19 @@ export default function ScanScreen() {
           </>
         )}
       </ScrollView>
+      <Modal visible={recognitionState === 'analyzing'} transparent animationType="fade" onRequestClose={() => undefined}>
+        <View style={styles.progressBackdrop}>
+          <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.progressTitle, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}</Text>
+            <Text style={[styles.progressPercent, { color: colors.primary }]}>{analysisProgressPercent}%</Text>
+            <View testID="photo-analysis-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated photo analysis progress" accessibilityValue={{ min: 0, max: 100, now: analysisProgressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
+              <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${analysisProgressPercent}%` }]} />
+            </View>
+            <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>{analysisStage}</Text>
+            <Text style={[styles.progressSubnote, { color: colors.mutedForeground }]}>Estimated progress while we prepare and process the image response.</Text>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>
         <View style={styles.cameraScreen}>
           {cameraOpen ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" onCameraReady={() => setCameraReady(true)} onMountError={() => { setCameraReady(false); Alert.alert('Camera unavailable', 'Close the camera and try again.'); }} /> : null}
@@ -415,6 +450,14 @@ const styles = StyleSheet.create({
   keepPhotoBody: { fontSize: 11, lineHeight: 16, marginTop: 3 },
   stateNote: { flexDirection: 'row', gap: 8, padding: 13, borderRadius: 15, marginBottom: 14 },
   stateText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  progressBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.62)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  progressCard: { width: '100%', maxWidth: 390, borderRadius: 22, padding: 24, alignItems: 'center' },
+  progressTitle: { fontSize: 17, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  progressPercent: { fontSize: 34, fontFamily: 'Inter_700Bold', marginTop: 18 },
+  progressTrack: { width: '100%', height: 12, borderRadius: 6, overflow: 'hidden', marginTop: 14 },
+  progressFill: { height: '100%', borderRadius: 6 },
+  progressNote: { fontSize: 13, fontFamily: 'Inter_600SemiBold', textAlign: 'center', marginTop: 14 },
+  progressSubnote: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 6 },
   suggestionCard: { borderWidth: 1, borderRadius: 18, padding: 14, marginBottom: 12 },
   suggestionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   suggestionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
