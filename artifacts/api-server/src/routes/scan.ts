@@ -46,7 +46,7 @@ const modelResponseSchema = z.object({
     unit: z.string().max(40).nullable(),
     confidence: z.number().min(0).max(1),
     uncertaintyReasons: z.array(z.string().max(240)).max(8),
-  })).max(40),
+  })).max(100),
   warnings: z.array(z.string().max(240)).max(20),
 });
 
@@ -129,7 +129,7 @@ router.post("/scan/analyze", async (req, res) => {
         "Only provide a quantity and unit when a package label or clearly countable item supports it; otherwise use null.",
         "Use storageLocation only as a cautious proposal based on the visible item, not as a fact.",
         "When unsure, lower confidence and explain the uncertainty reason.",
-        "Keep the response concise: return no more than 4 clearly visible ingredients per photo and no more than 30 unique ingredients total.",
+        "Keep the response concise while covering the photos: return no more than 20 clearly visible ingredients per photo and no more than 100 unique ingredients total.",
         "Each image has a Photo ID immediately before it. Use that exact ID in sourcePhotoId for every suggestion.",
         `Existing inventory for duplicate awareness: ${JSON.stringify(existingIngredients)}`,
       ].join("\n"),
@@ -152,7 +152,7 @@ router.post("/scan/analyze", async (req, res) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-         max_completion_tokens: 6000,
+        max_completion_tokens: 12000,
         response_format: {
           type: "json_schema",
           json_schema: { name: "ingredient_scan", strict: true, schema: responseSchema },
