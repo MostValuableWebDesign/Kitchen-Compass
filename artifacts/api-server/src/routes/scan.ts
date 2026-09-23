@@ -129,6 +129,7 @@ router.post("/scan/analyze", async (req, res) => {
         "Only provide a quantity and unit when a package label or clearly countable item supports it; otherwise use null.",
         "Use storageLocation only as a cautious proposal based on the visible item, not as a fact.",
         "When unsure, lower confidence and explain the uncertainty reason.",
+        "Keep the response concise: return no more than 4 clearly visible ingredients per photo and no more than 30 unique ingredients total.",
         "Each image has a Photo ID immediately before it. Use that exact ID in sourcePhotoId for every suggestion.",
         `Existing inventory for duplicate awareness: ${JSON.stringify(existingIngredients)}`,
       ].join("\n"),
@@ -151,7 +152,7 @@ router.post("/scan/analyze", async (req, res) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        max_completion_tokens: 3000,
+         max_completion_tokens: 6000,
         response_format: {
           type: "json_schema",
           json_schema: { name: "ingredient_scan", strict: true, schema: responseSchema },
@@ -213,7 +214,10 @@ router.post("/scan/analyze", async (req, res) => {
     res.json(result);
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
-    req.log.error({ reason: isTimeout ? "timeout" : "provider_or_validation_failure" }, "Ingredient scan processing failed");
+    req.log.error({
+      reason: isTimeout ? "timeout" : "provider_or_validation_failure",
+      errorType: error instanceof Error ? error.name : typeof error,
+    }, "Ingredient scan processing failed");
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition failed. Your existing kitchen inventory was not changed.");
   } finally {
     clearTimeout(timeout);

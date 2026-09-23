@@ -5,3 +5,4 @@
 - [Expo notification triggers](expo-notifications-trigger.md) — keep reminder logic injectable and translate daily triggers at the Expo SDK 57 adapter boundary.
 - [Allergen validation](allergen-validation.md) — AI allergen metadata is advisory; deterministic ingredient checks are shared by API filtering and client readiness.
 - [Week-wide plan accounting](weekly-plan-accounting.md) — all planned meals share reservations; known shortages and unknown quantities stay separate.
+- [Multi-photo scan reliability](scan-batch-reliability.md) — real image batches need bounded model output and more provider time than tiny-image tests.

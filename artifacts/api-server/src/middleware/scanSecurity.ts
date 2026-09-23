@@ -19,7 +19,7 @@ export const scanLimits = {
   maxPhotoBytes: 5 * 1024 * 1024,
   maxTotalPhotoBytes: 10 * 1024 * 1024,
   maxBodyBytes: 12 * 1024 * 1024,
-  requestTimeoutMs: 20_000,
+  requestTimeoutMs: 45_000,
 };
 
 export type ScanErrorCode =
