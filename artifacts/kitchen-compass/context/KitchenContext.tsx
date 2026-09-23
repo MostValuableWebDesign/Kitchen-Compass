@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, Appearance } from 'react-native';
+import { Alert, Appearance, Platform } from 'react-native';
 import {
   buildReservations,
   applyCookingTransaction,
@@ -188,6 +188,10 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function applyNativeTheme(theme: ThemePreference) {
+  if (Platform.OS !== 'web') Appearance.setColorScheme(theme);
+}
+
 function normalizeIngredient(ingredient: Ingredient) {
   const parsed = parseQuantityText(ingredient.quantity);
   const confirmedDate = ingredient.dateConfirmed ? normalizeConfirmedDate(ingredient.expires) : undefined;
@@ -242,6 +246,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
                favoriteRecipeVersions: [],
                onboardingComplete: false,
                reminders: defaultReminderSettings,
+                theme: 'light',
             };
           // Keep v1 as a recovery copy. The migration is complete only after v2 is written.
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
@@ -259,7 +264,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setOnboardingComplete(parsed.onboardingComplete);
         setReminders(parsed.reminders);
         setThemeState(parsed.theme);
-        Appearance.setColorScheme(parsed.theme);
+        applyNativeTheme(parsed.theme);
         setStorageError(null);
         setHydrated(true);
       } catch (error) {
@@ -324,7 +329,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     theme,
     setTheme: (nextTheme) => {
       setThemeState(nextTheme);
-      Appearance.setColorScheme(nextTheme);
+      applyNativeTheme(nextTheme);
     },
     hydrated,
     storageError,
@@ -416,6 +421,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setSavedRecipes([]);
       setFavoriteRecipeVersions([]);
       setReminders(defaultReminderSettings);
+      setThemeState('light');
+      applyNativeTheme('light');
       setOnboardingComplete(false);
     },
     saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => mergeRecipes(current, nextRecipes).filter((recipe) => recipe.source === 'server-ai')),
@@ -552,7 +559,7 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       setPlan((current) => current.filter((meal) => meal.id !== input.plannedMealId));
       return true;
     },
-  }), [completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedRecipes, shoppingList, storageError]);
+  }), [completedMeals, favoriteRecipeVersions, hydrated, ingredients, leftovers, onboardingComplete, plan, preferences, reminders, reservationWarnings, reservations, savedRecipes, shoppingList, storageError, theme]);
 
   return <KitchenContext.Provider value={value}>{children}</KitchenContext.Provider>;
 }
