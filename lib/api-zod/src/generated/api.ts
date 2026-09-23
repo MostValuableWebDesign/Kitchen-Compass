@@ -303,3 +303,29 @@ export const DiscoverRecipesResponse = zod.object({
 })
 
 
+/**
+ * @summary Find a matching recipe photo or generate an illustrative image
+ */
+export const resolveRecipeImagesBodyRecipesMax = 8;
+
+
+
+export const ResolveRecipeImagesBody = zod.object({
+  "recipes": zod.array(zod.object({
+  "recipeVersion": zod.string(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "ingredients": zod.array(zod.string())
+})).min(1).max(resolveRecipeImagesBodyRecipesMax)
+})
+
+export const ResolveRecipeImagesResponse = zod.object({
+  "images": zod.array(zod.object({
+  "recipeVersion": zod.string(),
+  "imageUrl": zod.string().url().optional(),
+  "imageBase64": zod.string().optional(),
+  "source": zod.enum(['TheMealDB', 'AI-generated']).optional()
+}))
+})
+
+

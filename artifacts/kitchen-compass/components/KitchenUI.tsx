@@ -51,7 +51,7 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
   const colors = useColors();
   return (
     <Pressable testID={`recipe-${recipe.id}`} onPress={onPress} style={({ pressed }) => [styles.recipeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
-      {recipe.image ? <Image source={recipe.image} contentFit="cover" style={styles.recipeImage} /> : <View style={[styles.recipeImage, { backgroundColor: colors.secondary }]}><Ionicons name="restaurant-outline" size={34} color={colors.primary} /></View>}
+      {recipe.image ? <Image source={typeof recipe.image === 'string' ? { uri: recipe.image } : recipe.image} contentFit="cover" style={styles.recipeImage} /> : <View style={[styles.recipeImage, { backgroundColor: colors.secondary }]}><Ionicons name="restaurant-outline" size={34} color={colors.primary} /></View>}
       <View style={styles.recipeBody}>
         <View style={styles.recipeRow}>
           <View style={{ flex: 1 }}>
@@ -66,6 +66,7 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
           </View>
         </View>
         <Text numberOfLines={2} style={[styles.recipeDescription, { color: colors.mutedForeground }]}>{recipe.description}</Text>
+        {recipe.imageSource ? <Text style={[styles.imageCredit, { color: colors.mutedForeground }]}>{recipe.imageSource === 'AI-generated' ? 'Illustrative AI image' : 'Photo: TheMealDB'}</Text> : null}
         <View style={styles.recipeFooter}>
           <View style={[styles.statusPill, { backgroundColor: hasIngredients ? colors.secondary : colors.muted }]}>
             <View style={[styles.statusDot, { backgroundColor: hasIngredients ? colors.primary : colors.mutedForeground }]} />
@@ -121,6 +122,7 @@ const styles = StyleSheet.create({
   titleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   recipeMeta: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   recipeDescription: { fontSize: 13, lineHeight: 19, marginTop: 10 },
+  imageCredit: { fontSize: 10, marginTop: 6 },
   recipeFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
   scoreBadge: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   scoreText: { fontSize: 14, fontFamily: 'Inter_700Bold' },

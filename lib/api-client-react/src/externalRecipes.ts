@@ -19,9 +19,10 @@ export type ExternalRecipesResponse = {
   safetyNotice: string;
 };
 
-export function findExternalRecipes(ingredients: string[], allergies: string[]) {
+export function findExternalRecipes(ingredients: string[], allergies: string[], signal?: AbortSignal) {
   return customFetch<ExternalRecipesResponse>("/api/recipes/external", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ingredients, allergies }),
   });

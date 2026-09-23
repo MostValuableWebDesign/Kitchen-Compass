@@ -64,7 +64,8 @@ export interface Recipe {
   difficulty: string;
   equipment: string[];
   healthScore: HealthScoreCalculation;
-  image?: number;
+  image?: number | string;
+  imageSource?: 'TheMealDB' | 'AI-generated';
   ingredients: RecipeIngredient[];
   nutrition: NutritionCalculation;
   steps: RecipeStep[];
