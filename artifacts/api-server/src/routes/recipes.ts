@@ -354,6 +354,9 @@ router.post("/recipes/discover", async (req, res) => {
     "Generate practical recipe candidates from confirmed kitchen inventory.",
     "Use the confirmed inventory as the primary source. You may include a small number of clearly identified missing ingredients so the app can label the recipe Almost ready or Check quantities.",
     "Never invent an inventory item as if the user owns it. Never claim a required ingredient is available.",
+    "Every returned recipe must satisfy all saved allergies, dietary restrictions, dislikes, cuisines, skill, cooking-time, equipment, and selected-filter requirements. Return at least one recipe that satisfies them.",
+    "Use only the equipment listed in Saved preferences and Selected filters. Do not require an appliance or specialized tool that is not listed.",
+    "Use common ingredient names with reliable allergen information. Do not include an ingredient when its allergen status is uncertain; omit it or choose a known-safe alternative.",
     "Return varied candidates, not minor title changes. The variation seed selects a different direction.",
     "All ingredient amounts must be numeric and paired with a unit. Mark pantry garnish or optional additions required=false.",
     "All steps must be ordered from 1 with no gaps. Every step must include exact ingredientAmounts with numeric quantities and units, at least one sensory cue, and at least one common mistake to avoid.",
@@ -377,7 +380,7 @@ router.post("/recipes/discover", async (req, res) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        max_completion_tokens: 5000,
+        max_completion_tokens: 12000,
         response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(responseSchemaForOpenAi) } },
         messages: [{ role: "user", content: prompt }],
       }),
@@ -391,13 +394,25 @@ router.post("/recipes/discover", async (req, res) => {
     const rawContent = payload.choices?.[0]?.message?.content;
     if (!rawContent) throw new Error("Recipe discovery returned no content.");
     const aiResult = aiResponseSchema.parse(removeNullOptionalFields(JSON.parse(rawContent)));
-    const safeRecipes = aiResult.recipes
-      .filter(validateSteps)
-      .filter((recipe) => !excludeRecipeVersions.includes(stableVersion(recipe)))
-      .filter((recipe) => !violatesPreferences(recipe, preferences, filters))
+    const rejectionReasons = new Map<string, number>();
+    const reject = (reason: string) => {
+      rejectionReasons.set(reason, (rejectionReasons.get(reason) ?? 0) + 1);
+      return false;
+    };
+    const eligibleRecipes = aiResult.recipes.filter((recipe) => {
+      if (!validateSteps(recipe)) return reject("steps");
+      if (excludeRecipeVersions.includes(stableVersion(recipe))) return reject("excluded-version");
+      const preferenceViolation = violatesPreferences(recipe, preferences, filters);
+      return preferenceViolation ? reject(preferenceViolation) : true;
+    });
+    const safeRecipes = eligibleRecipes
       .map((recipe) => makeResponseRecipe(recipe, preferences, filters))
       .map((recipe) => recipeSchema.parse(recipe));
     if (!safeRecipes.length) {
+      req.log.warn({
+        candidateCount: aiResult.recipes.length,
+        rejectionReasons: Object.fromEntries(rejectionReasons),
+      }, "Recipe discovery returned no safe candidates");
       sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery did not return a safe recipe for these preferences. Previously saved recipes remain available.");
       return;
     }
@@ -405,7 +420,10 @@ router.post("/recipes/discover", async (req, res) => {
     res.json(result);
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
-    req.log.error({ reason: isTimeout ? "timeout" : "provider_or_validation_failure" }, "Recipe discovery failed");
+    req.log.error({
+      reason: isTimeout ? "timeout" : "provider_or_validation_failure",
+      errorType: error instanceof Error ? error.name : typeof error,
+    }, "Recipe discovery failed");
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery could not be completed. Previously saved recipes remain available.");
   } finally {
     clearTimeout(timeout);

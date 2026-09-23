@@ -27,10 +27,15 @@ const knownSafeIngredients = [
   'tomato', 'tomatoes', 'basil', 'parsley', 'cilantro', 'coriander', 'rosemary', 'thyme', 'oregano',
   'avocado', 'onion', 'red onion', 'green onion', 'scallion', 'garlic', 'ginger',
   'carrot', 'celery', 'bell pepper', 'pepper', 'cucumber', 'zucchini', 'mushroom', 'mushrooms',
+  'asparagus', 'green bean', 'green beans', 'pea pod', 'radish', 'beet', 'eggplant', 'okra',
+  'apple', 'banana', 'orange', 'lime zest', 'lemon zest',
   'rice', 'brown rice', 'quinoa', 'oat', 'oats', 'potato', 'sweet potato', 'corn', 'cornmeal',
   'bean', 'beans', 'black bean', 'black beans', 'kidney bean', 'kidney beans', 'chickpea', 'chickpeas',
   'lentil', 'lentils', 'pea', 'peas', 'olive oil', 'canola oil', 'sugar', 'salt', 'water',
+  'vegetable oil', 'sunflower oil', 'grapeseed oil', 'avocado oil', 'black pepper', 'white pepper',
+  'peppercorn', 'peppercorns', 'baking powder', 'baking soda', 'cornstarch', 'corn starch',
   'vinegar', 'apple cider vinegar', 'paprika', 'cumin', 'turmeric', 'chili', 'chili flake', 'chili flakes',
+  'red pepper flakes', 'bay leaf', 'bay leaves',
 ].map(normalizeText);
 
 const removableDescriptors = new Set([
