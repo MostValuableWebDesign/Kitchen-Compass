@@ -8,7 +8,7 @@ import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, novelRecipes, recipeTitleKey, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import type { Recipe } from '@/data/recipes';
@@ -57,6 +57,7 @@ export default function RecipesScreen() {
   const [imageMessage, setImageMessage] = useState('');
   const searchGuard = useRef(false);
   const imageJob = useRef(0);
+  const pendingImages = useRef(new Set<string>());
   const searchRequest = useRef<AbortController | null>(null);
   const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -130,16 +131,21 @@ export default function RecipesScreen() {
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
 
   const prepareImages = async (recipes: Recipe[]) => {
-    if (!recipes.length) return;
+    const missing = recipes.filter((recipe) => !recipe.image
+      && !pendingImages.current.has(recipeVersion(recipe))
+      && !savedRecipes.some((saved) => recipeTitleKey(saved) === recipeTitleKey(recipe) && Boolean(saved.image))).slice(0, 8);
+    if (!missing.length) return;
+    missing.forEach((recipe) => pendingImages.current.add(recipeVersion(recipe)));
     const job = ++imageJob.current;
     setImageBusy(true);
     setImageMessage('Preparing recipe images in the background…');
     try {
-      const saved = await loadRecipeImages(recipes, setDiscoveredRecipeImage);
-      if (imageJob.current === job) setImageMessage(saved < recipes.length ? 'Some recipe images could not be loaded. You can retry below.' : '');
+      const saved = await loadRecipeImages(missing, setDiscoveredRecipeImage);
+      if (imageJob.current === job) setImageMessage(saved < missing.length ? 'Some recipe images could not be loaded. You can retry below.' : '');
     } catch {
       if (imageJob.current === job) setImageMessage('Recipe images could not be loaded. You can retry below.');
     } finally {
+      missing.forEach((recipe) => pendingImages.current.delete(recipeVersion(recipe)));
       if (imageJob.current === job) setImageBusy(false);
     }
   };
@@ -153,6 +159,7 @@ export default function RecipesScreen() {
   }, [hydrated]);
 
   const discover = async (different = false) => {
+    const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
     const controller = new AbortController();
     if (!beginSearch('kitchen', controller)) return;
     setDiscoveryBusy(true);
@@ -167,16 +174,23 @@ export default function RecipesScreen() {
         preferences,
         filterState,
         `${different ? 'different' : 'refresh'}-${nextVariation}`,
-        different ? savedRecipes.map(recipeVersion) : [],
+        availableRecipes.map(recipeVersion).slice(-30),
+        availableRecipes.map((recipe) => recipe.title).slice(-30),
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const recipes = result.recipes.map(mapDiscoveredRecipe);
-      saveDiscoveredRecipes(recipes);
-      setDiscoveryWarning(result.warning);
+      const recipes = novelRecipes(availableRecipes, result.recipes.map(mapDiscoveredRecipe));
+      if (recipes.length) saveDiscoveredRecipes(recipes);
+      setSearch('');
+      setResultFilter('All');
+      setDiscoveryWarning(recipes.length
+        ? `${recipes.length} new recipe${recipes.length === 1 ? '' : 's'} added.${result.warning ? ` ${result.warning}` : ''}`
+        : savedMatches.length
+          ? 'No new recipes were found. Your saved matching recipes are shown below.'
+          : result.warning ?? 'No new recipes were found. Your saved recipes are still available.');
       setDiscoveryBusy(false);
       finishSearch(controller, true);
-      void prepareImages(recipes);
+      void prepareImages([...recipes, ...savedMatches]);
     } catch {
       if (searchRequest.current !== controller) return;
       setDiscoveryError(true);
@@ -188,15 +202,24 @@ export default function RecipesScreen() {
   };
 
   const findPublished = async () => {
-    const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
+    const confirmed = [...new Set(ingredients
+      .filter((item) => item.status !== 'used' && item.confidence === 'confirmed' && typeof item.name === 'string')
+      .map((item) => item.name.trim())
+      .filter((name) => name.length > 0 && name.length <= 80))]
+      .slice(0, 30);
     if (!confirmed.length) { setExternalMessage('Add at least one confirmed ingredient first.'); return; }
+    const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
+      .filter((allergy): allergy is string => typeof allergy === 'string')
+      .map((allergy) => allergy.trim())
+      .filter((allergy) => allergy.length > 0 && allergy.length <= 80))]
+      .slice(0, 30);
     const controller = new AbortController();
     if (!beginSearch('published', controller)) return;
     setExternalBusy(true);
     setExternalMessage('');
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const result = await findExternalRecipes([...new Set(confirmed)], preferences.allergies, controller.signal);
+      const result = await findExternalRecipes(confirmed, allergies, controller.signal);
       if (searchRequest.current !== controller || controller.signal.aborted) return;
       setExternalRecipes(result.recipes);
       setExternalMessage(result.recipes.length ? result.safetyNotice : 'No published recipes matched these ingredients. Try confirming more items.');

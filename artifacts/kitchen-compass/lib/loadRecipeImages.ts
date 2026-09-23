@@ -1,18 +1,19 @@
 import { findRecipeImages } from '@workspace/api-client-react';
 import type { Recipe } from '@/data/recipes';
-import { recipeVersion } from '@/lib/recipeDiscovery';
+import { recipeVersion, recipesNeedingImages } from '@/lib/recipeDiscovery';
 import { saveGeneratedRecipeImage } from '@/lib/recipeImages';
 
 export async function loadRecipeImages(
   recipes: Recipe[],
   saveImage: (version: string, image: string, source: 'TheMealDB' | 'AI-generated') => void,
 ) {
-  if (!recipes.length) return 0;
+  const missing = recipesNeedingImages(recipes);
+  if (!missing.length) return 0;
   let saved = 0;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 125_000);
   try {
-    const response = await findRecipeImages(recipes.slice(0, 8).map((recipe) => ({
+    const response = await findRecipeImages(missing.map((recipe) => ({
       recipeVersion: recipeVersion(recipe),
       title: recipe.title,
       description: recipe.description,

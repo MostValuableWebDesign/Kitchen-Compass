@@ -182,6 +182,43 @@ test("recipe discovery keeps valid candidates when another candidate fails valid
   }
 });
 
+test("recipe discovery discards existing titles and repeated titles in one response", async () => {
+  const first = validModelRecipe();
+  const repeated = { ...validModelRecipe(), title: "Egg & greens bowl", description: "Different wording for the same dish." };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [first, repeated] }) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify(requestBody()),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { recipes: Array<{ title: string }> };
+    assert.deepEqual(payload.recipes.map((recipe) => recipe.title), [first.title]);
+
+    const excluded = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify({ ...requestBody(), excludeRecipeTitles: [first.title] }),
+    });
+    assert.equal(excluded.status, 200);
+    const excludedPayload = await excluded.json() as { recipes: unknown[]; warning?: string };
+    assert.deepEqual(excludedPayload.recipes, []);
+    assert.match(excludedPayload.warning ?? "", /No new recipes/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("recipe discovery retry excludes confirmed inventory the allergen validator cannot assess", async () => {
   const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
   const unsafe = validModelRecipe();

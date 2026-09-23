@@ -1,6 +1,7 @@
 import type { DiscoveredRecipe, RecipeDiscoveryFilters, RecipeDiscoveryInventory, RecipeDiscoveryPreferences } from '@workspace/api-client-react';
 import type { HealthScoreCalculation, NutritionCalculation } from '@workspace/recipe-calculations';
 import type { Recipe } from '@/data/recipes';
+import { ingredientIdentitiesMatch, recipeMatchesPreferences, recipeReadiness, type InventoryCandidate, type RecipePreferenceInput, type ReservationRecord } from '@/lib/kitchenLogic';
 
 export type RecipeFilterState = {
   mealType: RecipeDiscoveryFilters['mealType'];
@@ -13,6 +14,58 @@ export type RecipeFilterState = {
 
 export function recipeVersion(recipe: Pick<Recipe, 'sourceVersion' | 'recipeVersion'>) {
   return recipe.recipeVersion ?? recipe.sourceVersion;
+}
+
+export function recipeTitleKey(recipe: Pick<Recipe, 'title'>) {
+  return recipe.title.trim().toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+export function novelRecipes(existing: Recipe[], candidates: Recipe[]) {
+  const versions = new Set(existing.map(recipeVersion));
+  const titles = new Set(existing.map(recipeTitleKey));
+  return candidates.filter((recipe) => {
+    const version = recipeVersion(recipe);
+    const title = recipeTitleKey(recipe);
+    if (versions.has(version) || titles.has(title)) return false;
+    versions.add(version);
+    titles.add(title);
+    return true;
+  });
+}
+
+export function recipesNeedingImages(recipes: Recipe[]) {
+  const seen = new Set<string>();
+  return recipes.filter((recipe) => {
+    const version = recipeVersion(recipe);
+    if (recipe.image || seen.has(version)) return false;
+    seen.add(version);
+    return true;
+  }).slice(0, 8);
+}
+
+export function matchingSavedRecipes(
+  saved: Recipe[],
+  inventory: InventoryCandidate[],
+  preferences: RecipePreferenceInput & { servings: number },
+  filters: RecipeFilterState,
+  reservations: ReservationRecord[],
+) {
+  return saved.filter((recipe) => {
+    if (recipe.source !== 'server-ai' || !recipeMatchesPreferences(recipe, {
+      ...preferences,
+      dietaryRestrictions: filters.dietaryPreference
+        ? [...preferences.dietaryRestrictions, filters.dietaryPreference]
+        : preferences.dietaryRestrictions,
+    })) return false;
+    if (filters.mealType !== 'Any' && recipe.meal !== filters.mealType) return false;
+    if (filters.cuisine.trim() && !recipe.cuisine.toLowerCase().includes(filters.cuisine.trim().toLowerCase())) return false;
+    if (filters.maxMinutes !== undefined && recipe.prep + recipe.cook > filters.maxMinutes) return false;
+    if (filters.equipment && !recipe.equipment.includes(filters.equipment)) return false;
+    if (filters.minHealthScore !== undefined && (recipe.healthScore.score === undefined || recipe.healthScore.score < filters.minHealthScore)) return false;
+    const readiness = recipeReadiness(recipe, inventory, preferences.allergies, preferences.servings, reservations);
+    return readiness.missingIngredients.length <= 2
+      && (!inventory.length || recipe.ingredients.some((item) => inventory.some((stock) => ingredientIdentitiesMatch(item.name, stock))));
+  });
 }
 
 export function mapDiscoveredRecipe(recipe: DiscoveredRecipe): Recipe {
@@ -125,12 +178,14 @@ export function buildRecipeDiscoveryRequest(
   filters: RecipeFilterState,
   variationSeed: string,
   excludeRecipeVersions: string[],
+  excludeRecipeTitles: string[] = [],
 ): {
   inventory: RecipeDiscoveryInventory[];
   preferences: RecipeDiscoveryPreferences;
   filters: RecipeDiscoveryFilters;
   variationSeed: string;
   excludeRecipeVersions: string[];
+  excludeRecipeTitles: string[];
 } {
   return {
     inventory,
@@ -145,5 +200,6 @@ export function buildRecipeDiscoveryRequest(
     },
     variationSeed,
     excludeRecipeVersions,
+    excludeRecipeTitles,
   };
 }

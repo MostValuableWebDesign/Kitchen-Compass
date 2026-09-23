@@ -23,6 +23,8 @@ import type {
   HealthStatus,
   RecipeDiscoveryRequest,
   RecipeDiscoveryResponse,
+  RecipeImagesRequest,
+  ResolveRecipeImages200,
   ScanAccessResponse,
   ScanAnalysisRequest,
   ScanAnalysisResponse
@@ -381,5 +383,93 @@ export const useDiscoverRecipes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDiscoverRecipesMutationOptions(options));
+    }
+
+export const getResolveRecipeImagesUrl = () => {
+
+
+
+
+  return `/api/recipes/images`
+}
+
+/**
+ * @summary Find a matching recipe photo or generate an illustrative image
+ */
+export const resolveRecipeImages = async (recipeImagesRequest: RecipeImagesRequest, options?: Parameters<typeof customFetch>[1]): Promise<ResolveRecipeImages200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ResolveRecipeImages200>(getResolveRecipeImagesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(recipeImagesRequest)
+  }
+);}
+
+
+
+
+
+export const getResolveRecipeImagesMutationKey = () => ['resolveRecipeImages'] as const;
+
+export const getResolveRecipeImagesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveRecipeImages>>, TError,ResolveRecipeImagesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveRecipeImages>>, TError,ResolveRecipeImagesMutationVariables, TContext> => {
+
+const mutationKey = getResolveRecipeImagesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveRecipeImages>>, ResolveRecipeImagesMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  resolveRecipeImages(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveRecipeImagesMutationResult = NonNullable<Awaited<ReturnType<typeof resolveRecipeImages>>>
+    export type ResolveRecipeImagesMutationBody = BodyType<RecipeImagesRequest>
+    export type ResolveRecipeImagesMutationError = ErrorType<void>
+    export type ResolveRecipeImagesMutationVariables = {data: BodyType<RecipeImagesRequest>}
+
+    /**
+ * @summary Find a matching recipe photo or generate an illustrative image
+ */
+export const useResolveRecipeImages = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveRecipeImages>>, TError,ResolveRecipeImagesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveRecipeImages>>,
+        TError,
+        ResolveRecipeImagesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResolveRecipeImagesMutationOptions(options));
     }
 

@@ -8,6 +8,7 @@ import {
   deductInventory,
   ingredientIdentitiesMatch,
   ingredientRowsMatch,
+  addKitchenIngredient,
   confirmedDateStatus,
   consumeLeftover,
   generatePlanIncrementally,
@@ -26,6 +27,24 @@ import {
 } from '../lib/kitchenLogic';
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
 import { calculateHealthScore, calculateRecipeNutrition } from '@workspace/recipe-calculations';
+import { groupKitchenIngredients, kitchenIngredientCategory } from '../lib/ingredientCategories';
+
+test('kitchen ingredients group by food category and sort by name', () => {
+  const items = ['Spinach', 'Ground beef', 'Apple', 'Carrots', 'Chicken breast', 'Black pepper', 'Rice', 'Salmon', 'Mystery item']
+    .map((name) => ({ name }));
+  const groups = groupKitchenIngredients(items);
+  assert.deepEqual(groups.map(({ category, items: rows }) => [category, rows.map((item) => item.name)]), [
+    ['Meats & poultry', ['Chicken breast', 'Ground beef']],
+    ['Seafood', ['Salmon']],
+    ['Vegetables', ['Carrots', 'Spinach']],
+    ['Fruits', ['Apple']],
+    ['Grains & bread', ['Rice']],
+    ['Herbs & spices', ['Black pepper']],
+    ['Other', ['Mystery item']],
+  ]);
+  assert.equal(kitchenIngredientCategory('Canned tomatoes'), 'Vegetables');
+  assert.equal(kitchenIngredientCategory('Olive oil'), 'Pantry & condiments');
+});
 
 const greenEggToast = {
   id: 'green-egg-toast',
@@ -177,6 +196,21 @@ test('duplicate protection matches name and location, allowing separate rows by 
   const refrigeratorEggs = { name: 'Eggs', location: 'Refrigerator' };
   assert.equal(ingredientRowsMatch(refrigeratorEggs, { name: 'eggs', location: 'Refrigerator' }), true);
   assert.equal(ingredientRowsMatch(refrigeratorEggs, { name: 'eggs', location: 'Pantry' }), false);
+});
+
+test('repeated recognition keeps one ingredient unless extra stock is explicitly confirmed', () => {
+  const eggs = { id: 'eggs-1', name: 'eggs', location: 'Refrigerator', status: 'fresh' as const, quantity: '2 eggs', quantityValue: 2, unit: 'egg', quantityKnown: true };
+  const repeated = { ...eggs, id: 'eggs-2', quantity: '2 eggs' };
+  assert.deepEqual(addKitchenIngredient([], eggs), [eggs]);
+  assert.deepEqual(addKitchenIngredient([eggs], repeated), [eggs]);
+  const extra = addKitchenIngredient([eggs], repeated, true);
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0]?.quantityValue, 4);
+  assert.equal(addKitchenIngredient([eggs], { ...eggs, id: 'pantry-eggs', location: 'Pantry' }).length, 2);
+  const used = { ...eggs, status: 'used' as const };
+  const reactivated = addKitchenIngredient([used], repeated);
+  assert.equal(reactivated.length, 1);
+  assert.equal(reactivated[0]?.status, 'fresh');
 });
 
 test('date warnings use only valid user-confirmed dates and never infer a warning', () => {

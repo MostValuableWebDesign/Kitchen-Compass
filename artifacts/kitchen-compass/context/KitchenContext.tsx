@@ -6,10 +6,10 @@ import {
   buildReservations,
   applyCookingTransaction,
   applyLeftoverCookingTransaction,
+  addKitchenIngredient,
   consumeLeftover,
   generatePlanIncrementally,
   inventoryAfterReservations,
-  ingredientRowsMatch,
   movePlannedMeals,
   normalizeIngredientName,
   normalizeConfirmedDate,
@@ -21,7 +21,7 @@ import {
 } from '@/lib/kitchenLogic';
 import type { Recipe } from '@/data/recipes';
 import { defaultPreferences, migrateV1KitchenState, parsePersistedKitchenState, type PersistedKitchenState } from '@/lib/kitchenPersistence';
-import { mergeRecipes, recipeVersion } from '@/lib/recipeDiscovery';
+import { novelRecipes, recipeVersion } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
 import { defaultReminderSettings, syncDailyReminder, type ReminderScheduler, type ReminderSettings } from '@/lib/reminders';
 import { SCAN_ACCESS_TOKEN_STORAGE_KEY } from '@/lib/scanAccessToken';
@@ -150,7 +150,7 @@ interface KitchenContextValue {
   hydrated: boolean;
   storageError: string | null;
   retryHydration: () => void;
-  addIngredient: (ingredient: Omit<Ingredient, 'id'>) => void;
+  addIngredient: (ingredient: Omit<Ingredient, 'id'>, options?: { additionalStock?: boolean }) => void;
   addPurchasedItems: (rows: PurchaseRow[]) => void;
   updateIngredient: (id: string, changes: Partial<Ingredient>) => void;
   removeIngredient: (id: string) => void;
@@ -335,42 +335,26 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
     hydrated,
     storageError,
     retryHydration: () => setLoadAttempt((attempt) => attempt + 1),
-    addIngredient: (ingredient) => {
+    addIngredient: (ingredient, options) => {
       setIngredients((current) => {
         const incoming = normalizeIngredient({ ...ingredient, id: createId() });
-        const existingIndex = current.findIndex((item) => ingredientRowsMatch(item, incoming));
-        if (existingIndex < 0) return [...current, incoming];
-        const existing = current[existingIndex];
-        const sameUnit = existing.quantityKnown && incoming.quantityKnown && existing.unit === incoming.unit;
-        if (sameUnit && existing.quantityValue !== undefined && incoming.quantityValue !== undefined) {
-          const next = [...current];
-          const total = existing.quantityValue + incoming.quantityValue;
-          next[existingIndex] = { ...existing, ...ingredient, normalizedName: incoming.normalizedName, quantityValue: total, quantity: `${total} ${incoming.unit}`, unit: incoming.unit, quantityKnown: true, confidence: ingredient.confidence ?? existing.confidence };
-          return next;
-        }
-        if (!existing.quantityKnown && !incoming.quantityKnown) {
-          const next = [...current];
-          next[existingIndex] = { ...existing, ...ingredient, normalizedName: incoming.normalizedName, confidence: ingredient.confidence ?? existing.confidence };
-          return next;
-        }
-        return [...current, incoming];
+        return addKitchenIngredient(current, incoming, options?.additionalStock === true);
       });
     },
     addPurchasedItems: (rows) => {
-      rows.filter((row) => row.confirmed && row.name.trim()).forEach((row) => {
-        const parsed = parseQuantityText(row.quantity);
-        if (!parsed.quantityKnown) return;
-        setIngredients((current) => [...current, normalizeIngredient({
+      setIngredients((current) => rows.reduce((items, row) => {
+        if (!row.confirmed || !row.name.trim() || !parseQuantityText(row.quantity).quantityKnown) return items;
+        return addKitchenIngredient(items, normalizeIngredient({
           id: createId(),
           name: row.name.trim(),
           quantity: row.quantity.trim(),
           location: row.location,
           status: 'fresh',
           confidence: 'confirmed',
-           source: 'purchase',
-           reviewedAt: new Date().toISOString(),
-        })]);
-      });
+          source: 'purchase',
+          reviewedAt: new Date().toISOString(),
+        }), true);
+      }, current));
     },
     updateIngredient: (id, changes) => setIngredients((current) => current.map((item) => {
       if (item.id !== id) return item;
@@ -426,7 +410,10 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       applyNativeTheme('light');
       setOnboardingComplete(false);
     },
-    saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => mergeRecipes(current, nextRecipes).filter((recipe) => recipe.source === 'server-ai')),
+    saveDiscoveredRecipes: (nextRecipes) => setSavedRecipes((current) => [
+      ...current,
+      ...novelRecipes(getAvailableRecipes(current), nextRecipes).filter((recipe) => recipe.source === 'server-ai'),
+    ]),
     setDiscoveredRecipeImage: (version, image, source) => setSavedRecipes((current) => current.map((recipe) =>
       recipeVersion(recipe) === version ? { ...recipe, image, imageSource: source } : recipe,
     )),

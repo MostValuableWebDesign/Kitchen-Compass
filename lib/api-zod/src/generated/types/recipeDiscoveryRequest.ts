@@ -21,4 +21,6 @@ export interface RecipeDiscoveryRequest {
   variationSeed: string;
   /** @maxItems 30 */
   excludeRecipeVersions: string[];
+  /** @maxItems 30 */
+  excludeRecipeTitles?: string[];
 }
