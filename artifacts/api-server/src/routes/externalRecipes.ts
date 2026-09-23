@@ -4,11 +4,12 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { sendScanError } from "../middleware/scanSecurity";
 
 const router: IRouter = Router();
-const MAX_PROVIDER_SEARCH_ANCHORS = 10;
+const MAX_PROVIDER_SEARCH_ANCHORS = 30;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
   searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
+  excludeRecipeIds: z.array(z.string().trim().min(1).max(80)).max(120).optional(),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -38,13 +39,13 @@ function ingredientIdentity(value: string) {
 
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
 
-function interleaveMealIds(searches: MealSummary[][], limit: number) {
+function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>()) {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; ids.length < limit && searches.some((results) => index < results.length); index += 1) {
     for (const results of searches) {
       const id = results[index]?.idMeal;
-      if (id && !seen.has(id)) { ids.push(id); seen.add(id); }
+      if (id && !seen.has(id) && !excludedIds.has(id)) { ids.push(id); seen.add(id); }
       if (ids.length >= limit) break;
     }
   }
@@ -122,7 +123,7 @@ router.post("/recipes/external", async (req, res) => {
       const response = await providerJson(`${base}/filter.php?i=${value}`);
       return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
     }));
-    const ids = interleaveMealIds(searches, 12);
+    const ids = interleaveMealIds(searches, 30, new Set(parsed.data.excludeRecipeIds ?? []));
     const details = await Promise.all(ids.map(async (id) => {
       const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
       return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
