@@ -27,6 +27,24 @@ import {
 } from '../lib/kitchenLogic';
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
 import { calculateHealthScore, calculateRecipeNutrition } from '@workspace/recipe-calculations';
+import { groupKitchenIngredients, kitchenIngredientCategory } from '../lib/ingredientCategories';
+
+test('kitchen ingredients group by food category and sort by name', () => {
+  const items = ['Spinach', 'Ground beef', 'Apple', 'Carrots', 'Chicken breast', 'Black pepper', 'Rice', 'Salmon', 'Mystery item']
+    .map((name) => ({ name }));
+  const groups = groupKitchenIngredients(items);
+  assert.deepEqual(groups.map(({ category, items: rows }) => [category, rows.map((item) => item.name)]), [
+    ['Meats & poultry', ['Chicken breast', 'Ground beef']],
+    ['Seafood', ['Salmon']],
+    ['Vegetables', ['Carrots', 'Spinach']],
+    ['Fruits', ['Apple']],
+    ['Grains & bread', ['Rice']],
+    ['Herbs & spices', ['Black pepper']],
+    ['Other', ['Mystery item']],
+  ]);
+  assert.equal(kitchenIngredientCategory('Canned tomatoes'), 'Vegetables');
+  assert.equal(kitchenIngredientCategory('Olive oil'), 'Pantry & condiments');
+});
 
 const greenEggToast = {
   id: 'green-egg-toast',

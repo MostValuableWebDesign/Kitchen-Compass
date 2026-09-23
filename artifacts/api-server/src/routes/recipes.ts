@@ -468,6 +468,15 @@ router.post("/recipes/discover", async (req, res) => {
       safeRecipes = filterSafeRecipes(aiRecipes);
     }
     if (!safeRecipes.length) {
+      if (aiRecipes.length && rejectionReasons.size
+        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version")) {
+        res.json(responseSchema.parse({
+          recipes: [],
+          source: "server-ai",
+          warning: "No new recipes were found. Your saved recipes are still available.",
+        }));
+        return;
+      }
       req.log.warn({
         candidateCount: aiRecipes.length,
         rejectionReasons: Object.fromEntries(rejectionReasons),

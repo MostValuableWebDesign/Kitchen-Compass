@@ -43,7 +43,7 @@ export function recipesNeedingImages(recipes: Recipe[]) {
   }).slice(0, 8);
 }
 
-export function reusableRecipes(
+export function matchingSavedRecipes(
   saved: Recipe[],
   inventory: InventoryCandidate[],
   preferences: RecipePreferenceInput & { servings: number },

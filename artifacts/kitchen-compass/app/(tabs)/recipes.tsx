@@ -8,7 +8,7 @@ import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, novelRecipes, recipeTitleKey, recipeVersion, reusableRecipes, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, novelRecipes, recipeTitleKey, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import type { Recipe } from '@/data/recipes';
@@ -159,17 +159,7 @@ export default function RecipesScreen() {
   }, [hydrated]);
 
   const discover = async (different = false) => {
-    if (!different) {
-      const reusable = reusableRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
-      if (reusable.length) {
-        setSearch('');
-        setResultFilter('All');
-        setDiscoveryError(false);
-        setDiscoveryWarning('Showing saved recipes that match your kitchen and filters. No new AI request was needed. Use shuffle for different ideas.');
-        void prepareImages(reusable.filter((recipe) => !recipe.image));
-        return;
-      }
-    }
+    const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations);
     const controller = new AbortController();
     if (!beginSearch('kitchen', controller)) return;
     setDiscoveryBusy(true);
@@ -191,10 +181,16 @@ export default function RecipesScreen() {
       if (searchRequest.current !== controller || controller.signal.aborted) return;
       const recipes = novelRecipes(availableRecipes, result.recipes.map(mapDiscoveredRecipe));
       if (recipes.length) saveDiscoveredRecipes(recipes);
-      setDiscoveryWarning(recipes.length ? result.warning : 'No new recipes were found. Your saved recipes are still available.');
+      setSearch('');
+      setResultFilter('All');
+      setDiscoveryWarning(recipes.length
+        ? `${recipes.length} new recipe${recipes.length === 1 ? '' : 's'} added.${result.warning ? ` ${result.warning}` : ''}`
+        : savedMatches.length
+          ? 'No new recipes were found. Your saved matching recipes are shown below.'
+          : result.warning ?? 'No new recipes were found. Your saved recipes are still available.');
       setDiscoveryBusy(false);
       finishSearch(controller, true);
-      void prepareImages(recipes);
+      void prepareImages([...recipes, ...savedMatches]);
     } catch {
       if (searchRequest.current !== controller) return;
       setDiscoveryError(true);

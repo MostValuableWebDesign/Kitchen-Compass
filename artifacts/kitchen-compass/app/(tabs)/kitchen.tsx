@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, Chip, IngredientRow, SectionTitle } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
+import { groupKitchenIngredients } from '@/lib/ingredientCategories';
 
 const filters = ['All', 'Refrigerator', 'Freezer', 'Pantry'] as const;
 const pantryStaples = ['Rice', 'Pasta', 'Olive oil', 'Canned tomatoes', 'Garlic', 'Salt', 'Black pepper'] as const;
@@ -19,6 +20,7 @@ export default function KitchenScreen() {
   const [search, setSearch] = useState('');
   const [selectedStaples, setSelectedStaples] = useState<string[]>([]);
   const filtered = useMemo(() => ingredients.filter((item) => (filter === 'All' || item.location === filter) && item.name.toLowerCase().includes(search.toLowerCase())), [filter, ingredients, search]);
+  const grouped = useMemo(() => groupKitchenIngredients(filtered), [filtered]);
   const addSelectedStaples = () => {
     if (!selectedStaples.length) return;
     Alert.alert(
@@ -60,7 +62,10 @@ export default function KitchenScreen() {
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>{filters.map((item) => <Chip key={item} label={item} selected={filter === item} onPress={() => setFilter(item)} />)}</ScrollView>
         <SectionTitle title={filter === 'All' ? 'Everything' : filter} action={ingredients.length ? 'Manage' : undefined} />
-        {filtered.length ? filtered.map((item) => <IngredientRow key={item.id} ingredient={item} onPress={() => router.push(`/inventory/${item.id}`)} onDelete={() => Alert.alert(`Remove ${item.name}?`, 'This only removes it from your confirmed kitchen inventory.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => removeIngredient(item.id) }])} />) : (
+        {grouped.length ? grouped.map(({ category, items }) => <View key={category} style={styles.categoryGroup}>
+          <View style={styles.categoryHeader}><Text accessibilityRole="header" style={[styles.categoryTitle, { color: colors.foreground }]}>{category}</Text><Text style={[styles.categoryCount, { color: colors.mutedForeground }]}>{items.length}</Text></View>
+          {items.map((item) => <IngredientRow key={item.id} ingredient={item} onPress={() => router.push(`/inventory/${item.id}`)} onDelete={() => Alert.alert(`Remove ${item.name}?`, 'This only removes it from your confirmed kitchen inventory.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => removeIngredient(item.id) }])} />)}
+        </View>) : (
           <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name="basket-outline" size={34} color={colors.primary} /><Text style={[styles.emptyTitle, { color: colors.foreground }]}>{ingredients.length ? 'No matches' : 'Your kitchen is waiting'}</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>{ingredients.length ? 'Try another search or storage filter.' : 'Scan a shelf or add an ingredient manually to start getting useful suggestions.'}</Text><Pressable onPress={() => router.push('/scan')} style={({ pressed }) => [styles.emptyButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.emptyButtonText, { color: colors.primaryForeground }]}>Add ingredients</Text></Pressable></View>
         )}
         <View style={[styles.staplesCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -103,6 +108,10 @@ const styles = StyleSheet.create({
   searchBar: { height: 48, borderRadius: 15, borderWidth: 1, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 13 },
   searchInput: { flex: 1, fontSize: 14, fontFamily: 'Inter_400Regular' },
   filterRow: { gap: 8, paddingBottom: 21 },
+  categoryGroup: { marginBottom: 18 },
+  categoryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 5, paddingBottom: 3 },
+  categoryTitle: { fontSize: 15, fontFamily: 'Inter_700Bold' },
+  categoryCount: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   empty: { borderRadius: 22, borderWidth: 1, alignItems: 'center', padding: 28, marginTop: 8 },
   emptyTitle: { fontSize: 17, fontFamily: 'Inter_700Bold', marginTop: 12 },
   emptyBody: { fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 7, maxWidth: 280 },
