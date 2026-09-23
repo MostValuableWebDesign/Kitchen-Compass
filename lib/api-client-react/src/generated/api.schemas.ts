@@ -195,6 +195,14 @@ export interface RecipeDiscoveryFilters {
   minHealthScore?: number;
 }
 
+export type RecipeDiscoveryRequestAudience = typeof RecipeDiscoveryRequestAudience[keyof typeof RecipeDiscoveryRequestAudience];
+
+
+export const RecipeDiscoveryRequestAudience = {
+  general: 'general',
+  kids: 'kids',
+} as const;
+
 export interface RecipeDiscoveryRequest {
   /** @maxItems 100 */
   inventory: RecipeDiscoveryInventory[];
@@ -211,6 +219,7 @@ export interface RecipeDiscoveryRequest {
   excludeRecipeTitles?: string[];
   /** @maxItems 200 */
   excludeArchivedRecipeTitles?: string[];
+  audience?: RecipeDiscoveryRequestAudience;
 }
 
 export interface RecipeIngredient {
