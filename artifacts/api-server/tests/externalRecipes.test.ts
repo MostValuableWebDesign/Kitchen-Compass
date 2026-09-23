@@ -94,3 +94,48 @@ test("published recipes use up to thirty provider search anchors", async () => {
     else process.env.THEMEALDB_API_KEY = oldKey;
   }
 });
+
+test("published recipes ignore missing herbs and spices, reject more than five other missing ingredients, and sort by matches", async () => {
+  const oldKey = process.env.THEMEALDB_API_KEY;
+  const originalFetchForFilteringTest = globalThis.fetch;
+  process.env.THEMEALDB_API_KEY = "test-key";
+  globalThis.fetch = async (input) => {
+    const target = String(input);
+    if (target.includes("themealdb.com") && target.includes("filter.php")) {
+      return new Response(JSON.stringify({ meals: [{ idMeal: "few-matches" }, { idMeal: "many-matches" }, { idMeal: "too-many-missing" }] }), { status: 200 });
+    }
+    if (target.includes("themealdb.com") && target.includes("lookup.php")) {
+      const id = new URL(target).searchParams.get("i");
+      const ingredientNames = id === "many-matches"
+        ? ["Chicken", "Rice", "Tomato", "Basil", "Paprika", "Carrot", "Onion", "Garlic", "Lemon", "Celery"]
+        : id === "few-matches"
+          ? ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon"]
+          : ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon", "Celery"];
+      const meal = {
+        idMeal: id ?? "",
+        strMeal: id ?? "",
+        strInstructions: "Cook until done.",
+        ...Object.fromEntries(ingredientNames.map((name, index) => [`strIngredient${index + 1}`, name])),
+      };
+      return new Response(JSON.stringify({ meals: [meal] }), { status: 200 });
+    }
+    return originalFetchForFilteringTest(input);
+  };
+  try {
+    const response = await originalFetchForFilteringTest(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Chicken", "Rice", "Tomato"], searchAnchors: ["Chicken"], allergies: [] }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { recipes: Array<{ id: string; matchedIngredients: string[]; missingIngredients: string[] }> };
+    assert.deepEqual(payload.recipes.map((recipe) => recipe.id), ["many-matches", "few-matches"]);
+    assert.deepEqual(payload.recipes[0]?.missingIngredients, ["Carrot", "Onion", "Garlic", "Lemon", "Celery"]);
+    assert.equal(payload.recipes[0]?.missingIngredients.includes("Basil"), false);
+    assert.equal(payload.recipes[0]?.missingIngredients.includes("Paprika"), false);
+  } finally {
+    globalThis.fetch = originalFetchForFilteringTest;
+    if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
+    else process.env.THEMEALDB_API_KEY = oldKey;
+  }
+});
