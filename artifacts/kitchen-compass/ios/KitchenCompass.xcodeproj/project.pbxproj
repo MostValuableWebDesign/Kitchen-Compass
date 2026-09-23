@@ -267,7 +267,6 @@
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
 				TARGETED_DEVICE_FAMILY = "1";
-				CODE_SIGN_ENTITLEMENTS = KitchenCompass/KitchenCompass.entitlements;
 			};
 			name = Debug;
 		};
@@ -296,7 +295,6 @@
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
 				TARGETED_DEVICE_FAMILY = "1";
-				CODE_SIGN_ENTITLEMENTS = KitchenCompass/KitchenCompass.entitlements;
 			};
 			name = Release;
 		};
