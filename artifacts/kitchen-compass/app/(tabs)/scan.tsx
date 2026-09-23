@@ -13,6 +13,12 @@ import { normalizeIngredientName } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 
 const MAX_SCAN_PHOTOS = 10;
+const bundledTestPhotoSources = [
+  require('../../assets/test-scan-photos/pantry-shelf.jpeg'),
+  require('../../assets/test-scan-photos/pantry-lower-shelf.jpeg'),
+  require('../../assets/test-scan-photos/refrigerator.jpeg'),
+  require('../../assets/test-scan-photos/spice-cabinet.jpeg'),
+] as const;
 
 export default function ScanScreen() {
   const colors = useColors();
@@ -106,6 +112,26 @@ export default function ScanScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: false, allowsMultipleSelection: true, selectionLimit: MAX_SCAN_PHOTOS, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
     if (!result.canceled && result.assets.length) void reviewPhotos(result.assets);
+  };
+  const useBundledTestPhotos = () => {
+    try {
+      const assets = bundledTestPhotoSources.map((source, index) => {
+        const resolved = Image.resolveAssetSource(source);
+        if (!resolved?.uri) throw new Error('Bundled test photo has no URI.');
+        return {
+          assetId: `bundled-test-photo-${index + 1}`,
+          fileName: `kitchen-compass-test-${index + 1}.jpeg`,
+          height: resolved.height ?? 1024,
+          mimeType: 'image/jpeg',
+          type: 'image' as const,
+          uri: resolved.uri,
+          width: resolved.width ?? 1024,
+        };
+      });
+      void reviewPhotos(assets);
+    } catch {
+      Alert.alert('Test photos unavailable', 'The bundled recognition photos could not be loaded.');
+    }
   };
   const updateSuggestion = (suggestionId: string, changes: Partial<IngredientSuggestion>) => {
     setSuggestions((current) => current.map((item) => item.suggestionId === suggestionId ? { ...item, ...changes } : item));
@@ -215,6 +241,7 @@ export default function ScanScreen() {
             <SectionTitle title="Choose how to add" />
             <Pressable testID="take-photo" onPress={takePhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            <Pressable testID="use-test-photos" onPress={useBundledTestPhotos} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Ionicons name="flask-outline" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Use saved test photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Analyze the four bundled kitchen images</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             <Pressable testID="manual-entry" onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Enter a confirmed ingredient</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
              {pendingCameraAssets.length ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
                <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Camera session · {pendingCameraAssets.length} photo{pendingCameraAssets.length === 1 ? '' : 's'}</Text>
