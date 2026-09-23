@@ -9,12 +9,13 @@ import { supportedEquipmentOptions } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, recipeReadiness, recipeMatchesPreferences } from '@/lib/kitchenLogic';
 import { getAvailableRecipes, lookupPlannedRecipe } from '@/lib/recipeLookup';
+import { isArchivedRecipe } from '@/lib/recipeArchive';
 
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, preferences, plan, reservations, savedRecipes, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData, theme, setTheme } = useKitchen();
+  const { ingredients, preferences, plan, reservations, savedRecipes, archivedRecipes, setPreferences, reminders, setReminderSettings, clearSavedScanPhotos, eraseAllData, theme, setTheme } = useKitchen();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const plannedToday = plan.filter((meal) => meal.day === today);
@@ -76,7 +77,7 @@ export default function TodayScreen() {
 
         <SectionTitle title="Quick inspiration" action="See all" onPress={() => router.push('/recipes')} />
          {getAvailableRecipes(savedRecipes)
-           .filter((recipe) => recipeMatchesPreferences(recipe, preferences))
+           .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes) && recipeMatchesPreferences(recipe, preferences))
            .slice(0, 2)
            .map((recipe) => (
              <RecipeCard

@@ -96,6 +96,8 @@ export const discoverRecipesBodyExcludeRecipeVersionsMax = 30;
 
 export const discoverRecipesBodyExcludeRecipeTitlesMax = 30;
 
+export const discoverRecipesBodyExcludeArchivedRecipeTitlesMax = 200;
+
 
 
 export const DiscoverRecipesBody = zod.object({
@@ -128,7 +130,8 @@ export const DiscoverRecipesBody = zod.object({
 }),
   "variationSeed": zod.string().min(1).max(discoverRecipesBodyVariationSeedMax),
   "excludeRecipeVersions": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeVersionsMax),
-  "excludeRecipeTitles": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeTitlesMax).optional()
+  "excludeRecipeTitles": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeTitlesMax).optional(),
+  "excludeArchivedRecipeTitles": zod.array(zod.string()).max(discoverRecipesBodyExcludeArchivedRecipeTitlesMax).optional()
 })
 
 

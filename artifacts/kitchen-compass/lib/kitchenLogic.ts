@@ -482,12 +482,13 @@ export function generatePlanIncrementally<T extends PlanRecipeShape>(
   preferences: RecipePreferenceInput,
   targetServings: number,
   leftovers: Array<{ id: string; portions: number }> = [],
+  reservationRecipes: T[] = candidates,
 ) {
   const next = replacePlanSlots(current, requestedDays.flatMap((day) => requestedMeals.map((meal) => ({ day, meal: meal as MealSlot['meal'] }))), []);
   for (const day of requestedDays) {
     for (const meal of requestedMeals) {
       const usedRecipeIds = next.map((item) => item.recipeId);
-      const baseReservations = buildReservations(next, candidates, inventory, leftovers).reservations;
+      const baseReservations = buildReservations(next, reservationRecipes, inventory, leftovers).reservations;
       const remainingInventory = inventoryAfterReservations(inventory, baseReservations);
       const ranked = rankPlanRecipes(
         candidates.filter((recipe) => meal === 'Breakfast' ? recipe.meal === 'Breakfast' : recipe.meal !== 'Breakfast'),

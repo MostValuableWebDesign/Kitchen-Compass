@@ -214,6 +214,14 @@ test("recipe discovery discards existing titles and repeated titles in one respo
     const excludedPayload = await excluded.json() as { recipes: unknown[]; warning?: string };
     assert.deepEqual(excludedPayload.recipes, []);
     assert.match(excludedPayload.warning ?? "", /No new recipes/);
+
+    const archived = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify({ ...requestBody(), excludeArchivedRecipeTitles: [first.title] }),
+    });
+    assert.equal(archived.status, 200);
+    assert.deepEqual((await archived.json() as { recipes: unknown[] }).recipes, []);
   } finally {
     globalThis.fetch = original;
   }

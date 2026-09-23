@@ -1,7 +1,7 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Chip } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
@@ -10,6 +10,7 @@ import { scaledIngredient, scaledNutrition } from '@/data/recipes';
 import { useColors } from '@/hooks/useColors';
 import { ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
 import { recipeVersion } from '@/lib/recipeDiscovery';
+import { archiveKey } from '@/lib/recipeArchive';
 import { lookupRecipe } from '@/lib/recipeLookup';
 
 export default function RecipeDetailScreen() {
@@ -17,7 +18,7 @@ export default function RecipeDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, plannedMealId: requestedPlannedMealId } = useLocalSearchParams<{ id: string; plannedMealId?: string }>();
-  const { ingredients, preferences, reservations, plan, savedRecipes, favoriteRecipeVersions, toggleFavoriteRecipe } = useKitchen();
+  const { ingredients, preferences, reservations, plan, savedRecipes, archivedRecipes, favoriteRecipeVersions, toggleFavoriteRecipe, archiveRecipe, restoreRecipe } = useKitchen();
   const requestedId = Array.isArray(requestedPlannedMealId) ? requestedPlannedMealId[0] : requestedPlannedMealId;
   const plannedOccurrences = plan.filter((meal) => meal.recipeId === id);
   const plannedMeal = plannedOccurrences.find((meal) => meal.id === requestedId)
@@ -41,6 +42,14 @@ export default function RecipeDetailScreen() {
   const servingTarget = plannedMeal?.servings ?? preferences.servings;
   const safety = recipeReadiness(recipe, ingredients, preferences.allergies, servingTarget, reservations, plannedMeal?.id);
   const nutrition = scaledNutrition(recipe, servingTarget);
+  const archivedEntry = archivedRecipes.find((entry) => entry.key === archiveKey(recipe.title));
+  const manageArchive = () => {
+    if (archivedEntry) { restoreRecipe(archivedEntry.key); return; }
+    Alert.alert(`Archive ${recipe.title}?`, 'This hides the recipe from suggestions and future searches. Existing planned meals and the saved image stay available. You can restore it from Archived recipes.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Archive recipe', onPress: () => { archiveRecipe(recipe); router.back(); } },
+    ]);
+  };
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 35 }} showsVerticalScrollIndicator={false}>
@@ -61,6 +70,7 @@ export default function RecipeDetailScreen() {
              {recipe.methods?.length ? <><Text style={[styles.section, { color: colors.foreground }]}>Complete alternatives</Text><View style={[styles.alternativesCard, { backgroundColor: colors.secondary }]}>{recipe.methods.map((method) => <View key={method.id} style={styles.alternativeLine}><Text style={[styles.alternativeTitle, { color: colors.secondaryForeground }]}>{method.title}</Text><Text style={[styles.alternativeBody, { color: colors.secondaryForeground }]}>{method.description} · {method.steps.length} complete steps · {method.equipment.join(', ')}</Text></View>)}</View></> : null}
              <Text style={[styles.section, { color: colors.foreground }]}>Serving and storage</Text><View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{recipe.servingSuggestions?.map((item) => <Text key={item} style={[styles.infoText, { color: colors.foreground }]}>• {item}</Text>)}<Text style={[styles.infoLabel, { color: colors.foreground }]}>Storage</Text><Text style={[styles.infoText, { color: colors.mutedForeground }]}>{recipe.storageInstructions}</Text><Text style={[styles.infoLabel, { color: colors.foreground }]}>Reheating</Text><Text style={[styles.infoText, { color: colors.mutedForeground }]}>{recipe.reheatingInstructions}</Text>{recipe.commonMistakes?.length ? <><Text style={[styles.infoLabel, { color: colors.foreground }]}>Common mistakes</Text>{recipe.commonMistakes.map((item) => <Text key={item} style={[styles.infoText, { color: colors.mutedForeground }]}>• {item}</Text>)}</> : null}</View>
             <Text style={[styles.versionNote, { color: colors.mutedForeground }]}>Recipe version {recipeVersion(recipe)} · {recipe.source === 'server-ai' ? 'server-validated discovery' : 'curated example'}</Text>
+            <Pressable testID="manage-recipe-archive" onPress={manageArchive} style={[styles.archiveAction, { borderColor: colors.border }]}><Feather name={archivedEntry ? 'rotate-ccw' : 'archive'} size={16} color={colors.primary} /><Text style={[styles.archiveActionText, { color: colors.primary }]}>{archivedEntry ? 'Restore to recipes' : 'Archive and stop suggesting'}</Text></Pressable>
            {plannedOccurrences.length ? <View style={[styles.occurrenceCard, { backgroundColor: colors.secondary }]}><Text style={[styles.occurrenceTitle, { color: colors.secondaryForeground }]}>Choose the planned meal to cook</Text><View style={styles.chips}>{plannedOccurrences.map((meal) => <Chip key={meal.id} label={`${meal.day} · ${meal.meal}`} selected={plannedMeal?.id === meal.id} onPress={() => router.setParams({ plannedMealId: meal.id })} />)}</View><Text style={[styles.occurrenceNote, { color: colors.secondaryForeground }]}>{plannedOccurrences.length > 1 && !plannedMeal ? 'This recipe is planned more than once. Select the exact occurrence before cooking.' : 'This selection controls which reservation is used and deducted.'}</Text></View> : null}
             <Pressable disabled={!safety.ready || !eligible || !plannedMeal} testID="start-cooking" onPress={() => plannedMeal && router.push(`/cook/${recipe.id}?plannedMealId=${plannedMeal.id}`)} style={({ pressed }) => [styles.cookButton, { backgroundColor: safety.ready && eligible && plannedMeal ? colors.primary : colors.muted }, pressed && styles.pressed]}><Ionicons name="flame-outline" size={21} color={safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.cookText, { color: safety.ready && eligible && plannedMeal ? colors.primaryForeground : colors.mutedForeground }]}>{safety.allergenConflict ? 'Excluded for allergy' : safety.allergenIncomplete ? 'Allergen review needed' : !eligible ? 'Excluded by preferences' : !plannedMeal ? 'Plan this meal first' : 'Start cooking'}</Text></Pressable>
            {safety.missingIngredients.length ? <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>Missing: {safety.missingIngredients.join(', ')}.</Text> : null}
@@ -83,6 +93,8 @@ const styles = StyleSheet.create({
   placeholderText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
   backButton: { position: 'absolute', top: 56, left: 18, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 20, paddingTop: 22 },
+  archiveAction: { minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12 },
+  archiveActionText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   imageCredit: { fontSize: 11, marginBottom: 8 },
   detailHeader: { flexDirection: 'row', gap: 15 },
   healthScoreRow: { minHeight: 56, borderRadius: 16, marginTop: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },

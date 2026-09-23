@@ -7,6 +7,8 @@ const router: IRouter = Router();
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
+  excludedRecipeIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
+  excludedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -36,13 +38,18 @@ function ingredientIdentity(value: string) {
 
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
 
-function interleaveMealIds(searches: MealSummary[][], limit: number) {
+function titleKey(title: string) {
+  return title.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>(), excludedTitles = new Set<string>()) {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; ids.length < limit && searches.some((results) => index < results.length); index += 1) {
     for (const results of searches) {
       const id = results[index]?.idMeal;
-      if (id && !seen.has(id)) { ids.push(id); seen.add(id); }
+      if (id && !seen.has(id) && !excludedIds.has(id)
+        && (!results[index]?.strMeal || !excludedTitles.has(titleKey(results[index].strMeal!)))) { ids.push(id); seen.add(id); }
       if (ids.length >= limit) break;
     }
   }
@@ -99,6 +106,8 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const pantry = [...new Set(parsed.data.ingredients.map((item) => item.trim()))];
+  const excludedIds = new Set(parsed.data.excludedRecipeIds);
+  const excludedTitles = new Set(parsed.data.excludedRecipeTitles.map(titleKey));
   const searchIngredients = pantry.filter((item) => !commonSeasonings.has(ingredientIdentity(item)));
   const base = `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}`;
   try {
@@ -107,12 +116,13 @@ router.post("/recipes/external", async (req, res) => {
       const response = await providerJson(`${base}/filter.php?i=${value}`);
       return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
     }));
-    const ids = interleaveMealIds(searches, 12);
+    const ids = interleaveMealIds(searches, 12, excludedIds, excludedTitles);
     const details = await Promise.all(ids.map(async (id) => {
       const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
       return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
     }));
     const recipes = details.flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
+      .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
       .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length);
     res.json({ recipes, provider: "TheMealDB", safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label." });
   } catch {

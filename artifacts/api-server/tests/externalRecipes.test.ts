@@ -48,6 +48,10 @@ test("published recipes show source attribution and never assert allergy safety"
     assert.equal(payload.recipes[0]?.safetyVerified, false);
     assert.deepEqual(payload.recipes[0]?.matchedIngredients, ["Egg"]);
     assert.deepEqual(payload.recipes[0]?.missingIngredients, ["Tomato"]);
+
+    const excluded = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Egg"], allergies: ["peanut"], excludedRecipeIds: ["1"], excludedRecipeTitles: ["Egg and tomato bowl"] }) });
+    assert.equal(excluded.status, 200);
+    assert.deepEqual((await excluded.json() as { recipes: unknown[] }).recipes, []);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;

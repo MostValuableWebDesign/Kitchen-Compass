@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
+import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, parseArchivedRecipes, restoreArchivedRecipe } from '../lib/recipeArchive';
 
 const apiRecipe = {
   id: 'discovered-stable',
@@ -90,4 +91,27 @@ test('offline cache accepts only validated recipe-shaped entries', () => {
   const withImage = { ...recipe, image: 'file:///recipe-photo.jpg', imageSource: 'AI-generated' as const };
   assert.equal(parseCachedRecipes([withImage])[0]?.image, withImage.image);
   assert.equal(parseCachedRecipes(undefined).length, 0);
+});
+
+test('archiving hides a recipe without deleting its saved version or image and restores it later', () => {
+  const recipe = { ...mapDiscoveredRecipe(apiRecipe), image: 'file:///saved.jpg', imageSource: 'AI-generated' as const };
+  const archived = archiveLocalRecipe([], recipe, '2026-09-23T00:00:00.000Z');
+  assert.equal(isArchivedRecipe(recipe, archived), true);
+  assert.equal(isArchivedRecipe({ ...recipe, recipeVersion: 'another-version' }, archived), true);
+  assert.equal(archived[0]?.recipeVersion, recipe.recipeVersion);
+  assert.equal(recipe.image, 'file:///saved.jpg');
+  assert.equal(parseArchivedRecipes(JSON.parse(JSON.stringify(archived)))[0]?.key, archived[0]?.key);
+  assert.equal(isArchivedRecipe(recipe, restoreArchivedRecipe(archived, archived[0]!.key)), false);
+});
+
+test('published recipes can be archived and restored from a saved snapshot', () => {
+  const published = {
+    id: 'meal-1', title: 'Egg and greens bowl', provider: 'TheMealDB' as const,
+    sourceUrl: 'https://example.com/meal', ingredients: [{ name: 'egg', measure: '2' }],
+    instructions: 'Cook.', matchedIngredients: ['egg'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], published);
+  assert.equal(isArchivedPublished(published, archived), true);
+  assert.equal(parseArchivedRecipes(JSON.parse(JSON.stringify(archived)))[0]?.externalRecipe?.sourceUrl, published.sourceUrl);
+  assert.equal(isArchivedPublished(published, restoreArchivedRecipe(archived, archived[0]!.key)), false);
 });
