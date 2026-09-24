@@ -1,10 +1,11 @@
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import type { Ingredient } from '@/context/KitchenContext';
 import type { Recipe } from '@/data/recipes';
 import { confirmedDateStatus } from '@/lib/kitchenLogic';
+import { foodIconForIngredient, type FoodIconTone } from '@/lib/foodIcons';
 
 export function AppHeader({ eyebrow, title, action, onAction }: { eyebrow?: string; title: string; action?: string; onAction?: () => void }) {
   const colors = useColors();
@@ -80,18 +81,46 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
   );
 }
 
+export function FoodIdentityIcon({ name, size = 38 }: { name: string; size?: number }) {
+  const colors = useColors();
+  const visual = foodIconForIngredient(name);
+  const tones: Record<FoodIconTone, { color: string; backgroundColor: string }> = {
+    leaf: { color: colors.primary, backgroundColor: colors.secondary },
+    citrus: { color: colors.accentForeground, backgroundColor: colors.accent },
+    berry: { color: colors.destructive, backgroundColor: colors.muted },
+    ocean: { color: colors.secondaryForeground, backgroundColor: colors.secondary },
+    grain: { color: colors.accentForeground, backgroundColor: colors.secondary },
+    neutral: { color: colors.mutedForeground, backgroundColor: colors.muted },
+  };
+  const tone = tones[visual.tone];
+
+  return (
+    <View
+      accessible={false}
+      style={[
+        styles.ingredientIcon,
+        {
+          width: size,
+          height: size,
+          borderRadius: Math.round(size * 0.34),
+          backgroundColor: tone.backgroundColor,
+        },
+      ]}
+    >
+      <MaterialCommunityIcons name={visual.icon} size={Math.round(size * 0.52)} color={tone.color} />
+    </View>
+  );
+}
+
 export function IngredientRow({ ingredient, onPress, onDelete }: { ingredient: Ingredient; onPress?: () => void; onDelete?: () => void }) {
   const colors = useColors();
-  const locationIcon = ingredient.location === 'Refrigerator' ? 'thermometer' : ingredient.location === 'Freezer' ? 'cloud-snow' : 'archive';
   const dateStatus = ingredient.dateConfirmed ? confirmedDateStatus(ingredient.expires) : null;
   const quantityLabel = ingredient.quantityKnown && ingredient.quantityValue !== undefined && ingredient.unit
     ? `${ingredient.quantityValue} ${ingredient.unit}`
     : 'Quantity unknown';
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.ingredientRow, { borderBottomColor: colors.border }, pressed && styles.pressed]}>
-      <View style={[styles.ingredientIcon, { backgroundColor: ingredient.status === 'low' ? colors.accent : colors.secondary }]}>
-        <Feather name={locationIcon as 'archive'} size={17} color={ingredient.status === 'low' ? colors.accentForeground : colors.primary} />
-      </View>
+      <FoodIdentityIcon name={ingredient.name} />
       <View style={{ flex: 1 }}>
         <View style={styles.recipeRow}>
           <Text style={[styles.ingredientName, { color: colors.foreground }]}>{ingredient.name}</Text>

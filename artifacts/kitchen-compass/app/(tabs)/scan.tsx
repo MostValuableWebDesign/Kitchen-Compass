@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-client-react';
-import { Chip, SectionTitle } from '@/components/KitchenUI';
+import { Chip, FoodIdentityIcon, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { canCombineIngredientQuantities, hasInvalidMinimumQuantity, hasInvalidMinimumQuantityValue, normalizeIngredientName, parseQuantityText, quantityWithDefaultUnit } from '@/lib/kitchenLogic';
@@ -558,7 +558,10 @@ export default function ScanScreen() {
                return <View key={suggestion.suggestionId} style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                  <View style={styles.suggestionHeader}><Text style={[styles.suggestionLabel, { color: colors.mutedForeground }]}>REVIEW SUGGESTION</Text><Pressable accessibilityLabel={`Remove ${suggestion.displayName}`} onPress={() => removeSuggestion(suggestion.suggestionId)}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable></View>
                  {sourcePhotoUri ? <View style={styles.sourcePhotoRow}><Image source={{ uri: sourcePhotoUri }} style={styles.sourceThumbnail} /><Text style={[styles.sourcePhotoLabel, { color: colors.mutedForeground }]}>From photo {sourcePhotoIndex + 1}</Text></View> : null}
-                 <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
+                  <View style={styles.nameInputRow}>
+                    <FoodIdentityIcon name={suggestion.displayName} size={42} />
+                    <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.nameInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
+                  </View>
                   <View style={styles.quantityRow}><TextInput value={suggestion.quantityKnown && suggestion.quantity !== undefined ? String(suggestion.quantity) : '1'} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { quantity: value ? Number(value) : undefined, quantityKnown: Boolean(value) && Number.isFinite(Number(value)) })} keyboardType="decimal-pad" placeholder="Qty" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /><TextInput value={suggestion.unit ?? defaultUnit} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { unit: value, quantityKnown: Boolean(value.trim()) && suggestion.quantity !== undefined })} placeholder="unit" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} /></View>
                  <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={suggestion.storageLocation === item} onPress={() => updateSuggestion(suggestion.suggestionId, { storageLocation: item })} />)}</View>
                   <Text style={[styles.confidenceText, { color: colors.mutedForeground }]}>{Math.round(suggestion.confidence * 100)}% confidence · {suggestion.quantityKnown ? 'quantity supported by photo' : `defaults to 1 ${defaultUnit}`}</Text>
@@ -574,7 +577,10 @@ export default function ScanScreen() {
                </View>;
              })}
             <Text style={[styles.label, { color: colors.foreground }]}>Ingredient name</Text>
-            <TextInput autoFocus value={name} onChangeText={setName} placeholder="e.g. spinach" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             <View style={styles.nameInputRow}>
+               <FoodIdentityIcon name={name} size={44} />
+               <TextInput testID="ingredient-name" autoFocus value={name} onChangeText={setName} placeholder="e.g. spinach" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.nameInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+             </View>
              <Text style={[styles.label, { color: colors.foreground }]}>Quantity</Text>
              <TextInput testID="manual-quantity" value={displayedManualQuantity} onChangeText={(value) => { setQuantity(value); setQuantityEdited(true); }} placeholder="e.g. 1 ea" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
@@ -666,6 +672,8 @@ const styles = StyleSheet.create({
   reviewTitle: { fontSize: 22, fontFamily: 'Inter_700Bold' },
   reviewBody: { fontSize: 13, lineHeight: 19, marginTop: 5 },
   label: { fontSize: 13, fontFamily: 'Inter_700Bold', marginTop: 12, marginBottom: 8 },
+  nameInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nameInput: { flex: 1, minWidth: 0 },
   input: { height: 50, borderWidth: 1, borderRadius: 15, paddingHorizontal: 14, fontSize: 14, fontFamily: 'Inter_400Regular' },
   chips: { flexDirection: 'row', gap: 7, flexWrap: 'wrap' },
   uncertainNote: { flexDirection: 'row', gap: 9, padding: 13, borderRadius: 15, marginTop: 19 },

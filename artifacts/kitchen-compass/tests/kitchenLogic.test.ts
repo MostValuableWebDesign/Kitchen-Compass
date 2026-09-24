@@ -31,6 +31,7 @@ import {
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
 import { calculateHealthScore, calculateRecipeNutrition } from '@workspace/recipe-calculations';
 import { groupKitchenIngredients, kitchenIngredientCategory } from '../lib/ingredientCategories';
+import { foodIconForIngredient } from '../lib/foodIcons';
 
 test('new inventory quantities require at least one unit', () => {
   assert.equal(hasInvalidMinimumQuantity('0 bag'), true);
@@ -57,6 +58,14 @@ test('kitchen ingredients group by food category and sort by name', () => {
   ]);
   assert.equal(kitchenIngredientCategory('Canned tomatoes'), 'Vegetables');
   assert.equal(kitchenIngredientCategory('Olive oil'), 'Pantry & condiments');
+});
+
+test('food icons match ingredient names and use a food fallback for unknown items', () => {
+  assert.deepEqual(foodIconForIngredient('Chicken breast'), { icon: 'food-drumstick', tone: 'berry' });
+  assert.deepEqual(foodIconForIngredient('Canned tomatoes'), { icon: 'leaf', tone: 'leaf' });
+  assert.deepEqual(foodIconForIngredient('Lemons'), { icon: 'fruit-citrus', tone: 'citrus' });
+  assert.deepEqual(foodIconForIngredient('Rice'), { icon: 'rice', tone: 'grain' });
+  assert.deepEqual(foodIconForIngredient('Mystery ingredient'), { icon: 'food-variant', tone: 'neutral' });
 });
 
 const greenEggToast = {

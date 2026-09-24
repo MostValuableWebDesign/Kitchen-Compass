@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Chip } from '@/components/KitchenUI';
+import { Chip, FoodIdentityIcon } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen, type Ingredient } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { hasInvalidMinimumQuantity, normalizeConfirmedDate } from '@/lib/kitchenLogic';
@@ -96,7 +96,10 @@ function InventoryEditForm({ ingredient }: { ingredient: Ingredient }) {
         {ingredient.barcode ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>Barcode: {ingredient.barcode}{ingredient.brand ? ` · ${ingredient.brand}` : ''}</Text> : null}
 
         <Text style={[styles.label, { color: colors.foreground }]}>Name</Text>
-        <TextInput testID="inventory-name" value={name} onChangeText={setName} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+        <View style={styles.nameInputRow}>
+          <FoodIdentityIcon name={name} size={44} />
+          <TextInput testID="inventory-name" value={name} onChangeText={setName} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.nameInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+        </View>
 
         <Text style={[styles.label, { color: colors.foreground }]}>Quantity</Text>
         <View style={styles.quantityRow}>
@@ -135,6 +138,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontFamily: 'Inter_700Bold' },
   subtitle: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
   label: { fontSize: 13, fontFamily: 'Inter_700Bold', marginTop: 15, marginBottom: 8 },
+  nameInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nameInput: { flex: 1, minWidth: 0 },
   input: { height: 50, borderRadius: 15, borderWidth: 1, paddingHorizontal: 14, fontSize: 14, fontFamily: 'Inter_400Regular' },
   quantityRow: { flexDirection: 'row', gap: 8 },
   quantityInput: { flex: 1 },
