@@ -37,6 +37,8 @@ export default function ScanScreen() {
   const { addIngredient, ingredients, updateIngredient, spaceScans, saveSpaceScan, deleteSpaceScan } = useKitchen();
   const [pendingModelUri, setPendingModelUri] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const [spaceOptionsOpen, setSpaceOptionsOpen] = useState(false);
+  const [spaceLocation, setSpaceLocation] = useState<StorageLocation>('Refrigerator');
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeCameraEnabled, setBarcodeCameraEnabled] = useState(false);
   const [barcodeBusy, setBarcodeBusy] = useState(false);
@@ -151,7 +153,7 @@ export default function ScanScreen() {
       analysisGuard.current = false;
     }
   };
-  const scanSpace = async () => {
+  const scanSpace = async (targetLocation: StorageLocation) => {
     if (scanBusy || pendingPhotos.length) return;
     if (!supportsSpaceScan()) {
       Alert.alert('3D scan unavailable', 'Use an iPhone 16 Pro with a Kitchen Compass development or store build. Expo Go cannot run the LiDAR module.');
@@ -168,8 +170,9 @@ export default function ScanScreen() {
     try {
       const result = await startSpaceScan();
       if (!result) return;
+      setLocation(targetLocation);
       setPendingModelUri(result.modelUri);
-      try { await reviewPhotos(result.photos.slice(0, MAX_SCAN_PHOTOS), location); }
+      try { await reviewPhotos(result.photos.slice(0, MAX_SCAN_PHOTOS), targetLocation); }
       finally { deleteTemporarySpaceScanFiles(undefined, result.photos.map((photo) => photo.uri)); }
     } catch {
       Alert.alert('3D scan unavailable', 'The space could not be scanned. Try again in better light.');
@@ -295,6 +298,7 @@ export default function ScanScreen() {
   };
   const resetScan = () => {
     saveGuard.current = false;
+    setSpaceOptionsOpen(false);
     deleteTemporarySpaceScanFiles(pendingModelUri ?? undefined, []);
     setPendingModelUri(null);
     setMode('choose');
@@ -443,7 +447,7 @@ export default function ScanScreen() {
     }
     if (savedModelUri) {
       saveSpaceScan({ id: `space-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        location, modelUri: savedModelUri, createdAt: reviewedAt,
+        location: spaceLocation, modelUri: savedModelUri, createdAt: reviewedAt,
         ingredientNames: [...new Set([...suggestions.map((item) => item.displayName.trim()), name.trim()].filter(Boolean))] });
     }
     const skipped = suggestions.length - acceptedSuggestions.length + (name.trim() && !manualIsNew ? 1 : 0);
@@ -466,9 +470,12 @@ export default function ScanScreen() {
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             <Pressable testID="scan-barcode" disabled={barcodeBusy || pendingPhotos.length > 0 || scanBusy} onPress={() => void openBarcodeCamera()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (barcodeBusy || pendingPhotos.length > 0 || scanBusy) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="barcode-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan food barcode</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Find the exact packaged product name</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             {barcodeBusy ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><ActivityIndicator color={colors.primary} /><Text style={[styles.stateText, { color: colors.foreground }]}>Looking up food product…</Text></View> : null}
-            <Pressable testID="scan-3d-space" disabled={scanBusy || pendingPhotos.length > 0} onPress={() => void scanSpace()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (scanBusy || pendingPhotos.length > 0) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="cube-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan 3D space</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{scanBusy ? 'Preparing ingredient review…' : supportsSpaceScan() ? 'Move around an open shelf · up to 10 views' : 'Requires iPhone 16 Pro and a native app build'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
-            <Text style={[styles.label, { color: colors.foreground }]}>Space to scan</Text>
-            <View style={[styles.chips, { marginBottom: 14 }]}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
+            <Pressable testID="scan-3d-space" accessibilityRole="button" accessibilityState={{ expanded: spaceOptionsOpen }} disabled={scanBusy || pendingPhotos.length > 0} onPress={() => setSpaceOptionsOpen((open) => !open)} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (scanBusy || pendingPhotos.length > 0) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="cube-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan 3D space</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{scanBusy ? 'Preparing ingredient review…' : spaceOptionsOpen ? 'Choose a space, then start scanning' : supportsSpaceScan() ? 'Move around an open shelf · up to 10 views' : 'Requires iPhone 16 Pro and a native app build'}</Text></View><Feather name={spaceOptionsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable>
+            {spaceOptionsOpen ? <View style={[styles.spaceSetup, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.spaceSetupTitle, { color: colors.foreground }]}>Space to scan</Text>
+              <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={spaceLocation === item} onPress={() => setSpaceLocation(item)} />)}</View>
+              <Pressable testID="start-3d-scan" disabled={scanBusy} onPress={() => void scanSpace(spaceLocation)} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.primary, marginTop: 14 }, pressed && styles.pressed, scanBusy && styles.disabled]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Start 3D scan</Text></Pressable>
+            </View> : null}
             <Pressable testID="manual-entry" disabled={pendingPhotos.length > 0} onPress={() => setMode('review')} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, pendingPhotos.length > 0 && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.muted }]}><Feather name="edit-3" size={20} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Add manually</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{pendingPhotos.length ? 'Review or remove queued photos first' : 'Enter a confirmed ingredient'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
              {pendingPhotos.length ? <View onLayout={(event) => { photoReviewY.current = event.nativeEvent.layout.y; }} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}>
                <Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>Review photos · {pendingPhotos.length}/{MAX_SCAN_PHOTOS}</Text>
@@ -586,6 +593,8 @@ const styles = StyleSheet.create({
   actionIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   actionTitle: { fontSize: 15, fontFamily: 'Inter_700Bold', marginBottom: 4 },
   actionBody: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  spaceSetup: { borderWidth: 1, borderRadius: 18, padding: 14, marginTop: -3, marginBottom: 12 },
+  spaceSetupTitle: { fontSize: 13, fontFamily: 'Inter_700Bold', marginBottom: 10 },
   cameraSession: { borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 4, marginBottom: 12 },
   cameraSessionTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
   cameraSessionBody: { fontSize: 12, lineHeight: 17, marginTop: 4 },
