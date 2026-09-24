@@ -8,3 +8,4 @@
 - [Multi-photo scan reliability](scan-batch-reliability.md) — real image batches need bounded model output and more provider time than tiny-image tests.
 - [Published recipe search payload](published-recipe-search-payload.md) — keep search anchors separate from pantry matching so excluded seasonings still count as available.
 - [Ingredient add quantity defaults](ingredient-add-quantity-defaults.md) — new additions default to 1 ea; confirmed duplicates increment the existing row in its unit.
+- [Ingredient icon matching](ingredient-icon-matching.md) — preserve food form when matching icons; canonical aliases can hide it, and prepared products should outrank base ingredients.

@@ -5,6 +5,7 @@ import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import { useColors } from '@/hooks/useColors';
 import type { Ingredient } from '@/context/KitchenContext';
 import type { Recipe } from '@/data/recipes';
+import { FoodIllustrationsExtra } from '@/components/FoodIllustrationsExtra';
 import { confirmedDateStatus } from '@/lib/kitchenLogic';
 import { foodIconForIngredient, type FoodIconName, type FoodIconTone } from '@/lib/foodIcons';
 
@@ -177,7 +178,7 @@ function FoodIllustration({ icon, size, colors }: { icon: FoodIconName; size: nu
         </Svg>
       );
     default:
-      return null;
+      return <FoodIllustrationsExtra icon={icon} size={size} colors={colors} />;
   }
 }
 

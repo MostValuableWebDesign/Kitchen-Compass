@@ -61,9 +61,9 @@ test('kitchen ingredients group by food category and sort by name', () => {
 });
 
 test('food icons match ingredient names and use a food fallback for unknown items', () => {
-  assert.deepEqual(foodIconForIngredient('Chicken breast'), { icon: 'food-drumstick', tone: 'berry' });
+  assert.deepEqual(foodIconForIngredient('Chicken breast'), { icon: 'illustration-chicken-breast', tone: 'berry' });
   assert.deepEqual(foodIconForIngredient('Canned tomatoes'), { icon: 'illustration-tomato', tone: 'berry' });
-  assert.deepEqual(foodIconForIngredient('Lemons'), { icon: 'fruit-citrus', tone: 'citrus' });
+  assert.deepEqual(foodIconForIngredient('Lemons'), { icon: 'illustration-lemon', tone: 'citrus' });
   assert.deepEqual(foodIconForIngredient('Rice'), { icon: 'rice', tone: 'grain' });
   assert.deepEqual(foodIconForIngredient('Mystery ingredient'), { icon: 'food-variant', tone: 'neutral' });
 });
@@ -73,6 +73,66 @@ test('common produce and herbs receive distinct illustrated icons', () => {
   const icons = foods.map((food) => foodIconForIngredient(food).icon);
   assert.equal(new Set(icons).size, foods.length);
   assert.ok(icons.every((icon) => icon.startsWith('illustration-')));
+});
+
+test('recognizable foods do not reuse a generic food, leaf, or misleading category icon', () => {
+  const expected: Record<string, string> = {
+    banana: 'illustration-banana',
+    peach: 'illustration-peach',
+    peaches: 'illustration-peach',
+    mangoes: 'illustration-mango',
+    kiwi: 'illustration-kiwi',
+    coconut: 'illustration-coconut',
+    strawberries: 'illustration-strawberry',
+    blueberries: 'illustration-blueberry',
+    raspberry: 'illustration-raspberry',
+    lemon: 'illustration-lemon',
+    lime: 'illustration-lime',
+    orange: 'illustration-orange',
+    lettuce: 'illustration-lettuce',
+    kale: 'illustration-kale',
+    cabbage: 'illustration-cabbage',
+    celery: 'illustration-celery',
+    zucchini: 'illustration-zucchini',
+    squash: 'illustration-squash',
+    cauliflower: 'illustration-cauliflower',
+    asparagus: 'illustration-asparagus',
+    peas: 'illustration-peas',
+    cilantro: 'illustration-cilantro',
+    mint: 'illustration-mint',
+    rosemary: 'illustration-rosemary',
+    ginger: 'illustration-ginger',
+    turmeric: 'illustration-turmeric',
+    shrimp: 'illustration-shrimp',
+    crab: 'illustration-crab',
+    clams: 'illustration-shellfish',
+    milk: 'illustration-milk',
+    'coconut milk': 'illustration-milk',
+    yogurt: 'illustration-yogurt',
+    butter: 'illustration-butter',
+    'black beans': 'illustration-beans',
+    tofu: 'illustration-tofu',
+    almonds: 'illustration-almond',
+    bacon: 'illustration-bacon',
+    'chicken breast': 'illustration-chicken-breast',
+    salmon: 'illustration-salmon',
+    'bell pepper': 'illustration-bell-pepper',
+    'chicken stock': 'pot-steam',
+    'peanut butter': 'peanut',
+    'almond butter': 'illustration-almond',
+    oatmeal: 'illustration-oats',
+    'freshly ground black pepper': 'shaker',
+    honey: 'illustration-honey',
+    'pasta sauce': 'illustration-sauce',
+    croissant: 'food-croissant',
+    turkey: 'food-turkey',
+    sausage: 'food-hot-dog',
+    'jalapeño': 'chili-mild',
+  };
+  for (const [food, icon] of Object.entries(expected)) {
+    assert.equal(foodIconForIngredient(food).icon, icon, food);
+  }
+  assert.equal(foodIconForIngredient('Unfamiliar ingredient').icon, 'food-variant');
 });
 
 const greenEggToast = {
