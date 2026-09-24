@@ -15,6 +15,8 @@ import {
   inventoryAfterReservations,
   movePlannedMeals,
   normalizeConfirmedDate,
+  hasInvalidMinimumQuantity,
+  hasInvalidMinimumQuantityValue,
   parseQuantityText,
   replacePlanSlots,
   rankPlanRecipes,
@@ -28,6 +30,16 @@ import {
 import { defaultPreferences, migrateV1KitchenState } from '../lib/kitchenPersistence';
 import { calculateHealthScore, calculateRecipeNutrition } from '@workspace/recipe-calculations';
 import { groupKitchenIngredients, kitchenIngredientCategory } from '../lib/ingredientCategories';
+
+test('new inventory quantities require at least one unit', () => {
+  assert.equal(hasInvalidMinimumQuantity('0 bag'), true);
+  assert.equal(hasInvalidMinimumQuantity('0.5 cup'), true);
+  assert.equal(hasInvalidMinimumQuantity('1 bag'), false);
+  assert.equal(hasInvalidMinimumQuantity(''), false);
+  assert.equal(hasInvalidMinimumQuantityValue(0), true);
+  assert.equal(hasInvalidMinimumQuantityValue(1), false);
+  assert.equal(hasInvalidMinimumQuantityValue(undefined), false);
+});
 
 test('kitchen ingredients group by food category and sort by name', () => {
   const items = ['Spinach', 'Ground beef', 'Apple', 'Carrots', 'Chicken breast', 'Black pepper', 'Rice', 'Salmon', 'Mystery item']

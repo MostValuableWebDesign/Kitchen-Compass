@@ -199,6 +199,8 @@ export const discoverRecipesResponseRecipesItemStepsItemIngredientAmountsItemQua
 
 
 
+export const discoverRecipesResponseRecipesMax = 5;
+
 
 
 export const DiscoverRecipesResponse = zod.object({
@@ -304,7 +306,7 @@ export const DiscoverRecipesResponse = zod.object({
   "reason": zod.string().min(1),
   "validated": zod.boolean()
 }))
-})),
+})).max(discoverRecipesResponseRecipesMax),
   "source": zod.enum(['server-ai']),
   "warning": zod.string().optional()
 })

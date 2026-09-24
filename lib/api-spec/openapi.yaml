@@ -648,6 +648,7 @@ components:
       properties:
         recipes:
           type: array
+          maxItems: 5
           items:
             $ref: "#/components/schemas/DiscoveredRecipe"
         source:

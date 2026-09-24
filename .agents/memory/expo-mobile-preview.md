@@ -26,3 +26,9 @@ Expo SDK 57 rejects the old top-level splash configuration, even when Metro stil
 **Why:** Native launch troubleshooting revealed that web and native bundles could succeed while the config schema still failed validation.
 
 **How to apply:** For phone-loading issues, distinguish stale Metro errors from current bundle failures, request the manifest's actual native launch asset, and run Expo Doctor before changing app logic.
+
+When API client code generation changes workspace source files, a running Metro process can retain a stale resolution error until Expo is restarted.
+
+**Why:** The generated client source was present and typechecking, but the pre-codegen Metro process continued reporting it as missing.
+
+**How to apply:** After regenerating shared client files, restart Expo once before treating a module-resolution error as a source or dependency problem.

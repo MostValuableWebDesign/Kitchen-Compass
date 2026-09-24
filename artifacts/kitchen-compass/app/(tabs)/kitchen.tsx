@@ -9,43 +9,15 @@ import { useColors } from '@/hooks/useColors';
 import { groupKitchenIngredients } from '@/lib/ingredientCategories';
 
 const filters = ['All', 'Refrigerator', 'Freezer', 'Pantry'] as const;
-const pantryStaples = ['Rice', 'Pasta', 'Olive oil', 'Canned tomatoes', 'Garlic', 'Salt', 'Black pepper'] as const;
-
 export default function KitchenScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { ingredients, addIngredient, removeIngredient } = useKitchen();
+  const { ingredients, removeIngredient } = useKitchen();
   const [filter, setFilter] = useState<(typeof filters)[number]>('All');
   const [search, setSearch] = useState('');
-  const [selectedStaples, setSelectedStaples] = useState<string[]>([]);
   const filtered = useMemo(() => ingredients.filter((item) => (filter === 'All' || item.location === filter) && item.name.toLowerCase().includes(search.toLowerCase())), [filter, ingredients, search]);
   const grouped = useMemo(() => groupKitchenIngredients(filtered), [filtered]);
-  const addSelectedStaples = () => {
-    if (!selectedStaples.length) return;
-    Alert.alert(
-      'Add pantry staples?',
-      `This will add ${selectedStaples.length} confirmed item${selectedStaples.length === 1 ? '' : 's'} to Pantry. Quantities will stay unknown until you enter them.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Add to kitchen',
-          onPress: () => {
-            selectedStaples.forEach((item) => addIngredient({
-              name: item,
-              location: 'Pantry',
-              status: 'fresh',
-              quantity: undefined,
-              quantityKnown: false,
-              confidence: 'confirmed',
-              source: 'manual',
-            }));
-            setSelectedStaples([]);
-          },
-        },
-      ],
-    );
-  };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
@@ -68,29 +40,6 @@ export default function KitchenScreen() {
         </View>) : (
           <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name="basket-outline" size={34} color={colors.primary} /><Text style={[styles.emptyTitle, { color: colors.foreground }]}>{ingredients.length ? 'No matches' : 'Your kitchen is waiting'}</Text><Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>{ingredients.length ? 'Try another search or storage filter.' : 'Scan a shelf or add an ingredient manually to start getting useful suggestions.'}</Text><Pressable onPress={() => router.push('/scan')} style={({ pressed }) => [styles.emptyButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.emptyButtonText, { color: colors.primaryForeground }]}>Add ingredients</Text></Pressable></View>
         )}
-        <View style={[styles.staplesCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.staplesHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.staplesTitle, { color: colors.foreground }]}>Pantry staples</Text>
-              <Text style={[styles.staplesBody, { color: colors.mutedForeground }]}>Select items you want to confirm into your pantry.</Text>
-            </View>
-            <Ionicons name="list-outline" size={22} color={colors.primary} />
-          </View>
-          <View style={styles.staplesGrid}>
-            {pantryStaples.map((item) => {
-              const selected = selectedStaples.includes(item);
-              return (
-                <Pressable key={item} onPress={() => setSelectedStaples((current) => selected ? current.filter((value) => value !== item) : [...current, item])} style={({ pressed }) => [styles.stapleRow, { backgroundColor: selected ? colors.secondary : colors.background, borderColor: selected ? colors.primary : colors.border }, pressed && styles.pressed]}>
-                  <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={19} color={selected ? colors.primary : colors.mutedForeground} />
-                  <Text style={[styles.stapleText, { color: colors.foreground }]}>{item}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Pressable disabled={!selectedStaples.length} onPress={addSelectedStaples} style={({ pressed }) => [styles.staplesButton, { backgroundColor: selectedStaples.length ? colors.primary : colors.muted }, pressed && selectedStaples.length ? styles.pressed : null]}>
-            <Text style={[styles.staplesButtonText, { color: selectedStaples.length ? colors.primaryForeground : colors.mutedForeground }]}>Confirm selected staples</Text>
-          </Pressable>
-        </View>
         <View style={[styles.note, { backgroundColor: colors.muted }]}><Ionicons name="information-circle-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.noteText, { color: colors.mutedForeground }]}>Tap an item to edit its details. Quantities are never guessed from a photo, and date warnings use only dates you confirm.</Text></View>
       </ScrollView>
     </View>
@@ -119,14 +68,5 @@ const styles = StyleSheet.create({
   emptyButtonText: { fontSize: 13, fontFamily: 'Inter_700Bold' },
   note: { flexDirection: 'row', gap: 9, padding: 13, borderRadius: 15, marginTop: 20 },
   noteText: { flex: 1, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' },
-  staplesCard: { borderRadius: 20, borderWidth: 1, padding: 15, marginTop: 23 },
-  staplesHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
-  staplesTitle: { fontSize: 17, fontFamily: 'Inter_700Bold' },
-  staplesBody: { fontSize: 12, lineHeight: 17, marginTop: 4 },
-  staplesGrid: { gap: 8 },
-  stapleRow: { minHeight: 42, borderRadius: 12, borderWidth: 1, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stapleText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
-  staplesButton: { height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
-  staplesButtonText: { fontSize: 13, fontFamily: 'Inter_700Bold' },
   pressed: { opacity: 0.72 },
 });

@@ -9,6 +9,7 @@ import type { DiscoveredRecipe } from './discoveredRecipe';
 import type { RecipeDiscoveryResponseSource } from './recipeDiscoveryResponseSource';
 
 export interface RecipeDiscoveryResponse {
+  /** @maxItems 5 */
   recipes: DiscoveredRecipe[];
   source: RecipeDiscoveryResponseSource;
   warning?: string;

@@ -33,10 +33,10 @@ export function SectionTitle({ title, action, onPress }: { title: string; action
   );
 }
 
-export function Chip({ label, selected, onPress, icon }: { label: string; selected?: boolean; onPress?: () => void; icon?: string }) {
+export function Chip({ label, selected, onPress, icon, testID }: { label: string; selected?: boolean; onPress?: () => void; icon?: string; testID?: string }) {
   const colors = useColors();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [
+    <Pressable testID={testID} onPress={onPress} style={({ pressed }) => [
       styles.chip,
       { backgroundColor: selected ? colors.primary : colors.card, borderColor: selected ? colors.primary : colors.border },
       pressed && styles.pressed,

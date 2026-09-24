@@ -10,7 +10,7 @@ import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-cl
 import { Chip, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
-import { canCombineIngredientQuantities, normalizeIngredientName, parseQuantityText } from '@/lib/kitchenLogic';
+import { canCombineIngredientQuantities, hasInvalidMinimumQuantity, hasInvalidMinimumQuantityValue, normalizeIngredientName, parseQuantityText } from '@/lib/kitchenLogic';
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 import { deleteTemporarySpaceScanFiles, saveSpaceScanModel } from '@/lib/spaceScanFiles';
 import { openSpaceModel, startSpaceScan, supportsSpaceScan } from '@/modules/space-scan/src/SpaceScanModule';
@@ -64,7 +64,7 @@ export default function ScanScreen() {
   const [recognitionState, setRecognitionState] = useState<'idle' | 'analyzing' | 'ready' | 'unavailable'>('idle');
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [name, setName] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [quantity, setQuantity] = useState('1');
   const [location, setLocation] = useState<StorageLocation>('Refrigerator');
   const [mode, setMode] = useState<'choose' | 'review'>('choose');
   const [keepPhotos, setKeepPhotos] = useState(false);
@@ -209,7 +209,7 @@ export default function ScanScreen() {
       setBarcodeProduct(product);
       setScannedBarcode(code);
       setName(product?.name ?? '');
-      setQuantity('');
+      setQuantity('1');
       setSuggestions([]);
       setPhotoUris([]);
       setRecognitionState('idle');
@@ -219,7 +219,7 @@ export default function ScanScreen() {
       setBarcodeProduct(null);
       setScannedBarcode(code);
       setName('');
-      setQuantity('');
+      setQuantity('1');
       setSuggestions([]);
       setPhotoUris([]);
       setRecognitionState('idle');
@@ -310,7 +310,7 @@ export default function ScanScreen() {
     setAnalysisStartedAt(null);
     setRecognitionMessage('');
     setName('');
-    setQuantity('');
+    setQuantity('1');
     setKeepPhotos(false);
     setBarcodeOpen(false);
     setBarcodeProduct(null);
@@ -322,6 +322,15 @@ export default function ScanScreen() {
     if (saveGuard.current || recognitionState === 'analyzing') return;
     if (!name.trim() && !suggestions.length) {
       Alert.alert('Review an ingredient first', 'Confirm at least one recognized item or add an ingredient manually.');
+      return;
+    }
+    const invalidSuggestion = suggestions.find((suggestion) => suggestion.quantityKnown && hasInvalidMinimumQuantityValue(suggestion.quantity));
+    if (invalidSuggestion) {
+      Alert.alert('Quantity must be at least 1', `Enter 1 or more for ${invalidSuggestion.displayName}, or clear the quantity if it is unknown.`);
+      return;
+    }
+    if (name.trim() && hasInvalidMinimumQuantity(quantity)) {
+      Alert.alert('Quantity must be at least 1', 'Enter 1 or more, or clear the quantity if you do not know the quantity yet.');
       return;
     }
     const unresolvedCorrection = suggestions.find((suggestion) => {

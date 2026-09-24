@@ -156,7 +156,7 @@ const aiRecipeSchema = z.object({
 });
 
 const aiResponseEnvelopeSchema = z.object({
-  recipes: z.array(z.unknown()).max(8),
+  recipes: z.array(z.unknown()).max(5),
 });
 
 const recipeSchema = aiRecipeSchema.extend({
@@ -168,13 +168,14 @@ const recipeSchema = aiRecipeSchema.extend({
 });
 
 const responseSchema = z.object({
-  recipes: z.array(recipeSchema),
+  recipes: z.array(recipeSchema).max(5),
   source: z.literal("server-ai"),
   warning: z.string().optional(),
 });
 
 const model = "gpt-5.4-mini";
 const recipeDiscoveryTimeoutMs = 180_000;
+export const MAX_RECIPE_DISCOVERY_RESULTS = 5;
 
 function normalize(value: string) {
   const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
@@ -379,7 +380,7 @@ router.post("/recipes/discover", async (req, res) => {
     "Every returned recipe must satisfy all saved allergies, dietary restrictions, dislikes, cuisines, skill, cooking-time, equipment, and selected-filter requirements. Return at least one recipe that satisfies them.",
     "Use only the equipment listed in Saved preferences and Selected filters. Do not require an appliance or specialized tool that is not listed.",
     "Use only confirmed inventory ingredients or basic ingredients with an unambiguous allergen profile such as water, salt, pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, and common fresh herbs. Do not add a missing ingredient with uncertain allergen status.",
-    "Return varied candidates, not minor title changes. The variation seed selects a different direction.",
+     "Return no more than five varied candidates, not minor title changes. The variation seed selects a different direction.",
     "All ingredient amounts must be numeric and paired with a unit. Mark pantry garnish or optional additions required=false.",
     "All steps must be ordered from 1 with no gaps. Every step must include exact ingredientAmounts with numeric quantities and units, at least one sensory cue, and at least one common mistake to avoid.",
     "Use Fahrenheit as the authoritative cooking and food-safety temperature and include the equivalent Celsius value in the temperature object. Add safetyTemperature whenever a food safety target applies.",
@@ -437,7 +438,7 @@ router.post("/recipes/discover", async (req, res) => {
           issues: invalidRecipeIssues.slice(0, 8),
         }, "Recipe discovery discarded invalid candidates");
       }
-      return aiRecipes;
+       return aiRecipes.slice(0, MAX_RECIPE_DISCOVERY_RESULTS);
     };
 
     const rejectionReasons = new Map<string, number>();
@@ -497,7 +498,7 @@ router.post("/recipes/discover", async (req, res) => {
       sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery did not return a safe recipe for these preferences. Previously saved recipes remain available.");
       return;
     }
-    const result = responseSchema.parse({ recipes: safeRecipes, source: "server-ai" });
+     const result = responseSchema.parse({ recipes: safeRecipes.slice(0, MAX_RECIPE_DISCOVERY_RESULTS), source: "server-ai" });
     res.json(result);
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";

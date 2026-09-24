@@ -12,6 +12,8 @@ export type RecipeFilterState = {
   minHealthScore?: number;
 };
 
+export const MAX_AI_DISCOVERY_RECIPES = 5;
+
 export function recipeVersion(recipe: Pick<Recipe, 'sourceVersion' | 'recipeVersion'>) {
   return recipe.recipeVersion ?? recipe.sourceVersion;
 }

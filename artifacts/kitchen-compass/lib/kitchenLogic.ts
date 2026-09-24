@@ -126,6 +126,17 @@ export function parseQuantityText(quantity?: string) {
   return { quantityValue: Number(match[1]), unit, quantityKnown: true };
 }
 
+export function hasInvalidMinimumQuantity(quantity?: string) {
+  const value = quantity?.trim();
+  if (!value) return false;
+  const match = value.match(/^(-?(?:\d+(?:\.\d*)?|\.\d+))/);
+  return Boolean(match && Number(match[1]) < 1);
+}
+
+export function hasInvalidMinimumQuantityValue(quantity?: number) {
+  return quantity !== undefined && (!Number.isFinite(quantity) || quantity < 1);
+}
+
 export function normalizeConfirmedDate(value?: string) {
   const date = value?.trim();
   if (!date) return undefined;

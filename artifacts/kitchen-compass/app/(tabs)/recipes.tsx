@@ -8,7 +8,7 @@ import { AppHeader, Chip, RecipeCard } from '@/components/KitchenUI';
 import { useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
 import { confirmedDateStatus, ingredientIdentitiesMatch, recipeAvailabilityLabel, recipeMatchesPreferences, recipeReadiness } from '@/lib/kitchenLogic';
-import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, novelRecipes, recipeTitleKey, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
+import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, MAX_AI_DISCOVERY_RECIPES, novelRecipes, recipeTitleKey, recipeVersion, type RecipeFilterState } from '@/lib/recipeDiscovery';
 import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
@@ -225,7 +225,7 @@ export default function RecipesScreen() {
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const recipes = novelRecipes(availableRecipes, result.recipes.map((recipe) => mapDiscoveredRecipe(recipe, audience)))
+      const recipes = novelRecipes(availableRecipes, result.recipes.slice(0, MAX_AI_DISCOVERY_RECIPES).map((recipe) => mapDiscoveredRecipe(recipe, audience)))
         .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes));
       if (recipes.length) saveDiscoveredRecipes(recipes);
       setSearch('');
@@ -381,6 +381,17 @@ export default function RecipesScreen() {
     );
   };
 
+  const confirmKitchenDiscovery = (different = false) => {
+    Alert.alert(
+      'Find recipes from your kitchen?',
+      'Confirmed kitchen ingredients and saved preferences will be sent to AI to create up to 5 recipe ideas. Nothing is added to your kitchen.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Find recipes', onPress: () => void discover(different) },
+      ],
+    );
+  };
+
   const confirmArchiveRecipe = (recipe: Recipe) => Alert.alert(
     `Archive ${recipe.title}?`,
     'This hides the recipe from suggestions and future searches. Saved images and existing planned meals stay available. You can restore it from Archived recipes.',
@@ -465,7 +476,7 @@ export default function RecipesScreen() {
             <Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Discover from your kitchen</Text>
             <Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Only confirmed inventory is sent for recipe matching. Allergies and restrictions are applied before results appear.</Text>
           </View>
-          <Pressable testID="discover-recipes" onPress={() => void discover(false)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.discoverButton, { backgroundColor: colors.primary }, pressed && styles.pressed, activeSearch && styles.disabled]}>
+          <Pressable testID="discover-recipes" onPress={() => confirmKitchenDiscovery(false)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.discoverButton, { backgroundColor: colors.primary }, pressed && styles.pressed, activeSearch && styles.disabled]}>
             <Feather name="star" size={16} color={colors.primaryForeground} />
             <Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discoveryBusy ? 'Finding' : 'Find recipes'}</Text>
           </Pressable>
@@ -523,7 +534,7 @@ export default function RecipesScreen() {
         </ScrollView>
         <View style={styles.discoveryHeader}>
           <View><Text style={[styles.heading, { color: colors.foreground }]}>{resultFilter === 'All' ? 'A good place to start' : resultFilter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{visibleSavedCount ? `${visibleSavedCount} saved discover${visibleSavedCount === 1 ? 'y' : 'ies'} available offline` : ingredients.length ? 'Matched against your confirmed kitchen' : 'Add confirmed ingredients to make suggestions personal'}</Text></View>
-          <Pressable testID="different-recipes" onPress={() => void (section === 'kids' ? findKids() : discover(true))} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
+           <Pressable testID="different-recipes" onPress={() => section === 'kids' ? void findKids() : confirmKitchenDiscovery(true)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
         </View>
         {filtered.length ? filtered.map((recipe) => {
           const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);

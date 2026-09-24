@@ -462,6 +462,7 @@ export const RecipeDiscoveryResponseSource = {
 } as const;
 
 export interface RecipeDiscoveryResponse {
+  /** @maxItems 5 */
   recipes: DiscoveredRecipe[];
   source: RecipeDiscoveryResponseSource;
   warning?: string;

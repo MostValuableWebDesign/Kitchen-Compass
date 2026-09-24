@@ -4,9 +4,9 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Chip } from '@/components/KitchenUI';
-import { StorageLocation, useKitchen } from '@/context/KitchenContext';
+import { StorageLocation, useKitchen, type Ingredient } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
-import { normalizeConfirmedDate } from '@/lib/kitchenLogic';
+import { hasInvalidMinimumQuantity, normalizeConfirmedDate } from '@/lib/kitchenLogic';
 
 const locations: StorageLocation[] = ['Refrigerator', 'Freezer', 'Pantry'];
 const supportedUnits = ['g', 'kg', 'oz', 'lb', 'ml', 'l', 'tsp', 'tbsp', 'cup', 'count', 'egg', 'fruit', 'slice', 'clove', 'breast', 'handful'];
@@ -17,24 +17,34 @@ export default function InventoryEditScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { ingredients, updateIngredient, removeIngredient } = useKitchen();
+  const { ingredients } = useKitchen();
   const ingredient = useMemo(() => ingredients.find((item) => item.id === id), [id, ingredients]);
-  const [name, setName] = useState(ingredient?.name ?? '');
-  const [quantity, setQuantity] = useState(ingredient?.quantityKnown && ingredient.quantityValue !== undefined ? String(ingredient.quantityValue) : '');
-  const [unit, setUnit] = useState(ingredient?.quantityKnown ? ingredient.unit ?? '' : '');
-  const [location, setLocation] = useState<StorageLocation>(ingredient?.location ?? 'Refrigerator');
-  const [status, setStatus] = useState<(typeof statuses)[number]>(ingredient?.status ?? 'fresh');
-  const [date, setDate] = useState(ingredient?.dateConfirmed ? ingredient.expires ?? '' : '');
-  const [dateKind, setDateKind] = useState<'expiration' | 'best-before'>(ingredient?.dateKind ?? 'expiration');
 
   if (!ingredient) {
     return (
       <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 20 }]}>
         <Text style={[styles.missingTitle, { color: colors.foreground }]}>Inventory item not found</Text>
-        <Pressable onPress={() => router.back()} style={[styles.saveButton, { backgroundColor: colors.primary }]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Back to kitchen</Text></Pressable>
+        <Pressable testID="inventory-missing-back" onPress={() => router.back()} style={[styles.saveButton, { backgroundColor: colors.primary }]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Back to kitchen</Text></Pressable>
       </View>
     );
   }
+
+  return <InventoryEditForm key={ingredient.id} ingredient={ingredient} />;
+}
+
+function InventoryEditForm({ ingredient }: { ingredient: Ingredient }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { updateIngredient, removeIngredient } = useKitchen();
+  const [name, setName] = useState(ingredient.name);
+  const initialQuantity = ingredient.quantityKnown && ingredient.quantityValue !== undefined ? String(ingredient.quantityValue) : '';
+  const [quantity, setQuantity] = useState(initialQuantity || '1');
+  const [unit, setUnit] = useState(ingredient.quantityKnown ? ingredient.unit ?? '' : '');
+  const [location, setLocation] = useState<StorageLocation>(ingredient.location);
+  const [status, setStatus] = useState<(typeof statuses)[number]>(ingredient.status);
+  const [date, setDate] = useState(ingredient.dateConfirmed ? ingredient.expires ?? '' : '');
+  const [dateKind, setDateKind] = useState<'expiration' | 'best-before'>(ingredient.dateKind ?? 'expiration');
 
   const save = () => {
     const trimmedName = name.trim();
@@ -45,6 +55,10 @@ export default function InventoryEditScreen() {
     const confirmedDate = normalizeConfirmedDate(date);
     if (date.trim() && !confirmedDate) {
       Alert.alert('Check the date', 'Use a real date in YYYY-MM-DD format, or leave the date blank.');
+      return;
+    }
+    if (hasInvalidMinimumQuantity(quantity) && quantity.trim() !== initialQuantity) {
+      Alert.alert('Quantity must be at least 1', 'Enter 1 or more, or clear the quantity if you do not know it yet.');
       return;
     }
     const quantityText = quantity.trim() && unit.trim() ? `${quantity.trim()} ${unit.trim()}` : undefined;
@@ -74,7 +88,7 @@ export default function InventoryEditScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 34 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={10}><Feather name="arrow-left" size={22} color={colors.foreground} /></Pressable>
+          <Pressable testID="inventory-back" onPress={() => router.back()} hitSlop={10}><Feather name="arrow-left" size={22} color={colors.foreground} /></Pressable>
           <Text style={[styles.title, { color: colors.foreground }]}>Edit inventory</Text>
           <View style={{ width: 22 }} />
         </View>
@@ -82,33 +96,33 @@ export default function InventoryEditScreen() {
         {ingredient.barcode ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>Barcode: {ingredient.barcode}{ingredient.brand ? ` · ${ingredient.brand}` : ''}</Text> : null}
 
         <Text style={[styles.label, { color: colors.foreground }]}>Name</Text>
-        <TextInput value={name} onChangeText={setName} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+        <TextInput testID="inventory-name" value={name} onChangeText={setName} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
 
         <Text style={[styles.label, { color: colors.foreground }]}>Quantity</Text>
         <View style={styles.quantityRow}>
-          <TextInput value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="Leave blank if unknown" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
-          <TextInput value={unit} onChangeText={setUnit} placeholder="Unit" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+          <TextInput testID="inventory-quantity" value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="At least 1, or blank if unknown" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.quantityInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+          <TextInput testID="inventory-unit" value={unit} onChangeText={setUnit} placeholder="Unit" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.unitInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
         </View>
         {!ingredient.quantityKnown ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>Current quantity: unknown. Choose a supported unit if you want to confirm one.</Text> : null}
-        <View style={styles.chips}>{supportedUnits.map((item) => <Chip key={item} label={item} selected={unit.toLowerCase() === item} onPress={() => setUnit(item)} />)}</View>
+        <View style={styles.chips}>{supportedUnits.map((item) => <Chip key={item} testID={`inventory-unit-${item}`} label={item} selected={unit.toLowerCase() === item} onPress={() => setUnit(item)} />)}</View>
 
         <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
-        <View style={styles.chips}>{locations.map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
+        <View style={styles.chips}>{locations.map((item) => <Chip key={item} testID={`inventory-location-${item}`} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
 
         <Text style={[styles.label, { color: colors.foreground }]}>Status</Text>
-        <View style={styles.chips}>{statuses.map((item) => <Chip key={item} label={item === 'low' ? 'Running low' : item[0].toUpperCase() + item.slice(1)} selected={status === item} onPress={() => setStatus(item)} />)}</View>
+        <View style={styles.chips}>{statuses.map((item) => <Chip key={item} testID={`inventory-status-${item}`} label={item === 'low' ? 'Running low' : item[0].toUpperCase() + item.slice(1)} selected={status === item} onPress={() => setStatus(item)} />)}</View>
 
         <Text style={[styles.label, { color: colors.foreground }]}>Optional date</Text>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>Enter or confirm a date yourself. Use YYYY-MM-DD.</Text>
-        <TextInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
+        <TextInput testID="inventory-date" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
         <View style={styles.chips}>
-          <Chip label="Expiration" selected={dateKind === 'expiration'} onPress={() => setDateKind('expiration')} />
-          <Chip label="Best before" selected={dateKind === 'best-before'} onPress={() => setDateKind('best-before')} />
+          <Chip testID="inventory-date-expiration" label="Expiration" selected={dateKind === 'expiration'} onPress={() => setDateKind('expiration')} />
+          <Chip testID="inventory-date-best-before" label="Best before" selected={dateKind === 'best-before'} onPress={() => setDateKind('best-before')} />
         </View>
 
-        <Pressable onPress={save} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save inventory</Text></Pressable>
-        {ingredient.photoUri ? <Pressable onPress={() => Alert.alert('Delete saved scan photo?', 'The ingredient will remain in your kitchen. Kitchen Compass will remove its saved copy; a photo in your iPhone library will remain there.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete photo', style: 'destructive', onPress: () => updateIngredient(ingredient.id, { photoUri: undefined }) }])} style={({ pressed }) => [styles.photoButton, { borderColor: colors.border }, pressed && styles.pressed]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.photoButtonText, { color: colors.foreground }]}>Delete saved scan photo</Text></Pressable> : null}
-        <Pressable onPress={remove} style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}><Text style={[styles.removeText, { color: colors.destructive }]}>Remove from kitchen</Text></Pressable>
+        <Pressable testID="inventory-save" onPress={save} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save inventory</Text></Pressable>
+        {ingredient.photoUri ? <Pressable testID="inventory-delete-photo" onPress={() => Alert.alert('Delete saved scan photo?', 'The ingredient will remain in your kitchen. Kitchen Compass will remove its saved copy; a photo in your iPhone library will remain there.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete photo', style: 'destructive', onPress: () => updateIngredient(ingredient.id, { photoUri: undefined }) }])} style={({ pressed }) => [styles.photoButton, { borderColor: colors.border }, pressed && styles.pressed]}><Feather name="image" size={16} color={colors.foreground} /><Text style={[styles.photoButtonText, { color: colors.foreground }]}>Delete saved scan photo</Text></Pressable> : null}
+        <Pressable testID="inventory-remove" onPress={remove} style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}><Text style={[styles.removeText, { color: colors.destructive }]}>Remove from kitchen</Text></Pressable>
       </ScrollView>
     </View>
   );
