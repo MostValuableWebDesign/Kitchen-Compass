@@ -62,10 +62,17 @@ test('kitchen ingredients group by food category and sort by name', () => {
 
 test('food icons match ingredient names and use a food fallback for unknown items', () => {
   assert.deepEqual(foodIconForIngredient('Chicken breast'), { icon: 'food-drumstick', tone: 'berry' });
-  assert.deepEqual(foodIconForIngredient('Canned tomatoes'), { icon: 'leaf', tone: 'leaf' });
+  assert.deepEqual(foodIconForIngredient('Canned tomatoes'), { icon: 'illustration-tomato', tone: 'berry' });
   assert.deepEqual(foodIconForIngredient('Lemons'), { icon: 'fruit-citrus', tone: 'citrus' });
   assert.deepEqual(foodIconForIngredient('Rice'), { icon: 'rice', tone: 'grain' });
   assert.deepEqual(foodIconForIngredient('Mystery ingredient'), { icon: 'food-variant', tone: 'neutral' });
+});
+
+test('common produce and herbs receive distinct illustrated icons', () => {
+  const foods = ['avocado', 'canned tomatoes', 'broccoli', 'garlic', 'basil', 'fresh parsley', 'spinach', 'onion', 'cucumber', 'potato'];
+  const icons = foods.map((food) => foodIconForIngredient(food).icon);
+  assert.equal(new Set(icons).size, foods.length);
+  assert.ok(icons.every((icon) => icon.startsWith('illustration-')));
 });
 
 const greenEggToast = {

@@ -26,7 +26,17 @@ export type FoodIconName =
   | 'soy-sauce'
   | 'cow'
   | 'chili-mild'
-  | 'food-variant';
+  | 'food-variant'
+  | 'illustration-avocado'
+  | 'illustration-tomato'
+  | 'illustration-broccoli'
+  | 'illustration-garlic'
+  | 'illustration-basil'
+  | 'illustration-parsley'
+  | 'illustration-spinach'
+  | 'illustration-onion'
+  | 'illustration-cucumber'
+  | 'illustration-potato';
 
 export type FoodIconTone = 'leaf' | 'citrus' | 'berry' | 'ocean' | 'grain' | 'neutral';
 
@@ -41,6 +51,16 @@ export function foodIconForIngredient(name: string): FoodIconVisual {
   if (/\b(beef|steak|pork|bacon|ham|lamb|sausage|venison)\b/.test(value)) return { icon: 'food-steak', tone: 'berry' };
   if (/\b(salmon|tuna|cod|tilapia|trout|fish|shrimp|prawn|crab|lobster|scallop|mussel|clam|oyster)\b/.test(value)) return { icon: 'fish', tone: 'ocean' };
   if (/\b(eggs?)\b/.test(value)) return { icon: 'egg', tone: 'citrus' };
+  if (/\b(avocados?)\b/.test(value)) return { icon: 'illustration-avocado', tone: 'leaf' };
+  if (/\b(tomato(?:es)?)\b/.test(value)) return { icon: 'illustration-tomato', tone: 'berry' };
+  if (/\b(broccoli)\b/.test(value)) return { icon: 'illustration-broccoli', tone: 'leaf' };
+  if (/\b(garlic)\b/.test(value)) return { icon: 'illustration-garlic', tone: 'citrus' };
+  if (/\b(basil)\b/.test(value)) return { icon: 'illustration-basil', tone: 'leaf' };
+  if (/\b(parsley)\b/.test(value)) return { icon: 'illustration-parsley', tone: 'leaf' };
+  if (/\b(spinach)\b/.test(value)) return { icon: 'illustration-spinach', tone: 'leaf' };
+  if (/\b(onions?)\b/.test(value)) return { icon: 'illustration-onion', tone: 'citrus' };
+  if (/\b(cucumbers?)\b/.test(value)) return { icon: 'illustration-cucumber', tone: 'leaf' };
+  if (/\b(potatoes?)\b/.test(value)) return { icon: 'illustration-potato', tone: 'grain' };
   if (/\b(apples?)\b/.test(value)) return { icon: 'food-apple', tone: 'berry' };
   if (/\b(oranges?|lemons?|limes?|citrus)\b/.test(value)) return { icon: 'fruit-citrus', tone: 'citrus' };
   if (/\b(grapes?)\b/.test(value)) return { icon: 'fruit-grapes', tone: 'berry' };
@@ -52,7 +72,7 @@ export function foodIconForIngredient(name: string): FoodIconVisual {
   if (/\b(corn)\b/.test(value)) return { icon: 'corn', tone: 'citrus' };
   if (/\b(mushrooms?)\b/.test(value)) return { icon: 'mushroom', tone: 'grain' };
   if (/\b(chilies|chillis|chili|chilli|jalapeños?|peppers?)\b/.test(value)) return { icon: 'chili-mild', tone: 'berry' };
-  if (/\b(tomato(?:es)?|broccoli|spinach|kale|lettuce|avocados?|cucumbers?|celery|zucchini|squash|cabbage|cauliflower|asparagus|onions?|garlic|peas)\b/.test(value)) return { icon: 'leaf', tone: 'leaf' };
+  if (/\b(kale|lettuce|celery|zucchini|squash|cabbage|cauliflower|asparagus|peas)\b/.test(value)) return { icon: 'leaf', tone: 'leaf' };
   if (/\b(basil|parsley|cilantro|thyme|rosemary|oregano|mint|dill|ginger|turmeric)\b/.test(value)) return { icon: 'leaf', tone: 'leaf' };
   if (/\b(milk)\b/.test(value) && !/\b(coconut|almond|oat|soy) milk\b/.test(value)) return { icon: 'cow', tone: 'citrus' };
   if (/\b(cheese|cheddar|mozzarella|parmesan|yogurt|yoghurt|butter|cream)\b/.test(value)) return { icon: 'cheese', tone: 'citrus' };
