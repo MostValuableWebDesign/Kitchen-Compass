@@ -64,7 +64,9 @@ export interface Ingredient {
   dateConfirmed?: boolean;
   dateKind?: 'expiration' | 'best-before';
   photoUri?: string;
-  source?: 'manual' | 'scan' | 'purchase';
+  barcode?: string;
+  brand?: string;
+  source?: 'manual' | 'scan' | 'purchase' | 'barcode';
   sourceScanId?: string;
   sourcePhotoId?: string;
   reviewedAt?: string;

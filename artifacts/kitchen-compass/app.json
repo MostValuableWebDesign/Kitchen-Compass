@@ -36,7 +36,7 @@
         {
           "cameraPermission": "Kitchen Compass uses your camera to photograph ingredients for your review.",
           "recordAudioAndroid": false,
-          "barcodeScannerEnabled": false
+          "barcodeScannerEnabled": true
         }
       ]
     ],

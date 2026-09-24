@@ -4,7 +4,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-client-react';
 import { Chip, SectionTitle } from '@/components/KitchenUI';
@@ -14,6 +14,7 @@ import { canCombineIngredientQuantities, normalizeIngredientName, parseQuantityT
 import { deleteScanPhotos, saveScanPhoto } from '@/lib/scanPhotos';
 import { deleteTemporarySpaceScanFiles, saveSpaceScanModel } from '@/lib/spaceScanFiles';
 import { openSpaceModel, startSpaceScan, supportsSpaceScan } from '@/modules/space-scan/src/SpaceScanModule';
+import { lookupBarcodeProduct, normalizeFoodBarcode, type BarcodeProduct } from '@/lib/barcodeProducts';
 
 const MAX_SCAN_PHOTOS = 10;
 type ScanPhotoAsset = { uri: string; width: number; height: number };
@@ -36,6 +37,13 @@ export default function ScanScreen() {
   const { addIngredient, ingredients, updateIngredient, spaceScans, saveSpaceScan, deleteSpaceScan } = useKitchen();
   const [pendingModelUri, setPendingModelUri] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeCameraEnabled, setBarcodeCameraEnabled] = useState(false);
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeMessage, setBarcodeMessage] = useState('');
+  const [barcodeProduct, setBarcodeProduct] = useState<BarcodeProduct | null>(null);
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [pendingPhotos, setPendingPhotos] = useState<ScanPhotoAsset[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -47,6 +55,7 @@ export default function ScanScreen() {
   const captureGuard = useRef(false);
   const analysisGuard = useRef(false);
   const saveGuard = useRef(false);
+  const barcodeGuard = useRef(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -171,6 +180,56 @@ export default function ScanScreen() {
       if (!await openSpaceModel(uri)) Alert.alert('Model unavailable', 'This 3D model could not be opened.');
     } catch { Alert.alert('Model unavailable', 'This 3D model could not be opened.'); }
   };
+  const openBarcodeCamera = async () => {
+    if (barcodeBusy || pendingPhotos.length || scanBusy) return;
+    let granted = cameraPermission?.granted === true;
+    if (!granted) {
+      try { granted = (await requestCameraPermission()).granted; }
+      catch { granted = false; }
+    }
+    setBarcodeCameraEnabled(granted);
+    setBarcodeInput('');
+    setBarcodeMessage('');
+    barcodeGuard.current = false;
+    setBarcodeOpen(true);
+  };
+  const resolveBarcode = async (value: string) => {
+    if (barcodeGuard.current) return;
+    const code = normalizeFoodBarcode(value);
+    if (!code) {
+      setBarcodeMessage('Enter an 8, 12, 13, or 14 digit barcode.');
+      return;
+    }
+    barcodeGuard.current = true;
+    setBarcodeOpen(false);
+    setBarcodeBusy(true);
+    setBarcodeMessage('');
+    try {
+      const product = await lookupBarcodeProduct(code);
+      setBarcodeProduct(product);
+      setScannedBarcode(code);
+      setName(product?.name ?? '');
+      setQuantity('');
+      setSuggestions([]);
+      setPhotoUris([]);
+      setRecognitionState('idle');
+      setBarcodeMessage(product ? '' : 'No product name was found for this barcode. Read the package label and enter its name below.');
+      setMode('review');
+    } catch {
+      setBarcodeProduct(null);
+      setScannedBarcode(code);
+      setName('');
+      setQuantity('');
+      setSuggestions([]);
+      setPhotoUris([]);
+      setRecognitionState('idle');
+      setBarcodeMessage('Product lookup is unavailable. Read the package label and enter its name below.');
+      setMode('review');
+    } finally {
+      setBarcodeBusy(false);
+      barcodeGuard.current = false;
+    }
+  };
   const takePhoto = async () => {
     if (pendingPhotos.length >= MAX_SCAN_PHOTOS) {
       Alert.alert('Photo limit reached', `You can analyze up to ${MAX_SCAN_PHOTOS} photos at once.`);
@@ -253,6 +312,11 @@ export default function ScanScreen() {
     setName('');
     setQuantity('');
     setKeepPhotos(false);
+    setBarcodeOpen(false);
+    setBarcodeProduct(null);
+    setScannedBarcode(null);
+    setBarcodeMessage('');
+    setBarcodeInput('');
   };
   const saveIngredient = () => {
     if (saveGuard.current || recognitionState === 'analyzing') return;
@@ -361,8 +425,13 @@ export default function ScanScreen() {
       }, { additionalStock: Boolean(suggestion.existingInventoryMatch && decision === 'additional') });
     }
     const manualKey = `${normalizeIngredientName(name)}|${location}`;
-    const manualIsNew = Boolean(name.trim()) && !known.has(manualKey);
-    if (manualIsNew) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: 'manual', reviewedAt });
+    const barcodeMatch = scannedBarcode ? ingredients.find((item) => item.status !== 'used' && item.location === location && item.barcode === scannedBarcode) : undefined;
+    const manualIsNew = Boolean(name.trim()) && !known.has(manualKey) && !barcodeMatch;
+    if (manualIsNew) addIngredient({ name: name.trim(), quantity: quantity.trim() || undefined, location, status: 'fresh', confidence: 'confirmed', source: scannedBarcode ? 'barcode' : 'manual', ...(scannedBarcode ? { barcode: scannedBarcode } : {}), ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}), reviewedAt });
+    else if (scannedBarcode && name.trim()) {
+      const existing = barcodeMatch ?? ingredients.find((item) => item.status !== 'used' && item.location === location && normalizeIngredientName(item.name) === normalizeIngredientName(name));
+      if (existing) updateIngredient(existing.id, { barcode: scannedBarcode, ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}), reviewedAt });
+    }
     if (savedModelUri) {
       saveSpaceScan({ id: `space-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         location, modelUri: savedModelUri, createdAt: reviewedAt,
@@ -374,7 +443,7 @@ export default function ScanScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
-      <ScrollView ref={scanScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scanScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" pointerEvents={barcodeBusy ? 'none' : 'auto'}>
         <View style={styles.header}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>ADD TO YOUR KITCHEN</Text><Text style={[styles.title, { color: colors.foreground }]}>{mode === 'review' ? 'Review scan' : 'Scan ingredients'}</Text></View>{mode === 'review' ? <Pressable onPress={resetScan}><Feather name="x" size={22} color={colors.foreground} /></Pressable> : null}</View>
         {mode === 'choose' ? (
           <>
@@ -386,6 +455,8 @@ export default function ScanScreen() {
             <SectionTitle title="Choose how to add" />
             <Pressable testID="take-photo" onPress={takePhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
             <Pressable testID="choose-photo" onPress={pickPhoto} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            <Pressable testID="scan-barcode" disabled={barcodeBusy || pendingPhotos.length > 0 || scanBusy} onPress={() => void openBarcodeCamera()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (barcodeBusy || pendingPhotos.length > 0 || scanBusy) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="barcode-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan food barcode</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Find the exact packaged product name</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            {barcodeBusy ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><ActivityIndicator color={colors.primary} /><Text style={[styles.stateText, { color: colors.foreground }]}>Looking up food product…</Text></View> : null}
             <Pressable testID="scan-3d-space" disabled={scanBusy || pendingPhotos.length > 0} onPress={() => void scanSpace()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (scanBusy || pendingPhotos.length > 0) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="cube-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan 3D space</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>{scanBusy ? 'Preparing ingredient review…' : supportsSpaceScan() ? 'Move around an open shelf · up to 10 views' : 'Requires iPhone 16 Pro and a native app build'}</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             <Text style={[styles.label, { color: colors.foreground }]}>Space to scan</Text>
             <View style={[styles.chips, { marginBottom: 14 }]}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
@@ -399,14 +470,15 @@ export default function ScanScreen() {
                  <Pressable testID="analyze-photos" onPress={analyzeCameraSession} style={({ pressed }) => [styles.sessionButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Analyze photos</Text></Pressable>
                </View>
              </View> : null}
-             <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode lookup is not configured. Use photo recognition or manual entry instead.</Text></View>
+             <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode names come from Open Food Facts. Check the package label before saving; package size does not tell us how many you own.</Text></View>
               {spaceScans.length ? <><SectionTitle title="Saved 3D spaces" />{spaceScans.slice().reverse().map((scan) => <View key={scan.id} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{scan.location} · {new Date(scan.createdAt).toLocaleDateString()}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>{scan.ingredientNames.length ? scan.ingredientNames.join(', ') : 'No ingredients confirmed'}</Text><View style={styles.sessionActions}><Pressable onPress={() => void viewModel(scan.modelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View 3D model</Text></Pressable><Pressable onPress={() => Alert.alert('Delete 3D scan?', 'This removes the saved model. Kitchen ingredients remain.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteSpaceScan(scan.id) }])} style={[styles.sessionButton, { backgroundColor: colors.muted }]}><Text style={[styles.sessionButtonText, { color: colors.destructive }]}>Delete</Text></Pressable></View></View>)}</> : null}
-              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>When you ask for recognition, the photos are sent to the Kitchen Compass server and an external AI service. Ingredients are added only after review. Photo copies are optional; a saved 3D surface model stays on this device until you delete it.</Text></View>
+              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Photo recognition sends photos to the Kitchen Compass server and an external AI service. Barcode lookup sends only the barcode to Open Food Facts. Ingredients are added only after review. Photo copies are optional; a saved 3D surface model stays on this device until you delete it.</Text></View>
           </>
         ) : (
           <>
             {photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
             {pendingModelUri ? <Pressable onPress={() => void viewModel(pendingModelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 16 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View rotatable 3D model</Text></Pressable> : null}
+            {scannedBarcode ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{barcodeProduct ? 'Found on Open Food Facts' : 'Barcode scanned'}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>{barcodeProduct ? `${barcodeProduct.name}${barcodeProduct.packageSize ? ` · Package: ${barcodeProduct.packageSize}` : ''}` : barcodeMessage}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Barcode {scannedBarcode}. Confirm the food name and storage location below. The package size is not an inventory quantity.</Text></View> : null}
             <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
             {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
              {recognitionState === 'unavailable' ? <><View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View>{pendingPhotos.length ? <Pressable onPress={() => setMode('choose')} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 12 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Review photos and try again</Text></Pressable> : null}</> : null}
@@ -439,6 +511,7 @@ export default function ScanScreen() {
             <TextInput value={quantity} onChangeText={setQuantity} placeholder="e.g. 1 bag" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
+            {scannedBarcode && ingredients.some((item) => item.status !== 'used' && item.location === location && (item.barcode === scannedBarcode || normalizeIngredientName(item.name) === normalizeIngredientName(name))) ? <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground, marginTop: 12 }]}>This food is already in your kitchen at this location. Saving will attach its barcode without adding duplicate stock. Edit the existing item to change its quantity.</Text> : null}
                  {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Unclear quantities remain unknown until you add them. Save is the confirmation step; no item is silently added from an AI guess.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
             <Pressable testID="save-ingredient" disabled={recognitionState === 'analyzing'} onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, recognitionState === 'analyzing' && styles.disabled]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
           </>
@@ -455,6 +528,13 @@ export default function ScanScreen() {
             <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>{analysisStage}</Text>
             <Text style={[styles.progressSubnote, { color: colors.mutedForeground }]}>Estimated progress while we prepare and process the image response.</Text>
           </View>
+        </View>
+      </Modal>
+      <Modal visible={barcodeOpen} animationType="slide" onRequestClose={() => setBarcodeOpen(false)}>
+        <View style={styles.cameraScreen}>
+          {barcodeOpen && barcodeCameraEnabled ? <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'itf14'] }} onBarcodeScanned={(result) => void resolveBarcode(result.data)} onMountError={() => { setBarcodeCameraEnabled(false); Alert.alert('Barcode camera unavailable', 'Enter the barcode digits manually below.'); }} /> : null}
+          <View style={[styles.cameraTop, { paddingTop: insets.top + 14 }]}><Pressable accessibilityLabel="Close barcode scanner" onPress={() => setBarcodeOpen(false)} style={styles.cameraClose}><Feather name="x" size={22} color="#fff" /></Pressable><Text style={styles.cameraCount}>Food barcode</Text></View>
+          <View style={[styles.cameraBottom, { paddingBottom: insets.bottom + 20, paddingHorizontal: 20 }]}><Text style={styles.cameraHint}>{barcodeCameraEnabled ? 'Hold the product barcode inside the camera view.' : 'Camera access is unavailable. Enter the digits printed under the barcode.'}</Text><TextInput value={barcodeInput} onChangeText={setBarcodeInput} keyboardType="number-pad" maxLength={14} placeholder="Or enter barcode digits" placeholderTextColor="#777" style={[styles.input, { backgroundColor: '#fff', color: '#111', marginTop: 15 }]} /><Pressable onPress={() => void resolveBarcode(barcodeInput)} style={[styles.sessionButton, { backgroundColor: '#fff', marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: '#111' }]}>Look up barcode</Text></Pressable>{barcodeMessage ? <Text style={[styles.cameraHint, { marginTop: 10 }]}>{barcodeMessage}</Text> : null}</View>
         </View>
       </Modal>
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>

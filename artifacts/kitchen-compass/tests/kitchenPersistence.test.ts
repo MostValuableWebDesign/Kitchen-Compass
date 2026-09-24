@@ -40,6 +40,17 @@ test('saved scan photo deletion keeps confirmed ingredient data', () => {
   assert.equal(cleared.ingredients[0]?.quantityValue, 6);
 });
 
+test('barcode identity survives a local kitchen reload', () => {
+  const state = { ...emptyPersistedKitchenState(), ingredients: [{
+    id: 'oats', name: 'Brand Rolled Oats', location: 'Pantry' as const, status: 'fresh' as const,
+    confidence: 'confirmed' as const, source: 'barcode' as const, barcode: '012345678905', brand: 'Brand',
+  }] };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.equal(restored.ingredients[0]?.barcode, '012345678905');
+  assert.equal(restored.ingredients[0]?.source, 'barcode');
+  assert.equal(restored.ingredients[0]?.brand, 'Brand');
+});
+
 test('full local-data reset starts onboarding again and has no offline records', () => {
   const reset = emptyPersistedKitchenState();
   assert.equal(reset.onboardingComplete, false);

@@ -79,6 +79,7 @@ export default function InventoryEditScreen() {
           <View style={{ width: 22 }} />
         </View>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Only information you confirm here can create a date warning. Photos never set freshness, expiration, or quantity.</Text>
+        {ingredient.barcode ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>Barcode: {ingredient.barcode}{ingredient.brand ? ` · ${ingredient.brand}` : ''}</Text> : null}
 
         <Text style={[styles.label, { color: colors.foreground }]}>Name</Text>
         <TextInput value={name} onChangeText={setName} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
