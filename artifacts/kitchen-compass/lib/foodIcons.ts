@@ -60,7 +60,7 @@ export function foodIconForIngredient(name: string): FoodIconVisual {
   if (/\b(spinach)\b/.test(value)) return { icon: 'illustration-spinach', tone: 'leaf' };
   if (/\b(onions?)\b/.test(value)) return { icon: 'illustration-onion', tone: 'citrus' };
   if (/\b(cucumbers?)\b/.test(value)) return { icon: 'illustration-cucumber', tone: 'leaf' };
-  if (/\b(potatoes?)\b/.test(value)) return { icon: 'illustration-potato', tone: 'grain' };
+  if (/\b(potato(?:es)?)\b/.test(value)) return { icon: 'illustration-potato', tone: 'grain' };
   if (/\b(apples?)\b/.test(value)) return { icon: 'food-apple', tone: 'berry' };
   if (/\b(oranges?|lemons?|limes?|citrus)\b/.test(value)) return { icon: 'fruit-citrus', tone: 'citrus' };
   if (/\b(grapes?)\b/.test(value)) return { icon: 'fruit-grapes', tone: 'berry' };

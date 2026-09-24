@@ -82,7 +82,7 @@ export function RecipeCard({ recipe, hasIngredients, statusText, favorite, onFav
   );
 }
 
-function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: ReturnType<typeof useColors> }) {
+function FoodIllustration({ icon, size, colors }: { icon: FoodIconName; size: number; colors: ReturnType<typeof useColors> }) {
   const herb = colors.primary;
   const highlight = colors.secondaryForeground;
   const flesh = colors.accent;
@@ -91,7 +91,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
   switch (icon) {
     case 'illustration-avocado':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M24 4C18 4 17 12 13 19 9 26 8 31 12 37c5 7 19 7 24 0 4-6 3-11-1-18C31 12 30 4 24 4Z" fill={herb} />
           <Path d="M24 10c-4 0-5 7-8 12-3 5-4 9-1 13 3 4 15 4 18 0 3-4 2-8-1-13-3-5-4-12-8-12Z" fill={flesh} />
           <Ellipse cx="24" cy="29" rx="5" ry="6" fill={seed} />
@@ -99,7 +99,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-tomato':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M24 13c-4-3-9-3-13 0-7 5-7 17-1 23 6 6 18 7 27 1 9-7 8-20 0-25-4-2-9-2-13 1Z" fill={colors.destructive} />
           <Path d="m24 17-3-7-5 2 3-6 6 4 4-5 1 7 7-1-5 6-6-2-2 6-3-6-7 2 4-6Z" fill={herb} />
           <Path d="M24 9c0-3 2-5 5-6" fill="none" stroke={highlight} strokeWidth="2.5" strokeLinecap="round" />
@@ -107,7 +107,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-broccoli':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M18 25h12l3 16H15l3-16Z" fill={flesh} />
           <Circle cx="15" cy="21" r="8" fill={herb} />
           <Circle cx="24" cy="15" r="10" fill={herb} />
@@ -118,7 +118,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-garlic':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M23 11c-2-4-1-7 1-9 3 3 3 6 2 9 6 1 11 7 12 14 2 10-5 17-14 18-9-1-16-8-14-18 1-7 6-12 13-14Z" fill={colors.card} stroke={seed} strokeWidth="2.2" />
           <Path d="M23 14c-2 8-3 18 0 26M26 14c4 8 5 17 3 24M20 15c-4 8-5 16-3 21" fill="none" stroke={seed} strokeWidth="1.8" strokeLinecap="round" />
           <Path d="M23 10c-4-5-8-5-11-4 2 4 5 6 10 7m5-3c4-5 8-5 11-4-2 4-5 6-10 7" fill={herb} />
@@ -126,7 +126,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-basil':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M12 39c9-9 14-16 24-30" fill="none" stroke={herb} strokeWidth="2.4" strokeLinecap="round" />
           <Path d="M14 34C7 32 6 26 8 21c6 0 10 4 9 10m4-9c-2-7 2-12 7-14 4 5 3 11-3 15m2 3c1-7 7-9 12-8 1 6-3 11-10 11" fill={herb} />
           <Path d="m12 26 5 5m7-12-1 5m11 1-6 5" fill="none" stroke={highlight} strokeWidth="1.4" strokeLinecap="round" />
@@ -134,7 +134,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-parsley':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M24 42V21m0 13L13 23m11 7 11-10" fill="none" stroke={herb} strokeWidth="2.3" strokeLinecap="round" />
           <Path d="M24 23c-7 0-11-5-9-11 6-1 10 2 9 11Zm1-1c-1-7 3-11 9-10 2 6-2 10-9 10ZM14 28c-6-1-9-6-7-11 6 0 9 4 7 11Zm22-2c1-6 6-9 11-7 0 6-4 9-11 7Z" fill={herb} />
           <Circle cx="24" cy="12" r="2" fill={highlight} opacity="0.65" />
@@ -144,14 +144,14 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-spinach':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M24 40V18m0 17L12 25m12 4 12-12" fill="none" stroke={highlight} strokeWidth="2" strokeLinecap="round" />
           <Path d="M24 21C13 22 8 16 10 7c10-2 16 3 14 14Zm1-2C25 9 31 4 40 7c1 10-5 15-15 12ZM13 29c-7 0-10-5-8-11 7-1 11 3 8 11Zm23-2c1-7 6-10 12-7 0 7-4 10-12 7Z" fill={herb} />
         </Svg>
       );
     case 'illustration-onion':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M24 7c-3 6-12 9-14 19-2 9 4 16 14 17 10-1 16-8 14-17C36 16 27 13 24 7Z" fill={flesh} stroke={seed} strokeWidth="2" />
           <Path d="M24 11c-2 9-2 21 0 29m-1-24c-5 5-7 12-5 19m7-19c5 5 7 12 5 19" fill="none" stroke={seed} strokeWidth="1.6" strokeLinecap="round" />
           <Path d="M23 8c-1-3 0-5 2-7" fill="none" stroke={herb} strokeWidth="2" strokeLinecap="round" />
@@ -159,7 +159,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-cucumber':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M11 34c-3-3-2-9 2-14L28 5c4-4 10-4 13 0s4 9 0 13L27 33c-5 5-12 5-16 1Z" fill={herb} />
           <Path d="m15 31 19-22m-14 27L39 17" fill="none" stroke={highlight} strokeWidth="2" strokeLinecap="round" opacity="0.75" />
           <Circle cx="12" cy="33" r="2" fill={flesh} />
@@ -168,7 +168,7 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
       );
     case 'illustration-potato':
       return (
-        <Svg viewBox="0 0 48 48" width="100%" height="100%">
+        <Svg viewBox="0 0 48 48" width={size} height={size}>
           <Path d="M7 25C7 15 15 9 25 10c10-1 17 5 17 14s-8 15-18 15C14 39 7 34 7 25Z" fill={flesh} stroke={seed} strokeWidth="1.7" />
           <Circle cx="17" cy="20" r="1.6" fill={seed} />
           <Circle cx="29" cy="17" r="1.4" fill={seed} />
@@ -181,7 +181,9 @@ function FoodIllustration({ icon, colors }: { icon: FoodIconName; colors: Return
   }
 }
 
-function isFoodIllustration(icon: FoodIconName) {
+type FoodIllustrationName = Extract<FoodIconName, `illustration-${string}`>;
+
+function isFoodIllustration(icon: FoodIconName): icon is FoodIllustrationName {
   return icon.startsWith('illustration-');
 }
 
@@ -212,7 +214,7 @@ export function FoodIdentityIcon({ name, size = 38 }: { name: string; size?: num
       ]}
     >
       {isFoodIllustration(visual.icon)
-        ? <FoodIllustration icon={visual.icon} colors={colors} />
+        ? <FoodIllustration icon={visual.icon} size={Math.round(size * 0.66)} colors={colors} />
         : <MaterialCommunityIcons name={visual.icon} size={Math.round(size * 0.52)} color={tone.color} />}
     </View>
   );
