@@ -542,8 +542,12 @@ export default function ScanScreen() {
       <Modal visible={barcodeOpen} animationType="slide" onRequestClose={() => setBarcodeOpen(false)}>
         <View style={styles.cameraScreen}>
           {barcodeOpen && barcodeCameraEnabled ? <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'itf14'] }} onBarcodeScanned={(result) => void resolveBarcode(result.data)} onMountError={() => { setBarcodeCameraEnabled(false); Alert.alert('Barcode camera unavailable', 'Enter the barcode digits manually below.'); }} /> : null}
+          {barcodeCameraEnabled ? <View pointerEvents="none" style={styles.barcodeGuideArea}>
+            <View style={styles.barcodeGuideBox}><View style={styles.barcodeGuideLine} /></View>
+            <Text style={styles.barcodeGuideLabel}>Align the full barcode inside the box</Text>
+          </View> : null}
           <View style={[styles.cameraTop, { paddingTop: insets.top + 14 }]}><Pressable accessibilityLabel="Close barcode scanner" onPress={() => setBarcodeOpen(false)} style={styles.cameraClose}><Feather name="x" size={22} color="#fff" /></Pressable><Text style={styles.cameraCount}>Food barcode</Text></View>
-          <View style={[styles.cameraBottom, { paddingBottom: insets.bottom + 20, paddingHorizontal: 20 }]}><Text style={styles.cameraHint}>{barcodeCameraEnabled ? 'Hold the product barcode inside the camera view.' : 'Camera access is unavailable. Enter the digits printed under the barcode.'}</Text><TextInput value={barcodeInput} onChangeText={setBarcodeInput} keyboardType="number-pad" maxLength={14} placeholder="Or enter barcode digits" placeholderTextColor="#777" style={[styles.input, { backgroundColor: '#fff', color: '#111', marginTop: 15 }]} /><Pressable onPress={() => void resolveBarcode(barcodeInput)} style={[styles.sessionButton, { backgroundColor: '#fff', marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: '#111' }]}>Look up barcode</Text></Pressable>{barcodeMessage ? <Text style={[styles.cameraHint, { marginTop: 10 }]}>{barcodeMessage}</Text> : null}</View>
+          <View style={[styles.cameraBottom, { paddingBottom: insets.bottom + 20, paddingHorizontal: 20 }]}><Text style={styles.cameraHint}>{barcodeCameraEnabled ? 'Keep the bars sharp and level inside the box.' : 'Camera access is unavailable. Enter the digits printed under the barcode.'}</Text><TextInput value={barcodeInput} onChangeText={setBarcodeInput} keyboardType="number-pad" maxLength={14} placeholder="Or enter barcode digits" placeholderTextColor="#777" style={[styles.input, { backgroundColor: '#fff', color: '#111', marginTop: 15 }]} /><Pressable onPress={() => void resolveBarcode(barcodeInput)} style={[styles.sessionButton, { backgroundColor: '#fff', marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: '#111' }]}>Look up barcode</Text></Pressable>{barcodeMessage ? <Text style={[styles.cameraHint, { marginTop: 10 }]}>{barcodeMessage}</Text> : null}</View>
         </View>
       </Modal>
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>
@@ -638,6 +642,10 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.5 },
   cameraScreen: { flex: 1, backgroundColor: '#111' },
+  barcodeGuideArea: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  barcodeGuideBox: { width: '82%', maxWidth: 360, height: 140, borderWidth: 3, borderColor: '#fff', borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.12)', alignItems: 'center', justifyContent: 'center' },
+  barcodeGuideLine: { width: '76%', height: 2, backgroundColor: 'rgba(255,255,255,0.8)' },
+  barcodeGuideLabel: { color: '#fff', backgroundColor: 'rgba(0,0,0,0.7)', overflow: 'hidden', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, fontSize: 13, fontFamily: 'Inter_700Bold', marginTop: 14, textAlign: 'center' },
   cameraTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   cameraClose: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
   cameraCount: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold', backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, overflow: 'hidden', paddingHorizontal: 12, paddingVertical: 8 },
