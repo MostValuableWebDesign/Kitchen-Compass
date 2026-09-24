@@ -18,6 +18,7 @@ import {
   hasInvalidMinimumQuantity,
   hasInvalidMinimumQuantityValue,
   parseQuantityText,
+  quantityWithDefaultUnit,
   replacePlanSlots,
   rankPlanRecipes,
   recipeMatchesPreferences,
@@ -199,9 +200,13 @@ test('ingredient matching uses normalized identities, not broad substrings', () 
 
 test('unsupported quantities remain unknown while supported quantities are normalized', () => {
   assert.deepEqual(parseQuantityText('2 eggs'), { quantityValue: 2, unit: 'egg', quantityKnown: true });
+  assert.deepEqual(parseQuantityText('1 ea'), { quantityValue: 1, unit: 'ea', quantityKnown: true });
   assert.equal(parseQuantityText('1 bag').quantityKnown, false);
   assert.equal(parseQuantityText('a handful').quantityKnown, false);
   assert.equal(parseQuantityText('1 handful').quantityKnown, true);
+  assert.equal(quantityWithDefaultUnit(), '1 ea');
+  assert.equal(quantityWithDefaultUnit('2'), '2 ea');
+  assert.equal(quantityWithDefaultUnit('1', 'g'), '1 g');
 });
 
 test('duplicate protection matches name and location, allowing separate rows by location', () => {
@@ -218,6 +223,25 @@ test('repeated recognition keeps one ingredient unless extra stock is explicitly
   const extra = addKitchenIngredient([eggs], repeated, true);
   assert.equal(extra.length, 1);
   assert.equal(extra[0]?.quantityValue, 4);
+  const defaultedExtra = addKitchenIngredient([eggs], {
+    ...repeated,
+    id: 'single-egg',
+    quantity: '1 ea',
+    quantityValue: 1,
+    unit: 'ea',
+    quantityKnown: true,
+  }, true);
+  assert.equal(defaultedExtra[0]?.quantity, '3 egg');
+  const unknown = { id: 'unknown-apple', name: 'apple', location: 'Pantry', status: 'fresh' as const, quantityKnown: false };
+  const nowCounted = addKitchenIngredient([unknown], {
+    ...unknown,
+    id: 'new-apple',
+    quantity: '1 ea',
+    quantityValue: 1,
+    unit: 'ea',
+    quantityKnown: true,
+  }, true);
+  assert.equal(nowCounted[0]?.quantity, '2 ea');
   assert.equal(addKitchenIngredient([eggs], { ...eggs, id: 'pantry-eggs', location: 'Pantry' }).length, 2);
   const used = { ...eggs, status: 'used' as const };
   const reactivated = addKitchenIngredient([used], repeated);

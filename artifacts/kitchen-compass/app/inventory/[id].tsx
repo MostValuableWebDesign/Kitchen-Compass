@@ -9,7 +9,7 @@ import { useColors } from '@/hooks/useColors';
 import { hasInvalidMinimumQuantity, normalizeConfirmedDate } from '@/lib/kitchenLogic';
 
 const locations: StorageLocation[] = ['Refrigerator', 'Freezer', 'Pantry'];
-const supportedUnits = ['g', 'kg', 'oz', 'lb', 'ml', 'l', 'tsp', 'tbsp', 'cup', 'count', 'egg', 'fruit', 'slice', 'clove', 'breast', 'handful'];
+const supportedUnits = ['g', 'kg', 'oz', 'lb', 'ml', 'l', 'tsp', 'tbsp', 'cup', 'count', 'ea', 'egg', 'fruit', 'slice', 'clove', 'breast', 'handful'];
 const statuses = ['fresh', 'low', 'used'] as const;
 
 export default function InventoryEditScreen() {

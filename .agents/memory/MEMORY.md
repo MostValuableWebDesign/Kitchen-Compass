@@ -7,3 +7,4 @@
 - [Week-wide plan accounting](weekly-plan-accounting.md) — all planned meals share reservations; known shortages and unknown quantities stay separate.
 - [Multi-photo scan reliability](scan-batch-reliability.md) — real image batches need bounded model output and more provider time than tiny-image tests.
 - [Published recipe search payload](published-recipe-search-payload.md) — keep search anchors separate from pantry matching so excluded seasonings still count as available.
+- [Ingredient add quantity defaults](ingredient-add-quantity-defaults.md) — new additions default to 1 ea; confirmed duplicates increment the existing row in its unit.

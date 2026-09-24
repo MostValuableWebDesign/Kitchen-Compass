@@ -84,7 +84,7 @@ export function canonicalUnit(value?: string) {
   const unit = value?.trim().toLowerCase().replace(/\.$/, '');
   if (!unit) return undefined;
   const singular = unit.endsWith('s') && unit !== 'tbsp' ? unit.slice(0, -1) : unit;
-  return ({ tablespoons: 'tbsp', tablespoon: 'tbsp', teaspoons: 'tsp', teaspoon: 'tsp', pounds: 'lb', pound: 'lb', ounces: 'oz', ounce: 'oz', kilograms: 'kg', kilogram: 'kg', grams: 'g', gram: 'g', liters: 'l', liter: 'l', milliliters: 'ml', milliliter: 'ml', cups: 'cup', cloves: 'clove', breasts: 'breast', slices: 'slice', fruits: 'fruit', handfuls: 'handful', eggs: 'egg' } as Record<string, string>)[singular] ?? singular;
+  return ({ tablespoons: 'tbsp', tablespoon: 'tbsp', teaspoons: 'tsp', teaspoon: 'tsp', pounds: 'lb', pound: 'lb', ounces: 'oz', ounce: 'oz', kilograms: 'kg', kilogram: 'kg', grams: 'g', gram: 'g', liters: 'l', liter: 'l', milliliters: 'ml', milliliter: 'ml', cups: 'cup', cloves: 'clove', breasts: 'breast', slices: 'slice', fruits: 'fruit', handfuls: 'handful', eggs: 'egg', each: 'ea', piece: 'ea', pieces: 'ea' } as Record<string, string>)[singular] ?? singular;
 }
 
 type UnitConversion = { family: 'weight' | 'volume' | 'count'; factor: number };
@@ -101,6 +101,7 @@ function unitConversion(unit?: string): UnitConversion | null {
     case 'tbsp': return { family: 'volume', factor: 15 };
     case 'cup': return { family: 'volume', factor: 240 };
     case 'count':
+    case 'ea':
     case 'egg':
     case 'fruit':
     case 'slice':
@@ -124,6 +125,12 @@ export function parseQuantityText(quantity?: string) {
   const unit = canonicalUnit(match[2]);
   if (!isSupportedQuantityUnit(unit)) return { quantityValue: undefined, unit: undefined, quantityKnown: false };
   return { quantityValue: Number(match[1]), unit, quantityKnown: true };
+}
+
+export function quantityWithDefaultUnit(quantity?: string, defaultUnit = 'ea') {
+  const value = quantity?.trim();
+  if (!value) return `1 ${defaultUnit}`;
+  return /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ? `${value} ${defaultUnit}` : value;
 }
 
 export function hasInvalidMinimumQuantity(quantity?: string) {
@@ -175,9 +182,10 @@ export function canCombineIngredientQuantities(
   existing: { quantityKnown?: boolean; quantityValue?: number; unit?: string },
   incoming: { quantityKnown?: boolean; quantityValue?: number; unit?: string },
 ) {
-  if (!existing.quantityKnown || !incoming.quantityKnown
-    || existing.quantityValue === undefined || incoming.quantityValue === undefined
-    || !existing.unit || !incoming.unit) return false;
+  if (!incoming.quantityKnown || incoming.quantityValue === undefined || !incoming.unit) return false;
+  if (!existing.quantityKnown || existing.quantityValue === undefined || !existing.unit) {
+    return canonicalUnit(incoming.unit) === 'ea';
+  }
   const converted = canonicalUnit(existing.unit) === canonicalUnit(incoming.unit)
     ? incoming.quantityValue
     : convertQuantity(incoming.quantityValue, incoming.unit, existing.unit);
@@ -204,15 +212,20 @@ export function addKitchenIngredient<T extends {
     return next;
   }
   if (!additionalStock || !canCombineIngredientQuantities(existing, incoming)
-    || existing.quantityValue === undefined || incoming.quantityValue === undefined
-    || !existing.unit || !incoming.unit) return rows;
-  const converted = canonicalUnit(existing.unit) === canonicalUnit(incoming.unit)
+    || incoming.quantityValue === undefined || !incoming.unit) return rows;
+  const existingUnit = existing.quantityKnown && existing.quantityValue !== undefined && existing.unit
+    ? existing.unit
+    : 'ea';
+  const existingQuantity = existing.quantityKnown && existing.quantityValue !== undefined && existing.unit
+    ? existing.quantityValue
+    : 1;
+  const converted = canonicalUnit(existingUnit) === canonicalUnit(incoming.unit)
     ? incoming.quantityValue
-    : convertQuantity(incoming.quantityValue, incoming.unit, existing.unit);
+    : convertQuantity(incoming.quantityValue, incoming.unit, existingUnit);
   if (converted === null || !Number.isFinite(converted)) return rows;
-  const total = Number((existing.quantityValue + converted).toFixed(3));
+  const total = Number((existingQuantity + converted).toFixed(3));
   const next = [...rows];
-  next[index] = { ...existing, status: 'fresh', quantityValue: total, quantity: `${total} ${existing.unit}` };
+  next[index] = { ...existing, status: 'fresh', quantityKnown: true, quantityValue: total, unit: existingUnit, quantity: `${total} ${existingUnit}` };
   return next;
 }
 
