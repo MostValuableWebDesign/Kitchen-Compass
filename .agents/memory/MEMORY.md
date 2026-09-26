@@ -10,3 +10,4 @@
 - [Ingredient add quantity defaults](ingredient-add-quantity-defaults.md) — new additions default to 1 ea; confirmed duplicates increment the existing row in its unit.
 - [Ingredient icon matching](ingredient-icon-matching.md) — preserve food form when matching icons; canonical aliases can hide it, and prepared products should outrank base ingredients.
 - [Persistent API test quotas](persistent-api-test-quotas.md) — shared database-backed rate limits can cause broad API suites to fail with 429s even when focused tests pass.
+- [FatSecret IP allowlisting](fatsecret-ip-allowlisting.md) — FatSecret error 21 means an invalid source IP; Replit outbound IPs are dynamic, so a single-IP allowlist may be temporary.

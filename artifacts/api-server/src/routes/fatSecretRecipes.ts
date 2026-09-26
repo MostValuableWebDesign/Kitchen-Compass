@@ -112,7 +112,23 @@ export async function searchFatSecretRecipes(input: {
     const recipes = result.recipes as { recipe?: Array<{ recipe_id?: string; recipe_name?: string; recipe_image?: string }> | { recipe_id?: string; recipe_name?: string; recipe_image?: string } } | undefined;
     return arrayOf(recipes?.recipe);
   }));
-  if (searchResults.every((result) => result.status === "rejected")) throw new Error("FatSecret searches failed");
+  if (searchResults.every((result) => result.status === "rejected")) {
+    const reasons = new Set(searchResults.flatMap((result) => {
+      if (result.status !== "rejected") return [];
+      const reason: unknown = result.reason;
+      if (!(reason instanceof Error)) return ["unknown failure"];
+      const message = reason.message;
+      if (
+        /^FatSecret authentication responded \d{3}$/.test(message)
+        || /^FatSecret responded \d{3}$/.test(message)
+        || /^FatSecret API error(?: \d+)?$/.test(message)
+        || message === "FatSecret authentication returned no token"
+      ) return [message];
+      if (reason.name === "TimeoutError" || reason.name === "AbortError") return ["request timed out"];
+      return ["request failed"];
+    }));
+    throw new Error(`FatSecret searches failed: ${[...reasons].join("; ") || "unknown failure"}`);
+  }
   const searches = searchResults.map((result) => result.status === "fulfilled" ? result.value : []);
   const ids: string[] = [];
   const seen = new Set<string>();
