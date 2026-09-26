@@ -3,6 +3,7 @@ import { once } from "node:events";
 import test, { after } from "node:test";
 import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
+import { fatSecretConfigured } from "../src/routes/fatSecretRecipes";
 
 process.env.SESSION_SECRET = "fatsecret-recipes-test-session";
 const server = app.listen(0);
@@ -16,8 +17,15 @@ after(() => server.close());
 test("FatSecret search authenticates on the server, verifies full recipes, and excludes archived IDs", async () => {
   const oldId = process.env.FATSECRET_CLIENT_ID;
   const oldSecret = process.env.FATSECRET_CLIENT_SECRET;
+  const oldEnabled = process.env.FATSECRET_ENABLED;
+  const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
   process.env.FATSECRET_CLIENT_ID = "test-client";
   process.env.FATSECRET_CLIENT_SECRET = "test-secret";
+  process.env.FATSECRET_ENABLED = "false";
+  delete process.env.SPOONACULAR_API_KEY;
+  assert.equal(fatSecretConfigured(), false);
+  process.env.FATSECRET_ENABLED = "true";
+  assert.equal(fatSecretConfigured(), true);
   const calls: string[] = [];
   let failFatSecret = false;
   globalThis.fetch = async (input, init) => {
@@ -72,5 +80,7 @@ test("FatSecret search authenticates on the server, verifies full recipes, and e
     globalThis.fetch = originalFetch;
     if (oldId === undefined) delete process.env.FATSECRET_CLIENT_ID; else process.env.FATSECRET_CLIENT_ID = oldId;
     if (oldSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET; else process.env.FATSECRET_CLIENT_SECRET = oldSecret;
+    if (oldEnabled === undefined) delete process.env.FATSECRET_ENABLED; else process.env.FATSECRET_ENABLED = oldEnabled;
+    if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
   }
 });

@@ -15,6 +15,7 @@ let accessToken: { value: string; expiresAt: number } | undefined;
 let pendingToken: Promise<string> | undefined;
 
 export function fatSecretConfigured() {
+  if (process.env.FATSECRET_ENABLED?.trim().toLowerCase() === "false") return false;
   return Boolean(process.env.FATSECRET_CLIENT_ID?.trim() && process.env.FATSECRET_CLIENT_SECRET?.trim());
 }
 

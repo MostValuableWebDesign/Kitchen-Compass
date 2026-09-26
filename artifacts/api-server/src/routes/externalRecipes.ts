@@ -198,7 +198,7 @@ router.post("/recipes/external", async (req, res) => {
     }
     recipes.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
     res.json({ recipes, provider: "Multiple sources", providersUnavailable,
-      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. FatSecret and Spoonacular recipes are available online only."
+      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Published recipes are available online only."
         + (providersUnavailable.length ? ` ${providersUnavailable.join(" and ")} could not be reached; showing available sources.` : "") });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
