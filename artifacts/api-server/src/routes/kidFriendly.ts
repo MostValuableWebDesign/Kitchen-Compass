@@ -5,6 +5,7 @@ const familiarFormats = [
   /\b(pizza|quesadilla|grilled cheese|sandwich|wrap|burrito)\b/i,
   /\b(pancakes?|waffles?|french toast|oatmeal|scrambled eggs?)\b/i,
   /\b(chicken (?:bites|tenders|strips|nuggets)|meatballs?|rice bowls?)\b/i,
+  /\b(baked potatoes?|mashed potatoes?|potato wedges|french fries|burgers?|hamburgers?|cheeseburgers?|meatloaf|chicken pot pie)\b/i,
 ];
 const strongFlavors = /\b(spicy|hot sauce|chili|chilli|cayenne|jalape[nñ]o|habanero)\b/i;
 

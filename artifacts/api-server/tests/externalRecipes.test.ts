@@ -17,7 +17,10 @@ after(() => server.close());
 
 test("familiar meal formats are ranked as kid ideas without claiming every child likes them", () => {
   assert.equal(kidFriendlyScore("Tomato pasta", ["tomato", "pasta"]), 1);
+  assert.equal(kidFriendlyScore("Cheesy baked potatoes", ["potato", "cheddar"]), 1);
+  assert.equal(kidFriendlyScore("Chicken pot pie", ["chicken", "potato"]), 1);
   assert.equal(kidFriendlyScore("Spicy chicken tenders", ["chicken", "cayenne"]), 0);
+  assert.equal(kidFriendlyScore("Cheesy baked potatoes", ["potato", "chili powder"]), 0);
   assert.equal(kidFriendlyScore("Egg and tomato bowl", ["egg", "tomato"]), 0);
 });
 
@@ -30,7 +33,13 @@ test("published recipes require confirmed ingredients and an access token", asyn
 
 test("published recipes show source attribution and never assert allergy safety", async () => {
   const oldKey = process.env.THEMEALDB_API_KEY;
+  const oldFatSecretId = process.env.FATSECRET_CLIENT_ID;
+  const oldFatSecretSecret = process.env.FATSECRET_CLIENT_SECRET;
+  const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
   process.env.THEMEALDB_API_KEY = "test-key";
+  delete process.env.FATSECRET_CLIENT_ID;
+  delete process.env.FATSECRET_CLIENT_SECRET;
+  delete process.env.SPOONACULAR_API_KEY;
   globalThis.fetch = async (input, init) => {
     const target = String(input);
     if (target.includes("themealdb.com") && target.includes("filter.php")) return new Response(JSON.stringify({ meals: [{ idMeal: "1" }, { idMeal: "2" }] }), { status: 200 });
@@ -75,6 +84,12 @@ test("published recipes show source attribution and never assert allergy safety"
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
     else process.env.THEMEALDB_API_KEY = oldKey;
+    if (oldFatSecretId === undefined) delete process.env.FATSECRET_CLIENT_ID;
+    else process.env.FATSECRET_CLIENT_ID = oldFatSecretId;
+    if (oldFatSecretSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET;
+    else process.env.FATSECRET_CLIENT_SECRET = oldFatSecretSecret;
+    if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY;
+    else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
   }
 });
 

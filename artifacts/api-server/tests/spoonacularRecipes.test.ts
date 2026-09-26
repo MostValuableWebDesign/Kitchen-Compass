@@ -30,6 +30,15 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
       assert.equal((init?.headers as Record<string, string>)?.["x-api-key"], "test-key");
       if (failSpoonacular) return new Response("unavailable", { status: 503 });
       if (target.pathname.endsWith("/findByIngredients")) {
+        if (target.searchParams.get("ingredients") === "Potato,Cheddar") {
+          return new Response(JSON.stringify([
+            { id: 201, title: "Cheesy baked potatoes", image: "https://img.spoonacular.com/201.jpg", usedIngredientCount: 2 },
+            { id: 202, title: "Spicy baked potatoes", image: "https://img.spoonacular.com/202.jpg", usedIngredientCount: 2 },
+            { id: 203, title: "Cheesy baked potatoes with cayenne", image: "https://img.spoonacular.com/203.jpg", usedIngredientCount: 1 },
+            { id: 204, title: "Peanut baked potatoes", image: "https://img.spoonacular.com/204.jpg", usedIngredientCount: 1 },
+            { id: 205, title: "Archived cheesy baked potatoes", image: "https://img.spoonacular.com/205.jpg", usedIngredientCount: 2 },
+          ]), { status: 200 });
+        }
         assert.equal(target.searchParams.get("ingredients"), "Pasta,Tomato");
         return new Response(JSON.stringify([
           { id: 101, title: "Tomato pasta", image: "https://img.spoonacular.com/101.jpg", usedIngredientCount: 2 },
@@ -38,6 +47,22 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
         ]), { status: 200 });
       }
       assert.equal(target.pathname, "/recipes/informationBulk");
+      if (target.searchParams.get("ids") === "201,202,203,204") {
+        return new Response(JSON.stringify([
+          { id: 201, title: "Cheesy baked potatoes", ingredients: ["Potato", "Cheddar"] },
+          { id: 202, title: "Spicy baked potatoes", ingredients: ["Potato", "Cheddar"] },
+          { id: 203, title: "Cheesy baked potatoes with cayenne", ingredients: ["Potato", "Cayenne"] },
+          { id: 204, title: "Peanut baked potatoes", ingredients: ["Potato", "Peanut butter"] },
+        ].map(({ id, title, ingredients }) => ({
+          id,
+          title,
+          image: `https://img.spoonacular.com/${id}.jpg`,
+          sourceName: "Example Kitchen",
+          sourceUrl: `https://example.com/recipes/${id}`,
+          analyzedInstructions: [{ steps: [{ step: "Cook until tender." }] }],
+          extendedIngredients: ingredients.map((name) => ({ name, original: `1 cup ${name.toLowerCase()}` })),
+        }))), { status: 200 });
+      }
       assert.equal(target.searchParams.get("ids"), "101,102");
       return new Response(JSON.stringify([101, 102].map((id) => ({
         id,
@@ -69,6 +94,31 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(payload.recipes[0]?.matchedIngredients, ["Pasta", "Tomato"]);
     assert.deepEqual(payload.providersUnavailable, []);
     assert.equal(calls.length, 2);
+
+    const kidsResponse = await originalFetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ingredients: ["Potato", "Cheddar"],
+        searchAnchors: ["Potato", "Cheddar"],
+        allergies: ["peanut"],
+        excludedRecipeIds: ["spoonacular:205"],
+        audience: "kids",
+      }),
+    });
+    assert.equal(kidsResponse.status, 200);
+    const kidsPayload = await kidsResponse.json() as {
+      recipes: Array<{ id: string; title: string; provider: string; sourceName: string; sourceUrl: string; safetyVerified: boolean }>;
+      safetyNotice: string;
+    };
+    assert.deepEqual(kidsPayload.recipes.map((item) => item.id), ["spoonacular:201"]);
+    assert.equal(kidsPayload.recipes[0]?.title, "Cheesy baked potatoes");
+    assert.equal(kidsPayload.recipes[0]?.provider, "Spoonacular");
+    assert.equal(kidsPayload.recipes[0]?.sourceName, "Example Kitchen");
+    assert.equal(kidsPayload.recipes[0]?.sourceUrl, "https://example.com/recipes/201");
+    assert.equal(kidsPayload.recipes[0]?.safetyVerified, false);
+    assert.match(kidsPayload.safetyNotice, /not been independently verified/);
+    assert.match(kidsPayload.safetyNotice, /Check the original recipe and every package label/);
 
     failSpoonacular = true;
     const unavailable = await originalFetch(url, { method: "POST", headers, body: JSON.stringify(request) });
