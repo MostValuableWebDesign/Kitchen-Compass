@@ -18,6 +18,7 @@ export type ExternalRecipesResponse = {
   recipes: ExternalRecipe[];
   provider: "Multiple sources";
   providersUnavailable: Array<"TheMealDB" | "Spoonacular">;
+  sourceResults: Array<{ provider: "Spoonacular" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured"; count: number }>;
   safetyNotice: string;
 };
 

@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import { discoverRecipes, findExternalRecipes, type ExternalRecipe, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
+import { discoverRecipes, findExternalRecipes, type ExternalRecipe, type ExternalRecipesResponse, type RecipeDiscoveryFiltersMealType } from '@workspace/api-client-react';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Image, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -23,10 +23,18 @@ const resultFilters: ResultFilter[] = ['All', 'Ready to cook', 'Almost ready', '
 const mealTypes: RecipeDiscoveryFiltersMealType[] = ['Any', 'Breakfast', 'Lunch', 'Dinner'];
 const timeOptions: Array<number | undefined> = [undefined, 30, 45, 60];
 const healthOptions: Array<number | undefined> = [undefined, 70, 85];
-type ActiveSearch = { kind: 'kitchen' | 'published' | 'kids'; startedAt: number; complete: boolean };
+type ActiveSearch = { kind: 'kitchen' | 'published' | 'kids-ai' | 'kids-online'; startedAt: number; complete: boolean };
+type OnlineSourceResult = ExternalRecipesResponse['sourceResults'][number];
 type PublishedSearchStep = 'choice' | 'manual' | 'confirm';
 type PublishedSelectionMode = 'automatic' | 'manual';
 type RecipeSection = 'general' | 'kids';
+
+function onlineSourceDescription(source: OnlineSourceResult) {
+  if (source.status === 'unavailable') return 'could not be reached';
+  if (source.status === 'not_configured') return 'not configured';
+  if (source.status === 'no_results') return 'no eligible recipes returned';
+  return `${source.count} eligible recipe${source.count === 1 ? '' : 's'} returned`;
+}
 
 export default function RecipesScreen() {
   const colors = useColors();
@@ -64,11 +72,13 @@ export default function RecipesScreen() {
   const [discardedExternalRecipeIds, setDiscardedExternalRecipeIds] = useState<string[]>([]);
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalMessage, setExternalMessage] = useState('');
+  const [externalSourceResults, setExternalSourceResults] = useState<OnlineSourceResult[]>([]);
   const [publishedPickerOpen, setPublishedPickerOpen] = useState(false);
   const [publishedDriverIds, setPublishedDriverIds] = useState<string[]>([]);
   const [publishedSearchStep, setPublishedSearchStep] = useState<PublishedSearchStep>('choice');
   const [publishedSelectionMode, setPublishedSelectionMode] = useState<PublishedSelectionMode>('automatic');
   const [kidMessage, setKidMessage] = useState('');
+  const [kidSourceResults, setKidSourceResults] = useState<OnlineSourceResult[]>([]);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [discoveryError, setDiscoveryError] = useState(false);
   const [discoveryWarning, setDiscoveryWarning] = useState<string>();
@@ -128,17 +138,18 @@ export default function RecipesScreen() {
     setActiveSearch(null);
     setDiscoveryBusy(false);
     setExternalBusy(false);
-    if (activeSearch.kind === 'kitchen' || activeSearch.kind === 'kids') {
+    if (activeSearch.kind === 'kitchen' || activeSearch.kind === 'kids-ai') {
       setDiscoveryError(false);
       setDiscoveryWarning('Recipe search cancelled. Your saved recipes are unchanged.');
-      if (activeSearch.kind === 'kids') setKidMessage('');
+    } else if (activeSearch.kind === 'kids-online') {
+      setKidMessage('Online recipe search cancelled.');
     } else {
       setExternalMessage('Online recipe search cancelled.');
     }
   };
   // The provider does not report work completed. Show elapsed wait as an estimate,
   // then reserve 100% for a response that has actually been processed.
-  const progressLimitMs = activeSearch?.kind === 'published' ? 30_000 : 180_000;
+  const progressLimitMs = activeSearch?.kind === 'published' || activeSearch?.kind === 'kids-online' ? 30_000 : 180_000;
   const progressPercent = activeSearch?.complete ? 100 : activeSearch
     ? Math.min(95, Math.floor(((progressClock - activeSearch.startedAt) / progressLimitMs) * 95))
     : 0;
@@ -203,15 +214,16 @@ export default function RecipesScreen() {
     if (recipesMissingImages.length) void prepareImages(recipesMissingImages);
   }, [hydrated, archivedRecipes]);
 
-  const discover = async (different = false, audience: RecipeSection = 'general', existingController?: AbortController) => {
+  const discover = async (different = false, audience: RecipeSection = 'general') => {
     const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations)
       .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes) && (audience === 'kids' ? isKidFriendlyRecipe(recipe) : recipe.audience !== 'kids'));
-    const controller = existingController ?? new AbortController();
-    if (!existingController && !beginSearch('kitchen', controller)) return;
+    const controller = new AbortController();
+    if (!beginSearch(audience === 'kids' ? 'kids-ai' : 'kitchen', controller)) return;
     setDiscoveryBusy(true);
     setDiscoveryError(false);
     setDiscoveryWarning(undefined);
-    const timeout = existingController ? null : setTimeout(() => controller.abort(), 180_000);
+    if (audience === 'kids') setKidMessage('');
+    const timeout = setTimeout(() => controller.abort(), 180_000);
     try {
       const nextVariation = variation + 1;
       setVariation(nextVariation);
@@ -246,74 +258,27 @@ export default function RecipesScreen() {
       setDiscoveryBusy(false);
       finishSearch(controller, false);
     } finally {
-      if (timeout) clearTimeout(timeout);
+      clearTimeout(timeout);
     }
   };
 
-  const findKids = async () => {
-    const confirmed = ingredients.filter((item) => item.status !== 'used' && item.confidence === 'confirmed').map((item) => item.name);
-    if (!confirmed.length) { setKidMessage('Add at least one confirmed ingredient to find kids’ meals.'); return; }
-    const controller = new AbortController();
-    if (!beginSearch('kids', controller)) return;
-    setKidMessage('Looking for familiar published recipes first…');
-    setDiscoveryError(false);
-    const overallTimeout = setTimeout(() => controller.abort(), 180_000);
-    const sourceController = new AbortController();
-    const abortSource = () => sourceController.abort();
-    controller.signal.addEventListener('abort', abortSource);
-    const sourceTimeout = setTimeout(abortSource, 25_000);
-    try {
-      const result = await findExternalRecipes([...new Set(confirmed)].slice(0, 30), preferences.allergies, sourceController.signal,
-        undefined,
-        [...savedKidPublishedRecipes.map((recipe) => recipe.id), ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : entry.externalId ? [entry.externalId] : [])].slice(-200),
-        [...new Set([...archivedRecipes.map((entry) => entry.title), ...availableRecipes.map((recipe) => recipe.title), ...savedKidPublishedRecipes.map((recipe) => recipe.title)])].slice(0, 200), 'kids');
-      if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const knownIds = new Set([...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.id));
-      const knownTitles = new Set([...availableRecipes.map(recipeTitleKey), ...savedKidPublishedRecipes.map(recipeTitleKey), ...kidOnlineRecipes.map(recipeTitleKey)]);
-      const newRecipes = result.recipes.filter((recipe) => {
-        const title = recipeTitleKey(recipe);
-        if (knownIds.has(recipe.id) || knownTitles.has(title) || isArchivedPublished(recipe, archivedRecipes)
-          || !publishedRecipeAllowed(recipe, preferences.allergies, preferences.dislikes)) return false;
-        knownIds.add(recipe.id);
-        knownTitles.add(title);
-        return true;
-      });
-      if (newRecipes.length) {
-        saveKidPublishedRecipes(newRecipes.filter((recipe) => recipe.provider === 'TheMealDB'));
-        setKidOnlineRecipes((current) => [...current, ...newRecipes.filter((recipe) => recipe.provider !== 'TheMealDB')]);
-        setKidMessage(result.safetyNotice);
-        finishSearch(controller, true);
-        clearTimeout(overallTimeout);
-        return;
-      }
-    } catch {
-      if (searchRequest.current !== controller || controller.signal.aborted) return;
-    } finally {
-      clearTimeout(sourceTimeout);
-      controller.signal.removeEventListener('abort', abortSource);
-      if (searchRequest.current !== controller || controller.signal.aborted) clearTimeout(overallTimeout);
-    }
-    if (searchRequest.current !== controller || controller.signal.aborted) return;
-    setKidMessage('');
-    try {
-      await discover(false, 'kids', controller);
-    } finally {
-      clearTimeout(overallTimeout);
-    }
-  };
-
-  const findPublished = async () => {
+  const findPublished = async (audience: RecipeSection) => {
     const searchInput = buildPublishedRecipeSearch(ingredients, publishedDriverIds, { manualSelection: publishedSelectionMode === 'manual' });
-    if (!searchInput.anchors.length) { setExternalMessage('Add at least one eligible confirmed ingredient first.'); return; }
+    if (!searchInput.anchors.length) {
+      if (audience === 'kids') setKidMessage('Add at least one eligible confirmed ingredient first.');
+      else setExternalMessage('Add at least one eligible confirmed ingredient first.');
+      return;
+    }
     const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
       .filter((allergy): allergy is string => typeof allergy === 'string')
       .map((allergy) => allergy.trim())
       .filter((allergy) => allergy.length > 0 && allergy.length <= 80))]
       .slice(0, 30);
     const controller = new AbortController();
-    if (!beginSearch('published', controller)) return;
+    if (!beginSearch(audience === 'kids' ? 'kids-online' : 'published', controller)) return;
     setExternalBusy(true);
-    setExternalMessage('');
+    if (audience === 'kids') { setKidMessage(''); setKidSourceResults([]); }
+    else { setExternalMessage(''); setExternalSourceResults([]); }
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       const result = await findExternalRecipes(
@@ -322,24 +287,54 @@ export default function RecipesScreen() {
         controller.signal,
         searchInput.anchors,
         [
-          ...seenPublishedRecipeIds.current,
+          ...(audience === 'kids' ? [...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.id) : [...seenPublishedRecipeIds.current]),
           ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : entry.externalId ? [entry.externalId] : []),
         ].slice(0, 200),
-        archivedRecipes.map((entry) => entry.title).slice(0, 200),
+        [...new Set([
+          ...archivedRecipes.map((entry) => entry.title),
+          ...(audience === 'kids' ? [...availableRecipes, ...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.title) : []),
+        ])].slice(0, 200),
+        audience,
       );
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const visible = result.recipes.filter((recipe) => !isArchivedPublished(recipe, archivedRecipes));
-      setExternalRecipes(visible);
-      setDiscardedExternalRecipeIds([]);
-      visible.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
-      setExternalMessage(visible.length
-        ? result.safetyNotice
-        : `No new published recipes matched these ingredients. Archived recipes remain hidden.${result.providersUnavailable.length ? ` ${result.providersUnavailable.join(' and ')} could not be reached.` : ''}`);
+      const searchedOnlineSource = result.sourceResults?.some((source) => source.status === 'found' || source.status === 'no_results') ?? true;
+      if (audience === 'kids') {
+        setKidSourceResults(result.sourceResults ?? []);
+        const knownIds = new Set([...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.id));
+        const knownTitles = new Set([...availableRecipes, ...savedKidPublishedRecipes, ...kidOnlineRecipes].map(recipeTitleKey));
+        const newRecipes = result.recipes.filter((recipe) => {
+          const title = recipeTitleKey(recipe);
+          if (knownIds.has(recipe.id) || knownTitles.has(title) || isArchivedPublished(recipe, archivedRecipes)
+            || !publishedRecipeAllowed(recipe, preferences.allergies, preferences.dislikes)) return false;
+          knownIds.add(recipe.id);
+          knownTitles.add(title);
+          return true;
+        });
+        if (newRecipes.length) {
+          saveKidPublishedRecipes(newRecipes.filter((recipe) => recipe.provider === 'TheMealDB'));
+          setKidOnlineRecipes((current) => [...current, ...newRecipes.filter((recipe) => recipe.provider === 'Spoonacular')]);
+        }
+        setKidMessage(newRecipes.length
+          ? `${newRecipes.length} new kid-friendly online recipe${newRecipes.length === 1 ? '' : 's'} found. ${result.safetyNotice}`
+          : searchedOnlineSource ? 'No new kid-friendly online recipes matched. Saved and archived recipes remain unchanged.'
+            : 'No online recipe source was available. Saved and archived recipes remain unchanged.');
+      } else {
+        setExternalSourceResults(result.sourceResults ?? []);
+        const visible = result.recipes.filter((recipe) => !isArchivedPublished(recipe, archivedRecipes));
+        setExternalRecipes(visible);
+        setDiscardedExternalRecipeIds([]);
+        visible.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
+        setExternalMessage(visible.length
+          ? result.safetyNotice
+          : searchedOnlineSource ? 'No new online recipes matched these ingredients. Archived recipes remain hidden.'
+            : 'No online recipe source was available. Saved recipes remain available.');
+      }
       setExternalBusy(false);
       finishSearch(controller, true);
     } catch {
       if (searchRequest.current !== controller) return;
-      setExternalMessage('Published recipes are unavailable. Check the connection and recipe source setup; saved recipes remain available.');
+      if (audience === 'kids') setKidMessage('Online recipe search is unavailable. Check the connection; saved recipes remain available.');
+      else setExternalMessage('Online recipe search is unavailable. Check the connection; saved recipes remain available.');
       setExternalBusy(false);
       finishSearch(controller, false);
     } finally {
@@ -378,20 +373,20 @@ export default function RecipesScreen() {
           text: 'Find recipes',
           onPress: () => {
             setPublishedPickerOpen(false);
-            void findPublished();
+            void findPublished(section);
           },
         },
       ],
     );
   };
 
-  const confirmKitchenDiscovery = (different = false) => {
+  const confirmKitchenDiscovery = (different = false, audience: RecipeSection = 'general') => {
     Alert.alert(
-      'Find recipes from your kitchen?',
-      'Confirmed kitchen ingredients and saved preferences will be sent to AI to create up to 5 recipe ideas. Nothing is added to your kitchen.',
+      audience === 'kids' ? 'Create kid-friendly recipes?' : 'Find recipes from your kitchen?',
+      `Confirmed kitchen ingredients and saved preferences will be sent to AI to create up to 5 ${audience === 'kids' ? 'kid-friendly ' : ''}recipe ideas. Nothing is added to your kitchen.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Find recipes', onPress: () => void discover(different) },
+        { text: 'Create recipes', onPress: () => void discover(different, audience) },
       ],
     );
   };
@@ -450,7 +445,7 @@ export default function RecipesScreen() {
     : 0), [archivedRecipes, availableRecipes, cuisine, dietaryPreference, equipment, favoriteRecipeVersions, ingredients, maxMinutes, mealType, minHealthScore, preferences, reservations, resultFilter, search, section]);
 
   const statusMessage = discoveryBusy
-    ? section === 'kids' ? 'No new published match. Preparing a kid-friendly kitchen recipe…' : 'Checking your confirmed kitchen and preparing new ideas…'
+    ? section === 'kids' ? 'Creating kid-friendly recipes from your kitchen…' : 'Checking your confirmed kitchen and preparing new ideas…'
     : discoveryError
       ? 'Recipe discovery is unavailable. Saved recipes and the built-in examples are still available offline.'
       : discoveryWarning;
@@ -486,18 +481,20 @@ export default function RecipesScreen() {
             <Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discoveryBusy ? 'Finding' : 'Find recipes'}</Text>
           </Pressable>
         </View> : <View style={[styles.discoveryCard, { backgroundColor: colors.secondary }]}>
-          <View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Ideas for picky eaters</Text><Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Find familiar, mild meals using your confirmed kitchen ingredients. Published recipes come first; if none match, we’ll create a new one.</Text></View>
-          <Pressable testID="find-kids-recipes" onPress={() => void findKids()} disabled={Boolean(activeSearch) || !hydrated} style={[styles.discoverButton, { backgroundColor: colors.primary }, activeSearch && styles.disabled]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>Find kids’ recipes</Text></Pressable>
+          <View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Create for picky eaters</Text><Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Use AI to create familiar, mild recipes from your kitchen ingredients and saved preferences.</Text></View>
+          <Pressable testID="create-kids-recipes" onPress={() => confirmKitchenDiscovery(false, 'kids')} disabled={Boolean(activeSearch) || !hydrated} style={[styles.discoverButton, { backgroundColor: colors.primary }, activeSearch && styles.disabled]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discoveryBusy ? 'Creating' : 'Create recipes'}</Text></Pressable>
         </View>}
         {section === 'kids' ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="info" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>Familiar foods are a starting point; each child’s likes vary. Adjust size and texture for your child’s age and supervise meals. Review every ingredient and allergy.</Text></View> : null}
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
         {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find recipes through Spoonacular first, then TheMealDB, using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
+        {section === 'kids' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Kid-friendly recipes online</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search Spoonacular first, then TheMealDB. Choose automatic or manual ingredient anchors.</Text></View><Pressable testID="find-kids-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
+        {(section === 'kids' ? kidSourceResults : externalSourceResults).length ? <View style={[styles.sourceStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.sourceStatusTitle, { color: colors.foreground }]}>Online source results</Text>{(section === 'kids' ? kidSourceResults : externalSourceResults).map((source) => <Text key={source.provider} style={[styles.sourceStatusRow, { color: source.status === 'found' ? colors.primary : source.status === 'unavailable' ? colors.destructive : colors.mutedForeground }]}>{source.provider}: {onlineSourceDescription(source)}</Text>)}</View> : null}
         {(section === 'kids' ? kidMessage : externalMessage) ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{section === 'kids' ? kidMessage : externalMessage}</Text> : null}
         {section === 'general' && visibleExternalRecipes.length ? <View style={styles.externalResultsHeader}>
           <View>
             <Text style={[styles.externalResultsTitle, { color: colors.foreground }]}>{visibleExternalRecipes.length} recipe{visibleExternalRecipes.length === 1 ? '' : 's'} found</Text>
-            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Best ingredient matches first · Swipe to browse</Text>
+            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Spoonacular first, then TheMealDB · Swipe to browse</Text>
           </View>
           <Feather name="arrow-right" size={18} color={colors.primary} />
         </View> : null}
@@ -540,7 +537,7 @@ export default function RecipesScreen() {
         </ScrollView>
         <View style={styles.discoveryHeader}>
           <View><Text style={[styles.heading, { color: colors.foreground }]}>{resultFilter === 'All' ? 'A good place to start' : resultFilter}</Text><Text style={[styles.subheading, { color: colors.mutedForeground }]}>{visibleSavedCount ? `${visibleSavedCount} saved discover${visibleSavedCount === 1 ? 'y' : 'ies'} available offline` : ingredients.length ? 'Matched against your confirmed kitchen' : 'Add confirmed ingredients to make suggestions personal'}</Text></View>
-           <Pressable testID="different-recipes" onPress={() => section === 'kids' ? void findKids() : confirmKitchenDiscovery(true)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
+           <Pressable testID="different-recipes" onPress={() => confirmKitchenDiscovery(true, section)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.differentButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed, activeSearch && styles.disabled]}><Feather name="shuffle" size={15} color={colors.primary} /></Pressable>
         </View>
         {filtered.length ? filtered.map((recipe) => {
           const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
@@ -552,7 +549,7 @@ export default function RecipesScreen() {
       <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={cancelSearch}>
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : activeSearch?.kind === 'kids' ? 'Finding kid-friendly recipes' : 'Finding recipes from your kitchen'}</Text>
+            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : activeSearch?.kind === 'kids-online' ? 'Finding kid-friendly recipes online' : activeSearch?.kind === 'kids-ai' ? 'Creating kid-friendly recipes' : 'Finding recipes from your kitchen'}</Text>
             <Text style={[styles.progressPercent, { color: colors.primary }]}>{progressPercent}%</Text>
             <View testID="recipe-search-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated recipe search progress" accessibilityValue={{ min: 0, max: 100, now: progressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
               <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${progressPercent}%` }]} />
@@ -642,6 +639,9 @@ const styles = StyleSheet.create({
   discoverButtonText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
   serviceMessage: { borderWidth: 1, borderRadius: 14, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   serviceText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  sourceStatusCard: { borderWidth: 1, borderRadius: 14, padding: 11, gap: 4, marginTop: 10 },
+  sourceStatusTitle: { fontSize: 12, fontFamily: 'Inter_700Bold', marginBottom: 2 },
+  sourceStatusRow: { fontSize: 11, lineHeight: 16 },
   filterHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16 },
   filterTitle: { fontSize: 14, fontFamily: 'Inter_700Bold' },
   filterHint: { fontSize: 11 },

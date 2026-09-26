@@ -57,8 +57,12 @@ test("published recipes show source attribution and never assert allergy safety"
   try {
     const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Egg", "Tomato"], searchAnchors: ["Egg"], allergies: ["peanut"] }) });
     assert.equal(response.status, 200);
-    const payload = await response.json() as { recipes: Array<{ title: string; provider: string; sourceUrl: string; safetyVerified: boolean; matchedIngredients: string[]; missingIngredients: string[] }> };
+    const payload = await response.json() as { recipes: Array<{ title: string; provider: string; sourceUrl: string; safetyVerified: boolean; matchedIngredients: string[]; missingIngredients: string[] }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((item) => item.title), ["Egg and tomato bowl"]);
+    assert.deepEqual(payload.sourceResults, [
+      { provider: "Spoonacular", status: "not_configured", count: 0 },
+      { provider: "TheMealDB", status: "found", count: 1 },
+    ]);
     assert.equal(payload.recipes[0]?.provider, "TheMealDB");
     assert.equal(payload.recipes[0]?.sourceUrl, "https://example.com/recipe");
     assert.equal(payload.recipes[0]?.safetyVerified, false);

@@ -43,6 +43,7 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 - Photos are normalized to JPEG before recognition. Originals are kept only if selected, as app-owned local copies that can be deleted in Settings or with the ingredient. The app cannot delete a photo from the user's Photos library.
 - Planned meals reserve known quantities; cooking completion deducts inventory once, releases the reservation, and optionally creates leftovers.
 - Published recipes come from Spoonacular and TheMealDB, show provider/source attribution and ingredient gaps, and open the original source. Spoonacular recipe details are displayed only for the current online search; its standard API storage rules do not permit persisting full recipe details, so Spoonacular recipes cannot be added to offline saved recipes. Spoonacular archives store ID and title. The legacy FatSecret adapter and archive parsing remain for compatibility, but no FatSecret API calls are made. Published recipes are not imported into the in-app planner because external allergen and quantity data have not been verified.
+- General and Kid-friendly each offer separate AI creation and published online search actions. Online search never starts AI creation. Its `sourceResults` response reports Spoonacular and TheMealDB separately as found, no results, unavailable, or not configured; the app shows these outcomes below the online search card.
 
 ## Product
 

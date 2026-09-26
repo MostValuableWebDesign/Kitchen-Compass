@@ -33,6 +33,9 @@ export type ExternalRecipe = {
   missingIngredients: string[];
   safetyVerified: false;
 };
+type OnlineSource = "Spoonacular" | "TheMealDB";
+type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured"; count: number };
+const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular recipes are available online only.";
 
 function providerKey() {
   const key = process.env.THEMEALDB_API_KEY?.trim();
@@ -134,7 +137,11 @@ router.post("/recipes/external", async (req, res) => {
   }
   const key = providerKey();
   if (!key && !spoonacularConfigured()) {
-    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Configure a published recipe provider to find online recipes.");
+    res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
+      sourceResults: [
+        { provider: "Spoonacular", status: "not_configured", count: 0 },
+        { provider: "TheMealDB", status: "not_configured", count: 0 },
+      ] satisfies OnlineSourceResult[] });
     return;
   }
   const pantry = [...new Set(parsed.data.ingredients.map((item) => item.trim()))];
@@ -177,11 +184,15 @@ router.post("/recipes/external", async (req, res) => {
         req.log.warn({ provider: providerNames[index], reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error" }, "Published recipe provider unavailable");
       }
     });
-    if (results.every((result, index) => !configured[index] || result.status === "rejected")) throw new Error("All published sources failed");
     const recipes: ExternalRecipe[] = [];
     const seenTitles = new Set<string>();
     const limit = parsed.data.audience === "kids" ? 12 : 30;
     const providerRecipes = results.map((result) => result.status === "fulfilled" ? result.value : []);
+    const sourceResults: OnlineSourceResult[] = results.map((result, index) => ({
+      provider: providerNames[index]!,
+      status: !configured[index] ? "not_configured" : result.status === "rejected" ? "unavailable" : result.value.length ? "found" : "no_results",
+      count: result.status === "fulfilled" && configured[index] ? result.value.length : 0,
+    }));
     // Spoonacular has priority; TheMealDB fills any remaining slots.
     for (const items of providerRecipes) {
       for (const recipe of items) {
@@ -193,9 +204,7 @@ router.post("/recipes/external", async (req, res) => {
       }
       if (recipes.length >= limit) break;
     }
-    res.json({ recipes, provider: "Multiple sources", providersUnavailable,
-      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular recipes are available online only."
-        + (providersUnavailable.length ? ` ${providersUnavailable.join(" and ")} could not be reached; showing available sources.` : "") });
+    res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, safetyNotice });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
   }
