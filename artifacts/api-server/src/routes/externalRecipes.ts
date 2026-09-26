@@ -4,6 +4,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { fatSecretConfigured, searchFatSecretRecipes } from "./fatSecretRecipes";
+import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
@@ -24,7 +25,8 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB" | "FatSecret";
+  provider: "TheMealDB" | "FatSecret" | "Spoonacular";
+  sourceName?: string;
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
   instructions: string;
@@ -132,8 +134,8 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key && !fatSecretConfigured()) {
-    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Configure FatSecret credentials or a paid TheMealDB API key to find published recipes.");
+  if (!key && !fatSecretConfigured() && !spoonacularConfigured()) {
+    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Configure a published recipe provider to find online recipes.");
     return;
   }
   const pantry = [...new Set(parsed.data.ingredients.map((item) => item.trim()))];
@@ -166,9 +168,10 @@ router.post("/recipes/external", async (req, res) => {
     const results = await Promise.allSettled([
       key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
       fatSecretConfigured() ? searchFatSecretRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
+      spoonacularConfigured() ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
     ]);
-    const configured = [Boolean(key), fatSecretConfigured()];
-    const providerNames = ["TheMealDB", "FatSecret"] as const;
+    const configured = [Boolean(key), fatSecretConfigured(), spoonacularConfigured()];
+    const providerNames = ["TheMealDB", "FatSecret", "Spoonacular"] as const;
     const providersUnavailable = results.flatMap((result, index) => configured[index] && result.status === "rejected" ? [providerNames[index]!] : []);
     results.forEach((result, index) => {
       if (configured[index] && result.status === "rejected") {
@@ -195,7 +198,7 @@ router.post("/recipes/external", async (req, res) => {
     }
     recipes.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
     res.json({ recipes, provider: "Multiple sources", providersUnavailable,
-      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. FatSecret recipes are available online only."
+      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. FatSecret and Spoonacular recipes are available online only."
         + (providersUnavailable.length ? ` ${providersUnavailable.join(" and ")} could not be reached; showing available sources.` : "") });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");

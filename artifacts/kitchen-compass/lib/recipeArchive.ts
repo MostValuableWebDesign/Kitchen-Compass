@@ -8,7 +8,7 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
-  externalProvider?: 'FatSecret';
+  externalProvider?: 'FatSecret' | 'Spoonacular';
   externalId?: string;
 };
 
@@ -22,7 +22,7 @@ export function isArchivedRecipe(recipe: Pick<Recipe, 'title' | 'sourceVersion' 
 
 export function isArchivedPublished(recipe: Pick<ExternalRecipe, 'id' | 'title'>, archived: ArchivedRecipe[]) {
   return archived.some((entry) => entry.key === archiveKey(recipe.title) || entry.externalRecipe?.id === recipe.id
-    || (entry.externalProvider === 'FatSecret' && entry.externalId === recipe.id));
+    || (entry.externalProvider && (entry.externalId === recipe.id || archiveKey(entry.title) === archiveKey(recipe.title))));
 }
 
 export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, archivedAt = new Date().toISOString()) {
@@ -32,11 +32,12 @@ export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, a
 }
 
 export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: ExternalRecipe, archivedAt = new Date().toISOString()) {
-  if (recipe.provider === 'FatSecret') {
+  if (recipe.provider === 'FatSecret' || recipe.provider === 'Spoonacular') {
     const key = recipe.id;
     if (archived.some((entry) => entry.key === key)) return archived;
-    // FatSecret permits permanent storage of recipe IDs, not recipe content.
-    return [...archived, { key, title: `FatSecret recipe #${recipe.id.slice('fatsecret:'.length)}`, externalProvider: 'FatSecret' as const, externalId: recipe.id, archivedAt }];
+    // Keep only provider metadata; Spoonacular permits title storage for archive labels and title exclusions.
+    const title = recipe.provider === 'Spoonacular' ? recipe.title : `${recipe.provider} recipe #${recipe.id.split(':')[1]}`;
+    return [...archived, { key, title, externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
   }
   const key = archiveKey(recipe.title);
   if (!key || archived.some((entry) => entry.key === key)) return archived;
@@ -79,10 +80,12 @@ export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
   return value.flatMap((item): ArchivedRecipe[] => {
     if (!isRecord(item) || typeof item.title !== 'string' || !item.title.trim()) return [];
     const key = archiveKey(item.title);
-    if (item.externalProvider === 'FatSecret' && typeof item.externalId === 'string' && /^fatsecret:\d+$/.test(item.externalId)) {
+    const onlineProvider = item.externalProvider === 'FatSecret' ? 'FatSecret' : item.externalProvider === 'Spoonacular' ? 'Spoonacular' : undefined;
+    if (onlineProvider && typeof item.externalId === 'string'
+      && new RegExp(`^${onlineProvider.toLowerCase()}:\\d+$`).test(item.externalId)) {
       if (seen.has(item.externalId)) return [];
       seen.add(item.externalId);
-      return [{ key: item.externalId, title: `FatSecret recipe #${item.externalId.slice('fatsecret:'.length)}`, externalProvider: 'FatSecret' as const, externalId: item.externalId,
+      return [{ key: item.externalId, title: onlineProvider === 'Spoonacular' ? item.title.trim() : `${onlineProvider} recipe #${item.externalId.split(':')[1]}`, externalProvider: onlineProvider, externalId: item.externalId,
         archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
     }
     if (!key || seen.has(key)) return [];
