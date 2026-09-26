@@ -9,3 +9,4 @@
 - [Published recipe search payload](published-recipe-search-payload.md) — keep search anchors separate from pantry matching so excluded seasonings still count as available.
 - [Ingredient add quantity defaults](ingredient-add-quantity-defaults.md) — new additions default to 1 ea; confirmed duplicates increment the existing row in its unit.
 - [Ingredient icon matching](ingredient-icon-matching.md) — preserve food form when matching icons; canonical aliases can hide it, and prepared products should outrank base ingredients.
+- [Persistent API test quotas](persistent-api-test-quotas.md) — shared database-backed rate limits can cause broad API suites to fail with 429s even when focused tests pass.

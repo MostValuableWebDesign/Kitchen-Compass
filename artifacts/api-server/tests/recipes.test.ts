@@ -186,6 +186,44 @@ test("kid discovery does not label an unrelated generated meal as kid-friendly",
   assert.equal(response.status, 503);
 });
 
+test("recipe discovery includes used and uncertain ingredients as eligible recipe context", async () => {
+  const body = requestBody();
+  body.inventory.push(
+    { name: "spinach", location: "Refrigerator", quantityKnown: false, status: "fresh", confidence: "uncertain" },
+    { name: "canned tomatoes", location: "Pantry", quantityValue: 0, unit: "can", quantityKnown: true, status: "used", confidence: "confirmed" },
+  );
+  const original = globalThis.fetch;
+  let prompt = "";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      prompt = (JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }).messages[0]!.content;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [validModelRecipe()] }) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200);
+    assert.match(prompt, /Every submitted ingredient is eligible as a recipe ingredient/);
+    const available = JSON.parse(prompt.match(/Confirmed available inventory: (.+)\nAll submitted ingredients/)?.[1] ?? "[]") as Array<{ name: string }>;
+    const allItems = JSON.parse(prompt.match(/All submitted ingredients, including used and uncertain items: (.+)\nSaved preferences:/)?.[1] ?? "[]") as Array<{ name: string; status: string; confidence?: string }>;
+    assert.deepEqual(available.map((item) => item.name), ["eggs"]);
+    assert.deepEqual(allItems.slice(1).map((item) => [item.name, item.status, item.confidence]), [
+      ["spinach", "fresh", "uncertain"],
+      ["canned tomatoes", "used", "confirmed"],
+    ]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("recipe discovery keeps valid candidates when another candidate fails validation", async () => {
   const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
   const original = globalThis.fetch;
@@ -257,7 +295,7 @@ test("recipe discovery discards existing titles and repeated titles in one respo
   }
 });
 
-test("recipe discovery retry excludes confirmed inventory the allergen validator cannot assess", async () => {
+test("recipe discovery retry keeps all ingredient context but excludes unassessable stock from confirmed availability", async () => {
   const invalid = { ...validModelRecipe(), steps: [{ ...validModelRecipe().steps[0], ingredientAmounts: [] }] };
   const unsafe = validModelRecipe();
   unsafe.ingredients = [...unsafe.ingredients, { name: "mystery sauce", quantity: 1, unit: "tbsp", required: true }];
@@ -281,9 +319,11 @@ test("recipe discovery retry excludes confirmed inventory the allergen validator
       if (providerCalls === 1) {
         assert.match(prompt, /mystery sauce/);
       } else {
-        const confirmedInventory = prompt.match(/Confirmed inventory: (.+)\nSaved preferences:/)?.[1] ?? "";
+        const confirmedInventory = prompt.match(/Confirmed available inventory: (.+)\nAll submitted ingredients/)?.[1] ?? "";
+        const allIngredients = prompt.match(/All submitted ingredients, including used and uncertain items: (.+)\nSaved preferences:/)?.[1] ?? "";
         assert.doesNotMatch(confirmedInventory, /mystery sauce/);
         assert.match(confirmedInventory, /eggs/);
+        assert.match(allIngredients, /mystery sauce/);
       }
       const recipes = providerCalls === 1 ? [invalid, unsafe] : [validModelRecipe()];
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes }) } }] }), {
