@@ -24,7 +24,18 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
   let failSpoonacular = false;
   globalThis.fetch = async (input, init) => {
     const target = new URL(String(input));
-    if (target.hostname === "www.themealdb.com") return new Response(JSON.stringify({ meals: [] }), { status: 200 });
+    if (target.hostname === "www.themealdb.com") {
+      if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: ["Potato", "Cheddar"].includes(target.searchParams.get("i") ?? "") ? [] : [
+        { idMeal: "201", strMeal: "Tomato pasta" },
+        { idMeal: "202", strMeal: "Chicken pasta" },
+      ] }), { status: 200 });
+      const id = target.searchParams.get("i");
+      return new Response(JSON.stringify({ meals: [{
+        idMeal: id, strMeal: id === "201" ? "Tomato pasta" : "Chicken pasta",
+        strInstructions: "Cook the pasta.", strIngredient1: "Pasta", strMeasure1: "1 cup",
+        strIngredient2: id === "201" ? "Tomato" : "Chicken", strMeasure2: "1 cup",
+      }] }), { status: 200 });
+    }
     if (target.hostname === "api.spoonacular.com") {
       calls.push(target);
       assert.equal((init?.headers as Record<string, string>)?.["x-api-key"], "test-key");
@@ -85,7 +96,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     const response = await originalFetch(url, { method: "POST", headers, body: JSON.stringify(request) });
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ id: string; provider: string; sourceName: string; sourceUrl: string; imageUrl: string; instructions: string; matchedIngredients: string[] }>; providersUnavailable: string[] };
-    assert.deepEqual(payload.recipes.map((item) => item.id), ["spoonacular:101"]);
+    assert.deepEqual(payload.recipes.map((item) => item.id), ["spoonacular:101", "202"]);
     assert.equal(payload.recipes[0]?.provider, "Spoonacular");
     assert.equal(payload.recipes[0]?.sourceName, "Example Kitchen");
     assert.equal(payload.recipes[0]?.sourceUrl, "https://example.com/recipes/101");
@@ -123,7 +134,9 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     failSpoonacular = true;
     const unavailable = await originalFetch(url, { method: "POST", headers, body: JSON.stringify(request) });
     assert.equal(unavailable.status, 200);
-    assert.deepEqual((await unavailable.json() as { providersUnavailable: string[] }).providersUnavailable, ["Spoonacular"]);
+    const fallback = await unavailable.json() as { recipes: Array<{ id: string; provider: string }>; providersUnavailable: string[] };
+    assert.deepEqual(fallback.providersUnavailable, ["Spoonacular"]);
+    assert.deepEqual(fallback.recipes.map((item) => item.id), ["201", "202"]);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;

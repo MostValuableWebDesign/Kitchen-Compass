@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
-import { fatSecretConfigured, searchFatSecretRecipes } from "./fatSecretRecipes";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 
 const router: IRouter = Router();
@@ -134,7 +133,7 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key && !fatSecretConfigured() && !spoonacularConfigured()) {
+  if (!key && !spoonacularConfigured()) {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Configure a published recipe provider to find online recipes.");
     return;
   }
@@ -165,13 +164,13 @@ router.post("/recipes/external", async (req, res) => {
       if (parsed.data.audience === "kids") recipes.splice(12);
       return recipes;
     };
+    const spoonacularEnabled = spoonacularConfigured();
     const results = await Promise.allSettled([
+      spoonacularEnabled ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
       key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
-      fatSecretConfigured() ? searchFatSecretRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
-      spoonacularConfigured() ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
     ]);
-    const configured = [Boolean(key), fatSecretConfigured(), spoonacularConfigured()];
-    const providerNames = ["TheMealDB", "FatSecret", "Spoonacular"] as const;
+    const configured = [spoonacularEnabled, Boolean(key)];
+    const providerNames = ["Spoonacular", "TheMealDB"] as const;
     const providersUnavailable = results.flatMap((result, index) => configured[index] && result.status === "rejected" ? [providerNames[index]!] : []);
     results.forEach((result, index) => {
       if (configured[index] && result.status === "rejected") {
@@ -183,22 +182,19 @@ router.post("/recipes/external", async (req, res) => {
     const seenTitles = new Set<string>();
     const limit = parsed.data.audience === "kids" ? 12 : 30;
     const providerRecipes = results.map((result) => result.status === "fulfilled" ? result.value : []);
-    // Select across sources before sorting so a full result set from one provider
-    // cannot crowd the other provider out of the visible cards.
-    for (let index = 0; recipes.length < limit && providerRecipes.some((items) => index < items.length); index += 1) {
-      for (const items of providerRecipes) {
-        const recipe = items[index];
-        if (!recipe) continue;
+    // Spoonacular has priority; TheMealDB fills any remaining slots.
+    for (const items of providerRecipes) {
+      for (const recipe of items) {
         const title = titleKey(recipe.title);
         if (seenTitles.has(title)) continue;
         seenTitles.add(title);
         recipes.push(recipe);
         if (recipes.length >= limit) break;
       }
+      if (recipes.length >= limit) break;
     }
-    recipes.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
     res.json({ recipes, provider: "Multiple sources", providersUnavailable,
-      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Published recipes are available online only."
+      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular recipes are available online only."
         + (providersUnavailable.length ? ` ${providersUnavailable.join(" and ")} could not be reached; showing available sources.` : "") });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");

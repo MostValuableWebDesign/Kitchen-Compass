@@ -17,7 +17,7 @@ export type ExternalRecipe = {
 export type ExternalRecipesResponse = {
   recipes: ExternalRecipe[];
   provider: "Multiple sources";
-  providersUnavailable: Array<"TheMealDB" | "FatSecret" | "Spoonacular">;
+  providersUnavailable: Array<"TheMealDB" | "Spoonacular">;
   safetyNotice: string;
 };
 
