@@ -478,7 +478,7 @@ export default function RecipesScreen() {
         {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.secondary }]}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Discover from your kitchen</Text>
-            <Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Only confirmed inventory is sent for recipe matching. Allergies and restrictions are applied before results appear.</Text>
+            <Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>All listed ingredients can inform recipe ideas. Used or uncertain items won’t count as confirmed stock; allergies and restrictions are checked before results appear.</Text>
           </View>
           <Pressable testID="discover-recipes" onPress={() => confirmKitchenDiscovery(false)} disabled={Boolean(activeSearch) || !hydrated} style={({ pressed }) => [styles.discoverButton, { backgroundColor: colors.primary }, pressed && styles.pressed, activeSearch && styles.disabled]}>
             <Feather name="star" size={16} color={colors.primaryForeground} />

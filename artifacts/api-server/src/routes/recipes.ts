@@ -361,15 +361,17 @@ router.post("/recipes/discover", async (req, res) => {
   }
 
   const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience } = parsed.data;
-  const usableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
-  const allergenAssessableInventory = usableInventory.filter((item) =>
+  const confirmedAvailableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
+  const allergenAssessableInventory = confirmedAvailableInventory.filter((item) =>
     assessIngredientAllergens([item]).unknownIngredients.length === 0
   );
   const buildPrompt = (
-    promptInventory: typeof usableInventory,
+    allInventory: typeof inventory,
+    availableInventory: typeof inventory,
     correctionInstructions: string[] = [],
   ) => [
     "Generate practical recipe candidates from confirmed kitchen inventory.",
+    "Every submitted ingredient is eligible as a recipe ingredient, including items marked used or uncertain. These statuses describe tracked stock only: never claim a used or uncertain item is currently available. If a recipe uses one, the app will check it as unavailable or unconfirmed.",
     ...(audience === "kids" ? [
       "These candidates are for young, selective eaters. Prefer familiar, mild meal formats such as simple pasta, mac and cheese, quesadillas, mini pizzas, pancakes, egg dishes, rice bowls, chicken bites, meatballs, or sandwiches when the actual inventory and restrictions permit. These are examples, not a claim that every child likes them.",
       "Keep ingredients recognizable; give optional vegetables or sauces on the side rather than hiding them. Use gentle flavors, manageable portions, and straightforward steps. Do not label a food universally safe for children.",
@@ -392,12 +394,13 @@ router.post("/recipes/discover", async (req, res) => {
     `Do not repeat these recipe versions: ${JSON.stringify(excludeRecipeVersions)}`,
     `Do not repeat these existing recipe titles, even with different wording or amounts: ${JSON.stringify(excludeRecipeTitles)}`,
     `Never suggest these archived recipes again: ${JSON.stringify(excludeArchivedRecipeTitles)}`,
-    `Confirmed inventory: ${JSON.stringify(promptInventory)}`,
+    `Confirmed available inventory: ${JSON.stringify(availableInventory)}`,
+    `All submitted ingredients, including used and uncertain items: ${JSON.stringify(allInventory)}`,
     `Saved preferences: ${JSON.stringify(preferences)}`,
     `Selected filters: ${JSON.stringify(filters)}`,
     ...correctionInstructions,
   ].join("\n");
-  const prompt = buildPrompt(usableInventory);
+  const prompt = buildPrompt(inventory, confirmedAvailableInventory);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), recipeDiscoveryTimeoutMs);
@@ -470,9 +473,9 @@ router.post("/recipes/discover", async (req, res) => {
     let safeRecipes = filterSafeRecipes(aiRecipes);
     if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || rejectionReasons.has("not-kid-friendly") || aiRecipes.length === 0)) {
       rejectionReasons.clear();
-      aiRecipes = await requestCandidates(buildPrompt(allergenAssessableInventory, [
+      aiRecipes = await requestCandidates(buildPrompt(inventory, allergenAssessableInventory, [
         "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
-        "This corrected Confirmed inventory list contains only ingredients the server can assess deterministically. Do not use any ingredient from the earlier attempt that is absent from this corrected list.",
+        "The Confirmed available inventory list contains only available ingredients the server can assess deterministically. All submitted ingredients remain eligible for recipe ideas, but do not claim used, uncertain, or allergen-unassessable ingredients are available.",
         "Use only the corrected confirmed inventory and these exact basic ingredients when needed: water, salt, black pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, basil, parsley, cilantro, rosemary, thyme, oregano.",
         "Do not add sauces, broths, spice blends, packaged foods, garnishes, or other missing ingredients.",
         "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
