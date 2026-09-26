@@ -15,7 +15,11 @@ after(() => server.close());
 
 test("Spoonacular uses a server key, full recipe details, source credit, and archived exclusions", async () => {
   const oldKey = process.env.SPOONACULAR_API_KEY;
+  const oldFatSecretId = process.env.FATSECRET_CLIENT_ID;
+  const oldFatSecretSecret = process.env.FATSECRET_CLIENT_SECRET;
   process.env.SPOONACULAR_API_KEY = "test-key";
+  delete process.env.FATSECRET_CLIENT_ID;
+  delete process.env.FATSECRET_CLIENT_SECRET;
   const calls: URL[] = [];
   let failSpoonacular = false;
   globalThis.fetch = async (input, init) => {
@@ -73,5 +77,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
+    if (oldFatSecretId === undefined) delete process.env.FATSECRET_CLIENT_ID; else process.env.FATSECRET_CLIENT_ID = oldFatSecretId;
+    if (oldFatSecretSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET; else process.env.FATSECRET_CLIENT_SECRET = oldFatSecretSecret;
   }
 });
