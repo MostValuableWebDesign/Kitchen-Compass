@@ -4,7 +4,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB";
+  provider: "TheMealDB" | "FatSecret";
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
   instructions: string;
@@ -15,7 +15,8 @@ export type ExternalRecipe = {
 
 export type ExternalRecipesResponse = {
   recipes: ExternalRecipe[];
-  provider: "TheMealDB";
+  provider: "Multiple sources";
+  providersUnavailable: Array<"TheMealDB" | "FatSecret">;
   safetyNotice: string;
 };
 

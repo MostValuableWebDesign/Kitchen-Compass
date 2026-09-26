@@ -7,6 +7,7 @@ import {
   removeSavedScanPhotos,
   serializePersistedKitchenState,
 } from '../lib/kitchenPersistence';
+import { archivePublishedRecipe, isArchivedPublished } from '../lib/recipeArchive';
 
 test('onboarding preferences and reminder settings persist through the local state format', () => {
   const state = {
@@ -106,4 +107,18 @@ test('archived recipe exclusions survive a local state reload', () => {
   };
   const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
   assert.deepEqual(restored.archivedRecipes, state.archivedRecipes);
+});
+
+test('archiving a FatSecret result persists only its provider ID', () => {
+  const recipe = {
+    id: 'fatsecret:91', title: 'Tomato pasta', provider: 'FatSecret' as const,
+    sourceUrl: 'https://www.fatsecret.com/recipes/tomato/Default.aspx',
+    ingredients: [{ name: 'Pasta', measure: '1 cup' }], instructions: 'Cook pasta.',
+    matchedIngredients: ['Pasta'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], recipe);
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState({ ...emptyPersistedKitchenState(), archivedRecipes: archived }), defaultPreferences);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes('Tomato pasta'), false);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes('Cook pasta'), false);
+  assert.equal(isArchivedPublished(recipe, restored.archivedRecipes), true);
 });

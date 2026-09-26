@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
+import { fatSecretConfigured, searchFatSecretRecipes } from "./fatSecretRecipes";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
@@ -23,7 +24,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB";
+  provider: "TheMealDB" | "FatSecret";
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
   instructions: string;
@@ -131,35 +132,71 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key) {
-    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes require a paid TheMealDB API key for a public app.");
+  if (!key && !fatSecretConfigured()) {
+    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Configure FatSecret credentials or a paid TheMealDB API key to find published recipes.");
     return;
   }
   const pantry = [...new Set(parsed.data.ingredients.map((item) => item.trim()))];
   const excludedIds = new Set([...(parsed.data.excludeRecipeIds ?? []), ...parsed.data.excludedRecipeIds]);
   const excludedTitles = new Set(parsed.data.excludedRecipeTitles.map(titleKey));
   const searchIngredients = pantry.filter((item) => !commonSeasonings.has(ingredientIdentity(item)));
-  const base = `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}`;
+  const base = key ? `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}` : "";
   try {
     const anchors = parsed.data.searchAnchors ?? (searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS);
-    const searches = await Promise.all(anchors.map(async (ingredient) => {
-      const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
-      const response = await providerJson(`${base}/filter.php?i=${value}`);
-      return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
-    }));
-    const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles);
-    const details = await Promise.all(ids.map(async (id) => {
-      const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
-      return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
-    }));
-    const recipes = details
-      .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
-      .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
-      .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
-      .filter((recipe) => parsed.data.audience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
-      .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-    if (parsed.data.audience === "kids") recipes.splice(12);
-    res.json({ recipes, provider: "TheMealDB", safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label." });
+    const mealSearch = async () => {
+      const searches = await Promise.all(anchors.map(async (ingredient) => {
+        const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
+        const response = await providerJson(`${base}/filter.php?i=${value}`);
+        return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
+      }));
+      const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles);
+      const details = await Promise.all(ids.map(async (id) => {
+        const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
+        return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
+      }));
+      const recipes = details
+        .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
+        .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
+        .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
+        .filter((recipe) => parsed.data.audience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
+        .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+      if (parsed.data.audience === "kids") recipes.splice(12);
+      return recipes;
+    };
+    const results = await Promise.allSettled([
+      key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
+      fatSecretConfigured() ? searchFatSecretRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
+    ]);
+    const configured = [Boolean(key), fatSecretConfigured()];
+    const providerNames = ["TheMealDB", "FatSecret"] as const;
+    const providersUnavailable = results.flatMap((result, index) => configured[index] && result.status === "rejected" ? [providerNames[index]!] : []);
+    results.forEach((result, index) => {
+      if (configured[index] && result.status === "rejected") {
+        req.log.warn({ provider: providerNames[index], reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error" }, "Published recipe provider unavailable");
+      }
+    });
+    if (results.every((result, index) => !configured[index] || result.status === "rejected")) throw new Error("All published sources failed");
+    const recipes: ExternalRecipe[] = [];
+    const seenTitles = new Set<string>();
+    const limit = parsed.data.audience === "kids" ? 12 : 30;
+    const providerRecipes = results.map((result) => result.status === "fulfilled" ? result.value : []);
+    // Select across sources before sorting so a full result set from one provider
+    // cannot crowd the other provider out of the visible cards.
+    for (let index = 0; recipes.length < limit && providerRecipes.some((items) => index < items.length); index += 1) {
+      for (const items of providerRecipes) {
+        const recipe = items[index];
+        if (!recipe) continue;
+        const title = titleKey(recipe.title);
+        if (seenTitles.has(title)) continue;
+        seenTitles.add(title);
+        recipes.push(recipe);
+        if (recipes.length >= limit) break;
+      }
+    }
+    recipes.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+    res.json({ recipes, provider: "Multiple sources", providersUnavailable,
+      safetyNotice: "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. FatSecret recipes are available online only."
+        + (providersUnavailable.length ? ` ${providersUnavailable.join(" and ")} could not be reached; showing available sources.` : "") });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
   }

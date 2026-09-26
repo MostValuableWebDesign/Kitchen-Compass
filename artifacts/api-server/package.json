@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test tests/scan.test.ts tests/scanPersistenceFailure.test.ts tests/recipes.test.ts tests/externalRecipes.test.ts tests/recipeImages.test.ts"
+    "test": "tsx --test tests/scan.test.ts tests/scanPersistenceFailure.test.ts tests/recipes.test.ts tests/externalRecipes.test.ts tests/fatSecretRecipes.test.ts tests/recipeImages.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

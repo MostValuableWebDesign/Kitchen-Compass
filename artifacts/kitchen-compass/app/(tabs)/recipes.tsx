@@ -60,6 +60,7 @@ export default function RecipesScreen() {
   const [minHealthScore, setMinHealthScore] = useState<number>();
   const [variation, setVariation] = useState(0);
   const [externalRecipes, setExternalRecipes] = useState<ExternalRecipe[]>([]);
+  const [kidOnlineRecipes, setKidOnlineRecipes] = useState<ExternalRecipe[]>([]);
   const [discardedExternalRecipeIds, setDiscardedExternalRecipeIds] = useState<string[]>([]);
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalMessage, setExternalMessage] = useState('');
@@ -220,7 +221,7 @@ export default function RecipesScreen() {
         `${different ? 'different' : 'refresh'}-${nextVariation}`,
         availableRecipes.map(recipeVersion).slice(-30),
         availableRecipes.map((recipe) => recipe.title).slice(-30),
-        archivedRecipes.map((entry) => entry.title).slice(0, 200),
+        [...new Set([...archivedRecipes.map((entry) => entry.title), ...availableRecipes.map((recipe) => recipe.title), ...savedKidPublishedRecipes.map((recipe) => recipe.title)])].slice(0, 200),
         audience,
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
@@ -263,11 +264,11 @@ export default function RecipesScreen() {
     try {
       const result = await findExternalRecipes([...new Set(confirmed)].slice(0, 30), preferences.allergies, sourceController.signal,
         undefined,
-        [...savedKidPublishedRecipes.map((recipe) => recipe.id), ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : [])].slice(-200),
+        [...savedKidPublishedRecipes.map((recipe) => recipe.id), ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : entry.externalId ? [entry.externalId] : [])].slice(-200),
         [...new Set([...archivedRecipes.map((entry) => entry.title), ...availableRecipes.map((recipe) => recipe.title), ...savedKidPublishedRecipes.map((recipe) => recipe.title)])].slice(0, 200), 'kids');
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const knownIds = new Set(savedKidPublishedRecipes.map((recipe) => recipe.id));
-      const knownTitles = new Set([...availableRecipes.map(recipeTitleKey), ...savedKidPublishedRecipes.map(recipeTitleKey)]);
+      const knownIds = new Set([...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.id));
+      const knownTitles = new Set([...availableRecipes.map(recipeTitleKey), ...savedKidPublishedRecipes.map(recipeTitleKey), ...kidOnlineRecipes.map(recipeTitleKey)]);
       const newRecipes = result.recipes.filter((recipe) => {
         const title = recipeTitleKey(recipe);
         if (knownIds.has(recipe.id) || knownTitles.has(title) || isArchivedPublished(recipe, archivedRecipes)
@@ -277,7 +278,8 @@ export default function RecipesScreen() {
         return true;
       });
       if (newRecipes.length) {
-        saveKidPublishedRecipes(newRecipes);
+        saveKidPublishedRecipes(newRecipes.filter((recipe) => recipe.provider === 'TheMealDB'));
+        setKidOnlineRecipes(newRecipes.filter((recipe) => recipe.provider === 'FatSecret'));
         setKidMessage(result.safetyNotice);
         finishSearch(controller, true);
         clearTimeout(overallTimeout);
@@ -320,7 +322,7 @@ export default function RecipesScreen() {
         searchInput.anchors,
         [
           ...seenPublishedRecipeIds.current,
-          ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : []),
+          ...archivedRecipes.flatMap((entry) => entry.externalRecipe ? [entry.externalRecipe.id] : entry.externalId ? [entry.externalId] : []),
         ].slice(0, 200),
         archivedRecipes.map((entry) => entry.title).slice(0, 200),
       );
@@ -331,12 +333,12 @@ export default function RecipesScreen() {
       visible.forEach((recipe) => seenPublishedRecipeIds.current.add(recipe.id));
       setExternalMessage(visible.length
         ? result.safetyNotice
-        : 'No new published recipes matched these ingredients. Archived recipes remain hidden.');
+        : `No new published recipes matched these ingredients. Archived recipes remain hidden.${result.providersUnavailable.length ? ` ${result.providersUnavailable.join(' and ')} could not be reached.` : ''}`);
       setExternalBusy(false);
       finishSearch(controller, true);
     } catch {
       if (searchRequest.current !== controller) return;
-      setExternalMessage('Published recipes are unavailable. Check the connection and TheMealDB setup; saved recipes remain available.');
+      setExternalMessage('Published recipes are unavailable. Check the connection and recipe source setup; saved recipes remain available.');
       setExternalBusy(false);
       finishSearch(controller, false);
     } finally {
@@ -356,6 +358,7 @@ export default function RecipesScreen() {
   };
 
   const savePublishedRecipe = (recipe: ExternalRecipe) => {
+    if (recipe.provider === 'FatSecret') return;
     savePublishedRecipes([mapPublishedRecipe(recipe)]);
     setExternalMessage(`“${recipe.title}” was added to your saved recipes. Allergens, nutrition, and cooking safety remain unverified.`);
   };
@@ -403,6 +406,7 @@ export default function RecipesScreen() {
     [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive recipe', onPress: () => {
       archivePublishedRecipe(recipe);
       setExternalRecipes((current) => current.filter((item) => item.id !== recipe.id));
+      setKidOnlineRecipes((current) => current.filter((item) => item.id !== recipe.id));
     } }],
   );
   const restoreArchived = (entry: ArchivedRecipe) => {
@@ -487,7 +491,7 @@ export default function RecipesScreen() {
         {section === 'kids' ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="info" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>Familiar foods are a starting point; each child’s likes vary. Adjust size and texture for your child’s age and supervise meals. Review every ingredient and allergy.</Text></View> : null}
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
-        {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find real recipes through TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
+        {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find recipes through TheMealDB and FatSecret using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {(section === 'kids' ? kidMessage : externalMessage) ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{section === 'kids' ? kidMessage : externalMessage}</Text> : null}
         {section === 'general' && visibleExternalRecipes.length ? <View style={styles.externalResultsHeader}>
           <View>
@@ -504,12 +508,13 @@ export default function RecipesScreen() {
             <View style={styles.externalCardBody}>
               <Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text>
               <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text>
+              {item.provider === 'FatSecret' ? <Pressable onPress={() => void Linking.openURL('https://platform.fatsecret.com')}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Powered by fatsecret Platform API ↗</Text></Pressable> : null}
               <Text style={[styles.resultIngredientText, { color: colors.primary }]}>Have: {item.matchedIngredients.join(', ') || 'No matched ingredients listed'}</Text>
               <Text style={[styles.resultIngredientText, { color: item.missingIngredients.length ? colors.destructive : colors.primary }]}>{item.missingIngredients.length ? `Missing: ${item.missingIngredients.join(', ')}` : 'All required ingredients are in your confirmed kitchen.'}</Text>
               <Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens, quantities, nutrition, and cooking safety are unverified.</Text>
               <View style={styles.externalActions}>
                 <Pressable onPress={() => void Linking.openURL(item.sourceUrl)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Open source ↗</Text></Pressable>
-                <Pressable disabled={saved} onPress={() => savePublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: saved ? colors.muted : colors.secondary }]}><Text style={[styles.outlineButtonText, { color: saved ? colors.mutedForeground : colors.primary }]}>{saved ? 'Saved' : 'Add recipe'}</Text></Pressable>
+                {item.provider === 'TheMealDB' ? <Pressable disabled={saved} onPress={() => savePublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: saved ? colors.muted : colors.secondary }]}><Text style={[styles.outlineButtonText, { color: saved ? colors.mutedForeground : colors.primary }]}>{saved ? 'Saved' : 'Add recipe'}</Text></Pressable> : <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Online only</Text>}
                 <Pressable onPress={() => discardPublishedRecipe(item)} style={[styles.outlineButton, { borderColor: colors.border }]}><Text style={[styles.outlineButtonText, { color: colors.destructive }]}>Discard</Text></Pressable>
                 <Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={[styles.outlineButton, { borderColor: colors.border }]}><Feather name="archive" size={15} color={colors.mutedForeground} /><Text style={[styles.outlineButtonText, { color: colors.mutedForeground }]}>Archive</Text></Pressable>
               </View>
@@ -517,7 +522,7 @@ export default function RecipesScreen() {
           </View>;
         })}
         </ScrollView> : null}
-        {section === 'kids' && savedKidPublishedRecipes.filter((item) => !isArchivedPublished(item, archivedRecipes) && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)).map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<Pressable onPress={() => void Linking.openURL(item.sourceUrl)} style={{ flex: 1 }}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {publishedMatchedCount(item)} matching ingredients · {item.ingredients.length - publishedMatchedCount(item)} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
+        {section === 'kids' && [...savedKidPublishedRecipes, ...kidOnlineRecipes].filter((item) => !isArchivedPublished(item, archivedRecipes) && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)).map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {publishedMatchedCount(item)} matching ingredients · {item.ingredients.length - publishedMatchedCount(item)} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{item.provider === 'FatSecret' ? <Pressable onPress={() => void Linking.openURL('https://platform.fatsecret.com')}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Powered by fatsecret Platform API ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}
@@ -586,7 +591,7 @@ export default function RecipesScreen() {
               {!rankedPublishedIngredients.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>No eligible confirmed ingredients are available. Common seasonings and used ingredients are excluded from anchors.</Text> : null}
             </ScrollView> : null}
             {publishedSearchStep === 'confirm' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
-              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>These ingredients will drive the TheMealDB search. Up to 30 confirmed pantry ingredients are sent for matching.</Text>
+              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>These ingredients will drive the published recipe search. Up to 30 confirmed pantry ingredients are sent for matching.</Text>
               {groupedPublishedIngredients.map((group) => {
                 const selected = group.ingredients.filter((ingredient) => publishedDriverIds.includes(ingredient.id));
                 if (!selected.length) return null;

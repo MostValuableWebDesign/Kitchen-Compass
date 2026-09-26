@@ -13,7 +13,7 @@ export function isKidFriendlyRecipe(recipe: Recipe) {
 }
 
 export function publishedRecipeAllowed(recipe: ExternalRecipe, allergies: string[], dislikes: string[]) {
-  if (requestedAllergenConflicts(assessRecipeAllergens(recipe.ingredients.map((item) => item.name), []), allergies)) return false;
+  if (requestedAllergenConflicts(assessRecipeAllergens(recipe.ingredients.flatMap((item) => [item.name, item.measure]), []), allergies)) return false;
   const avoided = new Set(dislikes.map(normalizeIngredientName));
   return !recipe.ingredients.some((item) => avoided.has(normalizeIngredientName(item.name)));
 }

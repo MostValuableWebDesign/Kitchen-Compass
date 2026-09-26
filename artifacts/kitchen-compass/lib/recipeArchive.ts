@@ -8,6 +8,8 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
+  externalProvider?: 'FatSecret';
+  externalId?: string;
 };
 
 export function archiveKey(title: string) {
@@ -19,7 +21,8 @@ export function isArchivedRecipe(recipe: Pick<Recipe, 'title' | 'sourceVersion' 
 }
 
 export function isArchivedPublished(recipe: Pick<ExternalRecipe, 'id' | 'title'>, archived: ArchivedRecipe[]) {
-  return archived.some((entry) => entry.key === archiveKey(recipe.title) || entry.externalRecipe?.id === recipe.id);
+  return archived.some((entry) => entry.key === archiveKey(recipe.title) || entry.externalRecipe?.id === recipe.id
+    || (entry.externalProvider === 'FatSecret' && entry.externalId === recipe.id));
 }
 
 export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, archivedAt = new Date().toISOString()) {
@@ -29,6 +32,12 @@ export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, a
 }
 
 export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: ExternalRecipe, archivedAt = new Date().toISOString()) {
+  if (recipe.provider === 'FatSecret') {
+    const key = recipe.id;
+    if (archived.some((entry) => entry.key === key)) return archived;
+    // FatSecret permits permanent storage of recipe IDs, not recipe content.
+    return [...archived, { key, title: `FatSecret recipe #${recipe.id.slice('fatsecret:'.length)}`, externalProvider: 'FatSecret' as const, externalId: recipe.id, archivedAt }];
+  }
   const key = archiveKey(recipe.title);
   if (!key || archived.some((entry) => entry.key === key)) return archived;
   return [...archived, { key, title: recipe.title, externalRecipe: recipe, archivedAt }];
@@ -67,9 +76,15 @@ export function parseExternalRecipe(value: unknown): ExternalRecipe | undefined 
 export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  return value.flatMap((item) => {
+  return value.flatMap((item): ArchivedRecipe[] => {
     if (!isRecord(item) || typeof item.title !== 'string' || !item.title.trim()) return [];
     const key = archiveKey(item.title);
+    if (item.externalProvider === 'FatSecret' && typeof item.externalId === 'string' && /^fatsecret:\d+$/.test(item.externalId)) {
+      if (seen.has(item.externalId)) return [];
+      seen.add(item.externalId);
+      return [{ key: item.externalId, title: `FatSecret recipe #${item.externalId.slice('fatsecret:'.length)}`, externalProvider: 'FatSecret' as const, externalId: item.externalId,
+        archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
+    }
     if (!key || seen.has(key)) return [];
     seen.add(key);
     const externalRecipe = parseExternalRecipe(item.externalRecipe);
