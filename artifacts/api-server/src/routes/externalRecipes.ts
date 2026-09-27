@@ -6,12 +6,12 @@ import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
-import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import { MAX_PROVIDER_PANTRY_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
 
 const router: IRouter = Router();
 const MAX_COUNTED_MISSING_INGREDIENTS = 7;
-const requestSchema = z.object({
-  ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(64),
+export const externalRecipeRequestSchema = z.object({
+  ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_PANTRY_INGREDIENTS),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
   dislikes: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
@@ -142,7 +142,7 @@ export function normalizeExternalMeal(meal: MealDetail, pantry: string[], allerg
 }
 
 router.post("/recipes/external", async (req, res) => {
-  const parsed = requestSchema.safeParse(req.body);
+  const parsed = externalRecipeRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     sendScanError(req, res, 400, "INVALID_REQUEST", "Choose at least one confirmed ingredient to find published recipes.");
     return;

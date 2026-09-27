@@ -197,3 +197,41 @@ test("Spoonacular caps its ingredient query at the shared provider search limit"
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
   }
 });
+
+test("Spoonacular counts matches from the full pantry beyond the 30 query anchors", async () => {
+  const oldKey = process.env.SPOONACULAR_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SPOONACULAR_API_KEY = "test-key";
+  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS }, (_, index) => `Anchor ${index + 1}`);
+  const pantry = [...anchors, ...Array.from({ length: 34 }, (_, index) => `Ingredient ${index + 31}`)];
+  globalThis.fetch = async (input) => {
+    const target = new URL(String(input));
+    if (target.pathname.endsWith("/findByIngredients")) {
+      return new Response(JSON.stringify([{ id: 640, title: "Pantry match", image: "https://example.com/pantry-match.jpg", usedIngredientCount: 1 }]), { status: 200 });
+    }
+    return new Response(JSON.stringify([{
+      id: 640,
+      title: "Pantry match",
+      image: "https://example.com/pantry-match.jpg",
+      sourceUrl: "https://example.com/pantry-match",
+      instructions: "Cook the ingredients.",
+      extendedIngredients: [{ name: "Anchor 1" }, { name: "Ingredient 64" }],
+    }]), { status: 200 });
+  };
+  try {
+    const results = await searchSpoonacularRecipes({
+      pantry,
+      anchors,
+      allergies: [],
+      excludedIds: new Set<string>(),
+      excludedTitles: new Set<string>(),
+      audience: "general",
+      maxCandidates: 1,
+    });
+    assert.deepEqual(results[0]?.matchedIngredients, ["Anchor 1", "Ingredient 64"]);
+    assert.deepEqual(results[0]?.missingIngredients, []);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
+  }
+});

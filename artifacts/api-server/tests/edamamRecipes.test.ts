@@ -92,6 +92,41 @@ test("Edamam caps its ingredient query at the shared provider search limit", asy
   }
 });
 
+test("Edamam counts matches from the full pantry beyond the 30 query anchors", async () => {
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS }, (_, index) => `Anchor ${index + 1}`);
+  const pantry = [...anchors, ...Array.from({ length: 34 }, (_, index) => `Ingredient ${index + 31}`)];
+  globalThis.fetch = async () => new Response(JSON.stringify({ hits: [{
+    recipe: {
+      uri: "edamam-pantry-match",
+      label: "Pantry match",
+      image: "https://example.com/pantry-match.jpg",
+      url: "https://example.com/pantry-match",
+      ingredients: [{ food: "Anchor 1" }, { food: "Ingredient 64" }],
+    },
+  }] }), { status: 200 });
+  try {
+    const results = await searchEdamamRecipes({
+      pantry,
+      anchors,
+      allergies: [],
+      excludedIds: new Set<string>(),
+      excludedTitles: new Set<string>(),
+      audience: "general",
+    });
+    assert.deepEqual(results[0]?.matchedIngredients, ["Anchor 1", "Ingredient 64"]);
+    assert.deepEqual(results[0]?.missingIngredients, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+  }
+});
+
 test("published search combines every provider in priority order and reports each eligible count", async () => {
   const originalFetch = globalThis.fetch;
   const oldId = process.env.EDAMAM_APP_ID;

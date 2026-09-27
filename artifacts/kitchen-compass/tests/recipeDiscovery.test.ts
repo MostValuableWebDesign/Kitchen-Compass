@@ -138,7 +138,7 @@ test('published recipe search excludes seasonings and ranks useful ingredients b
 });
 
 test('automatic ranking selects useful, varied ingredients within 30 and changes focus for sides', () => {
-  const meats = Array.from({ length: 35 }, (_, index) => ({ id: `meat-${index}`, name: `Chicken cut ${index}`, location: 'Freezer' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const }));
+  const meats = Array.from({ length: 61 }, (_, index) => ({ id: `meat-${index}`, name: `Chicken cut ${index}`, location: 'Freezer' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const }));
   const vegetables = [
     { id: 'broccoli', name: 'Broccoli', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const, expires: '2026-09-28', dateConfirmed: true },
     { id: 'carrot', name: 'Carrot', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
@@ -155,7 +155,7 @@ test('automatic ranking selects useful, varied ingredients within 30 and changes
   assert.deepEqual(side.slice(0, 3).map((item) => item.name), ['Broccoli', 'Carrot', 'Rice']);
   const picked = buildPublishedRecipeSearch(inventory, general.slice(0, 30).map((item) => item.id), { manualSelection: true });
   assert.equal(picked.anchors.length, 30);
-  assert.equal(picked.ingredients.length, 38);
+  assert.equal(picked.ingredients.length, 64);
 });
 
 test('published search checks up to 64 confirmed pantry ingredients with at most 30 anchors', () => {

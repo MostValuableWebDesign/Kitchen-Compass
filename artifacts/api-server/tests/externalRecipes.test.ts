@@ -3,6 +3,7 @@ import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
 import { kidFriendlyScore } from "../src/routes/kidFriendly";
+import { externalRecipeRequestSchema } from "../src/routes/externalRecipes";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "external-recipes-test-session";
@@ -16,6 +17,14 @@ const oldEdamamId = process.env.EDAMAM_APP_ID;
 const oldEdamamKey = process.env.EDAMAM_APP_KEY;
 delete process.env.EDAMAM_APP_ID;
 delete process.env.EDAMAM_APP_KEY;
+
+test("published recipe request accepts 64 matching ingredients but keeps search anchors capped at 30", () => {
+  const ingredients = Array.from({ length: 64 }, (_, index) => `ingredient-${index + 1}`);
+  const anchors = ingredients.slice(0, 30);
+  assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: anchors, allergies: [] }).success, true);
+  assert.equal(externalRecipeRequestSchema.safeParse({ ingredients: [...ingredients, "ingredient-65"], searchAnchors: anchors, allergies: [] }).success, false);
+  assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
+});
 beforeEach(() => resetScanRateLimiter());
 after(() => {
   server.close();
@@ -133,7 +142,7 @@ test("kid published search keeps familiar mild pantry matches", async () => {
   }
 });
 
-test("published recipes use up to thirty provider search anchors", async () => {
+test("published recipes match against 64 pantry ingredients while searching at most 30 anchors", async () => {
   const oldKey = process.env.THEMEALDB_API_KEY;
   const originalFetchForAnchorTest = globalThis.fetch;
   const filterRequests: string[] = [];
@@ -151,7 +160,7 @@ test("published recipes use up to thirty provider search anchors", async () => {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
       body: JSON.stringify({
-        ingredients: Array.from({ length: 30 }, (_, index) => `ingredient-${index + 1}`),
+        ingredients: Array.from({ length: 64 }, (_, index) => `ingredient-${index + 1}`),
         searchAnchors: Array.from({ length: 30 }, (_, index) => `ingredient-${index + 1}`),
         allergies: [],
       }),
