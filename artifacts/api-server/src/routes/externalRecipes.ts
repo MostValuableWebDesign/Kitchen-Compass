@@ -4,6 +4,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
+import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
@@ -24,7 +25,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB" | "FatSecret" | "Spoonacular";
+  provider: "TheMealDB" | "FatSecret" | "Spoonacular" | "Edamam";
   sourceName?: string;
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
@@ -33,9 +34,9 @@ export type ExternalRecipe = {
   missingIngredients: string[];
   safetyVerified: false;
 };
-type OnlineSource = "Spoonacular" | "TheMealDB";
+type OnlineSource = "Edamam" | "Spoonacular" | "TheMealDB";
 type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured"; count: number };
-const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular recipes are available online only.";
+const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular and Edamam recipes are available online only.";
 
 function providerKey() {
   const key = process.env.THEMEALDB_API_KEY?.trim();
@@ -136,9 +137,10 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key && !spoonacularConfigured()) {
+  if (!key && !spoonacularConfigured() && !edamamConfigured()) {
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
       sourceResults: [
+        { provider: "Edamam", status: "not_configured", count: 0 },
         { provider: "Spoonacular", status: "not_configured", count: 0 },
         { provider: "TheMealDB", status: "not_configured", count: 0 },
       ] satisfies OnlineSourceResult[] });
@@ -172,12 +174,14 @@ router.post("/recipes/external", async (req, res) => {
       return recipes;
     };
     const spoonacularEnabled = spoonacularConfigured();
+    const edamamEnabled = edamamConfigured();
     const results = await Promise.allSettled([
+      edamamEnabled ? searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
       spoonacularEnabled ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
       key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
     ]);
-    const configured = [spoonacularEnabled, Boolean(key)];
-    const providerNames = ["Spoonacular", "TheMealDB"] as const;
+    const configured = [edamamEnabled, spoonacularEnabled, Boolean(key)];
+    const providerNames = ["Edamam", "Spoonacular", "TheMealDB"] as const;
     const providersUnavailable = results.flatMap((result, index) => configured[index] && result.status === "rejected" ? [providerNames[index]!] : []);
     results.forEach((result, index) => {
       if (configured[index] && result.status === "rejected") {
@@ -193,7 +197,7 @@ router.post("/recipes/external", async (req, res) => {
       status: !configured[index] ? "not_configured" : result.status === "rejected" ? "unavailable" : result.value.length ? "found" : "no_results",
       count: result.status === "fulfilled" && configured[index] ? result.value.length : 0,
     }));
-    // Spoonacular has priority; TheMealDB fills any remaining slots.
+    // Edamam has priority; Spoonacular and TheMealDB fill remaining slots.
     for (const items of providerRecipes) {
       for (const recipe of items) {
         const title = titleKey(recipe.title);

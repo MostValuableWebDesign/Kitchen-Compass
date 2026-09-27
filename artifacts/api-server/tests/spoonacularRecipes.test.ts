@@ -11,7 +11,15 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
-after(() => server.close());
+const oldEdamamId = process.env.EDAMAM_APP_ID;
+const oldEdamamKey = process.env.EDAMAM_APP_KEY;
+delete process.env.EDAMAM_APP_ID;
+delete process.env.EDAMAM_APP_KEY;
+after(() => {
+  server.close();
+  if (oldEdamamId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldEdamamId;
+  if (oldEdamamKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldEdamamKey;
+});
 
 test("Spoonacular uses a server key, full recipe details, source credit, and archived exclusions", async () => {
   const oldKey = process.env.SPOONACULAR_API_KEY;
@@ -105,6 +113,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(payload.recipes[0]?.matchedIngredients, ["Pasta", "Tomato"]);
     assert.deepEqual(payload.providersUnavailable, []);
     assert.deepEqual(payload.sourceResults, [
+      { provider: "Edamam", status: "not_configured", count: 0 },
       { provider: "Spoonacular", status: "found", count: 1 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);
@@ -136,6 +145,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.match(kidsPayload.safetyNotice, /not been independently verified/);
     assert.match(kidsPayload.safetyNotice, /Check the original recipe and every package label/);
     assert.deepEqual(kidsPayload.sourceResults, [
+      { provider: "Edamam", status: "not_configured", count: 0 },
       { provider: "Spoonacular", status: "found", count: 1 },
       { provider: "TheMealDB", status: "no_results", count: 0 },
     ]);
@@ -147,6 +157,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(fallback.providersUnavailable, ["Spoonacular"]);
     assert.deepEqual(fallback.recipes.map((item) => item.id), ["201", "202"]);
     assert.deepEqual(fallback.sourceResults, [
+      { provider: "Edamam", status: "not_configured", count: 0 },
       { provider: "Spoonacular", status: "unavailable", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);

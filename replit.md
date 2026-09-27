@@ -10,14 +10,20 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Server secrets: `OPENAI_API_KEY` for photo recognition and AI recipe discovery; `SESSION_SECRET` for signed scan access; `DATABASE_URL` for a shared quota store in deployed multi-instance environments.
-- Published recipes: set `SPOONACULAR_API_KEY` on the API server. Spoonacular results have priority; TheMealDB fills remaining result slots. Set `THEMEALDB_API_KEY` to a paid key before publishing an iPhone app; its free development key is used only outside production. FatSecret is disabled even if its credentials remain configured.
-- Keep `OPENAI_API_KEY`, `THEMEALDB_API_KEY`, and `SPOONACULAR_API_KEY` on the API server. The Expo bundle should receive only its API domain.
+- Published recipes: set `EDAMAM_APP_ID` and `EDAMAM_APP_KEY` for Edamam Recipe Search v2 and `SPOONACULAR_API_KEY` for Spoonacular on the API server. Edamam results have priority, followed by Spoonacular and then TheMealDB. Set `THEMEALDB_API_KEY` to a paid key before publishing an iPhone app; its free development key is used only outside production. FatSecret is disabled even if its credentials remain configured.
+- Keep `OPENAI_API_KEY`, `THEMEALDB_API_KEY`, `SPOONACULAR_API_KEY`, `EDAMAM_APP_ID`, and `EDAMAM_APP_KEY` on the API server. The Expo bundle should receive only its API domain.
 
 ### Activate Spoonacular in Replit
 
 1. Add `SPOONACULAR_API_KEY` as a Replit server secret. Do not put it in an `EXPO_PUBLIC_*` variable or the app bundle.
 2. Run the API and app typechecks plus the API and Kitchen Compass test scripts on Replit.
-3. Use **Find online** in General and **Find kids’ recipes** in Kid-friendly with confirmed ingredients. Spoonacular cards should appear before TheMealDB cards and show an image plus the original recipe source name and link. Spoonacular details remain online only; archiving stores just its ID and title. If the API response includes `Spoonacular` in `providersUnavailable`, inspect the server's `Published recipe provider unavailable` log for the upstream status. FatSecret should never appear in `providersUnavailable` or trigger an API request.
+3. Use **Find online** in General and **Find kids’ recipes** in Kid-friendly with confirmed ingredients. Spoonacular cards should appear after Edamam and before TheMealDB cards, and show an image plus the original recipe source name and link. Spoonacular details remain online only; archiving stores just its ID and title. If the API response includes `Spoonacular` in `providersUnavailable`, inspect the server's `Published recipe provider unavailable` log for the upstream status. FatSecret should never appear in `providersUnavailable` or trigger an API request.
+
+### Activate Edamam in Replit
+
+1. Add Recipe Search v2 credentials as `EDAMAM_APP_ID` and `EDAMAM_APP_KEY` in Replit server secrets. Both values are required; do not use `EXPO_PUBLIC_*` variables.
+2. Run the API and app typechecks and tests. Use **Find online** in General and Kid-friendly with confirmed ingredients. Check the first row, Edamam, in **Online source results** for found, no results, unavailable, or not configured. Edamam cards should appear first, link to the original recipe instructions, and show the source credit and official Edamam badge. They remain online only; archiving saves just an opaque ID.
+3. If Edamam shows unavailable, check the API server's `Published recipe provider unavailable` log for a safe HTTP status. Confirm your Edamam subscription permits Recipe Search v2 and your credentials belong to the same application.
 
 ## Stack
 
@@ -42,8 +48,8 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 - Camera and photo-library access use Expo ImagePicker's native entry points; every captured photo pauses at a review screen.
 - Photos are normalized to JPEG before recognition. Originals are kept only if selected, as app-owned local copies that can be deleted in Settings or with the ingredient. The app cannot delete a photo from the user's Photos library.
 - Planned meals reserve known quantities; cooking completion deducts inventory once, releases the reservation, and optionally creates leftovers.
-- Published recipes come from Spoonacular and TheMealDB, show provider/source attribution and ingredient gaps, and open the original source. Spoonacular recipe details are displayed only for the current online search; its standard API storage rules do not permit persisting full recipe details, so Spoonacular recipes cannot be added to offline saved recipes. Spoonacular archives store ID and title. The legacy FatSecret adapter and archive parsing remain for compatibility, but no FatSecret API calls are made. Published recipes are not imported into the in-app planner because external allergen and quantity data have not been verified.
-- General and Kid-friendly each offer separate AI creation and published online search actions. Online search never starts AI creation. Its `sourceResults` response reports Spoonacular and TheMealDB separately as found, no results, unavailable, or not configured; the app shows these outcomes below the online search card.
+- Published recipes come from Edamam, Spoonacular, and TheMealDB in that priority order, show provider/source attribution and ingredient gaps, and open the original source. Edamam and Spoonacular recipe details are displayed only for the current online search; they cannot be added to offline saved recipes. Edamam public web results link to the original instructions, because Edamam does not provide cooking steps for them. The official Edamam badge appears when Edamam returns eligible results. Spoonacular archives store ID and title; Edamam archives store only an opaque ID and a generic label. The legacy FatSecret adapter and archive parsing remain for compatibility, but no FatSecret API calls are made. Published recipes are not imported into the in-app planner because external allergen and quantity data have not been verified.
+- General and Kid-friendly each offer separate AI creation and published online search actions. Online search never starts AI creation. Its `sourceResults` response reports Edamam, Spoonacular, and TheMealDB separately as found, no results, unavailable, or not configured; the app shows these outcomes below the online search card.
 
 ## Product
 

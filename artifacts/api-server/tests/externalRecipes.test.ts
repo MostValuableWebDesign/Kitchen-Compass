@@ -12,8 +12,16 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port.");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
+const oldEdamamId = process.env.EDAMAM_APP_ID;
+const oldEdamamKey = process.env.EDAMAM_APP_KEY;
+delete process.env.EDAMAM_APP_ID;
+delete process.env.EDAMAM_APP_KEY;
 beforeEach(() => resetScanRateLimiter());
-after(() => server.close());
+after(() => {
+  server.close();
+  if (oldEdamamId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldEdamamId;
+  if (oldEdamamKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldEdamamKey;
+});
 
 test("familiar meal formats are ranked as kid ideas without claiming every child likes them", () => {
   assert.equal(kidFriendlyScore("Tomato pasta", ["tomato", "pasta"]), 1);
@@ -60,6 +68,7 @@ test("published recipes show source attribution and never assert allergy safety"
     const payload = await response.json() as { recipes: Array<{ title: string; provider: string; sourceUrl: string; safetyVerified: boolean; matchedIngredients: string[]; missingIngredients: string[] }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((item) => item.title), ["Egg and tomato bowl"]);
     assert.deepEqual(payload.sourceResults, [
+      { provider: "Edamam", status: "not_configured", count: 0 },
       { provider: "Spoonacular", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 1 },
     ]);

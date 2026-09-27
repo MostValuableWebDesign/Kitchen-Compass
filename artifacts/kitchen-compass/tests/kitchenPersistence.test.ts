@@ -139,3 +139,20 @@ test('archiving a Spoonacular result keeps its ID and title without recipe conte
   assert.equal(JSON.stringify(restored.archivedRecipes).includes('1 cup'), false);
   assert.equal(isArchivedPublished(recipe, restored.archivedRecipes), true);
 });
+
+test('archiving an Edamam result keeps only its opaque ID', () => {
+  const recipe = {
+    id: `edamam:${'a'.repeat(64)}`, title: 'Pasta with carrots', provider: 'Edamam' as const,
+    sourceName: 'Example Kitchen', sourceUrl: 'https://example.com/recipes/pasta',
+    imageUrl: 'https://example.com/pasta.jpg',
+    ingredients: [{ name: 'Pasta', measure: '1 cup' }], instructions: '',
+    matchedIngredients: ['Pasta'], missingIngredients: ['Carrots'], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], recipe);
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState({ ...emptyPersistedKitchenState(), archivedRecipes: archived }), defaultPreferences);
+  assert.equal(restored.archivedRecipes[0]?.externalId, recipe.id);
+  assert.equal(restored.archivedRecipes[0]?.title, 'Archived Edamam recipe');
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.title), false);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.sourceUrl), false);
+  assert.equal(isArchivedPublished(recipe, restored.archivedRecipes), true);
+});
