@@ -17,6 +17,11 @@ const requestSchema = z.object({
   excludedRecipeIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
   excludedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
   audience: z.enum(["general", "kids"]).default("general"),
+  course: z.enum(["main", "side"]).optional(),
+  mainRecipe: z.object({
+    title: z.string().trim().min(1).max(160),
+    ingredientNames: z.array(z.string().trim().min(1).max(120)).min(1).max(40),
+  }).optional(),
 });
 
 type MealSummary = { idMeal?: string; strMeal?: string };
@@ -63,6 +68,22 @@ function isNonCountedMissingIngredient(value: string) {
 
 function titleKey(title: string) {
   return title.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+const mainDishTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat|pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?)\b/i;
+const sideDishTerms = /\b(side|salad|slaw|vegetables?|broccoli|carrots?|spinach|asparagus|cauliflower|peas|corn|beans|rice|quinoa|couscous|potato(?:es)?|fries|wedges|greens)\b/i;
+const strongFlavors = /\b(spicy|hot sauce|chili|chilli|cayenne|jalape[nñ]o|habanero)\b/i;
+const meatTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat)\b/i;
+
+export function suitableMealCourse(recipe: ExternalRecipe, course: "main" | "side", audience: "general" | "kids", mainRecipe?: { title: string; ingredientNames: string[] }, anchors: string[] = []) {
+  const names = recipe.ingredients.map((item) => item.name);
+  if (!recipe.matchedIngredients.length) return false;
+  if (anchors.length && !recipe.matchedIngredients.some((name) => anchors.some((anchor) => ingredientIdentity(name) === ingredientIdentity(anchor)))) return false;
+  if (audience === "kids" && (strongFlavors.test(recipe.title) || names.some((name) => strongFlavors.test(name)))) return false;
+  if (course === "main") return mainDishTerms.test(recipe.title) || names.some((name) => meatTerms.test(name));
+  if (!mainRecipe || titleKey(recipe.title) === titleKey(mainRecipe.title) || !sideDishTerms.test(recipe.title) || mainDishTerms.test(recipe.title)) return false;
+  const mainProteins = mainRecipe.ingredientNames.filter((name) => meatTerms.test(name)).map(ingredientIdentity);
+  return !names.some((name) => meatTerms.test(name) || mainProteins.includes(ingredientIdentity(name)));
 }
 
 function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>(), excludedTitles = new Set<string>()) {
@@ -136,6 +157,10 @@ router.post("/recipes/external", async (req, res) => {
     sendScanError(req, res, 400, "INVALID_REQUEST", "Choose at least one confirmed ingredient to find published recipes.");
     return;
   }
+  if (parsed.data.course === "side" && !parsed.data.mainRecipe) {
+    sendScanError(req, res, 400, "INVALID_REQUEST", "Choose a main dish before finding a side.");
+    return;
+  }
   const key = providerKey();
   if (!key && !spoonacularConfigured() && !edamamConfigured()) {
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
@@ -153,6 +178,7 @@ router.post("/recipes/external", async (req, res) => {
   const base = key ? `https://www.themealdb.com/api/json/v1/${encodeURIComponent(key)}` : "";
   try {
     const anchors = parsed.data.searchAnchors ?? (searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS);
+    const providerAudience = parsed.data.course === "side" ? "general" : parsed.data.audience;
     const mealSearch = async () => {
       const searches = await Promise.all(anchors.map(async (ingredient) => {
         const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
@@ -168,16 +194,16 @@ router.post("/recipes/external", async (req, res) => {
         .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
         .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
         .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
-        .filter((recipe) => parsed.data.audience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
+        .filter((recipe) => providerAudience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
         .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-      if (parsed.data.audience === "kids") recipes.splice(12);
+      if (providerAudience === "kids") recipes.splice(12);
       return recipes;
     };
     const spoonacularEnabled = spoonacularConfigured();
     const edamamEnabled = edamamConfigured();
     const results = await Promise.allSettled([
-      edamamEnabled ? searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
-      spoonacularEnabled ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: parsed.data.audience }) : Promise.resolve([] as ExternalRecipe[]),
+      edamamEnabled ? searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) : Promise.resolve([] as ExternalRecipe[]),
+      spoonacularEnabled ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) : Promise.resolve([] as ExternalRecipe[]),
       key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
     ]);
     const configured = [edamamEnabled, spoonacularEnabled, Boolean(key)];
@@ -191,11 +217,13 @@ router.post("/recipes/external", async (req, res) => {
     const recipes: ExternalRecipe[] = [];
     const seenTitles = new Set<string>();
     const limit = parsed.data.audience === "kids" ? 12 : 30;
-    const providerRecipes = results.map((result) => result.status === "fulfilled" ? result.value : []);
+    const providerRecipes = results.map((result) => result.status === "fulfilled"
+      ? result.value.filter((recipe) => !parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
+      : []);
     const sourceResults: OnlineSourceResult[] = results.map((result, index) => ({
       provider: providerNames[index]!,
-      status: !configured[index] ? "not_configured" : result.status === "rejected" ? "unavailable" : result.value.length ? "found" : "no_results",
-      count: result.status === "fulfilled" && configured[index] ? result.value.length : 0,
+      status: !configured[index] ? "not_configured" : result.status === "rejected" ? "unavailable" : providerRecipes[index]!.length ? "found" : "no_results",
+      count: configured[index] ? providerRecipes[index]!.length : 0,
     }));
     // Edamam has priority; Spoonacular and TheMealDB fill remaining slots.
     for (const items of providerRecipes) {

@@ -4,6 +4,21 @@ import test from "node:test";
 import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
 import { searchEdamamRecipes } from "../src/routes/edamamRecipes";
+import { suitableMealCourse, type ExternalRecipe } from "../src/routes/externalRecipes";
+
+test("complete meal course checks distinguish mains from mild complementary sides", () => {
+  const recipe = (title: string, ingredients: string[]): ExternalRecipe => ({
+    id: title, title, provider: "Edamam", sourceUrl: "https://example.com/recipe", instructions: "",
+    ingredients: ingredients.map((name) => ({ name, measure: "1 cup" })),
+    matchedIngredients: ingredients, missingIngredients: [], safetyVerified: false,
+  });
+  const main = { title: "Roast chicken", ingredientNames: ["Chicken", "Garlic"] };
+  assert.equal(suitableMealCourse(recipe("Chicken pasta", ["Chicken", "Pasta"]), "main", "kids"), true);
+  assert.equal(suitableMealCourse(recipe("Mashed potatoes", ["Potatoes", "Milk"]), "side", "kids", main), true);
+  assert.equal(suitableMealCourse(recipe("Mashed potatoes", ["Potatoes", "Milk"]), "side", "kids", main, ["Broccoli"]), false);
+  assert.equal(suitableMealCourse(recipe("Spicy mashed potatoes", ["Potatoes"]), "side", "kids", main), false);
+  assert.equal(suitableMealCourse(recipe("Chicken salad", ["Chicken", "Lettuce"]), "side", "general", main), false);
+});
 
 test("Edamam uses server credentials and returns safe, online-only recipes for general and kids searches", async () => {
   const oldId = process.env.EDAMAM_APP_ID;
@@ -99,6 +114,53 @@ test("published search orders Edamam, Spoonacular, then TheMealDB and keeps the 
     assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.status, source.count]), [
       ["Edamam", "found", 2], ["Spoonacular", "found", 2], ["TheMealDB", "found", 1],
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    server.close();
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+    if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
+    if (oldSessionSecret === undefined) delete process.env.SESSION_SECRET; else process.env.SESSION_SECRET = oldSessionSecret;
+  }
+});
+
+test("kid side search accepts a mild published side and rejects a main dish", async () => {
+  const originalFetch = globalThis.fetch;
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
+  const oldSessionSecret = process.env.SESSION_SECRET;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  delete process.env.SPOONACULAR_API_KEY;
+  process.env.SESSION_SECRET = "meal-side-test-session";
+  const server = app.listen(0);
+  try {
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server has no port");
+    globalThis.fetch = async (input) => {
+      const target = new URL(String(input));
+      if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: [
+        { recipe: { uri: "side-1", label: "Mashed potatoes", image: "https://example.com/potatoes.jpg", url: "https://example.com/potatoes", ingredients: [{ food: "Potatoes", text: "2 potatoes" }, { food: "Milk", text: "1 cup milk" }] } },
+        { recipe: { uri: "main-1", label: "Chicken pasta", image: "https://example.com/pasta.jpg", url: "https://example.com/pasta", ingredients: [{ food: "Potatoes", text: "2 potatoes" }, { food: "Chicken", text: "1 chicken" }] } },
+      ] }), { status: 200 });
+      if (target.hostname === "www.themealdb.com") return new Response(JSON.stringify({ meals: [] }), { status: 200 });
+      throw new Error(`Unexpected provider ${target.hostname}`);
+    };
+    const response = await originalFetch(`http://127.0.0.1:${address.port}/api/recipes/external`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Potatoes", "Milk"], searchAnchors: ["Potatoes"], allergies: [], audience: "kids", course: "side", mainRecipe: { title: "Roast chicken", ingredientNames: ["Chicken", "Garlic"] } }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { recipes: Array<{ title: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
+    assert.deepEqual(payload.recipes.map((recipe) => recipe.title), ["Mashed potatoes"]);
+    assert.deepEqual(payload.sourceResults[0], { provider: "Edamam", status: "found", count: 1 });
+    const noMain = await originalFetch(`http://127.0.0.1:${address.port}/api/recipes/external`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Potatoes"], searchAnchors: ["Potatoes"], allergies: [], audience: "kids", course: "side" }),
+    });
+    assert.equal(noMain.status, 400);
   } finally {
     globalThis.fetch = originalFetch;
     server.close();
