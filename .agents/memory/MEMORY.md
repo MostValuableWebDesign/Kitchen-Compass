@@ -13,3 +13,4 @@
 - [Post-merge database safety](post-merge-database-safety.md) — declare runtime SQL tables in Drizzle and fail closed on non-TTY schema prompts.
 - [PNPM lockfile repairs](pnpm-lockfile-repairs.md) — lockfile syncs may rewrite optional peer contexts; inspect actual dependency changes before accepting broad churn.
 - [FatSecret IP allowlisting](fatsecret-ip-allowlisting.md) — FatSecret error 21 means an invalid source IP; Replit outbound IPs are dynamic, so a single-IP allowlist may be temporary.
+- [Keyboard-aware scroll refs](keyboard-aware-scroll-refs.md) — preserve ScrollView methods while adapting the native keyboard-aware ref at the shared wrapper boundary.
