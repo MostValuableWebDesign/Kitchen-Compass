@@ -158,6 +158,21 @@ test('automatic ranking selects useful, varied ingredients within 30 and changes
   assert.equal(picked.ingredients.length, 64);
 });
 
+test('prepared meat names stay in pantry matching but lose meat anchor priority', () => {
+  const item = (id: string, name: string) => ({ id, name, location: 'Pantry' as const,
+    status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const });
+  const inventory = [item('broth', 'Chicken broth'), item('seasoning', 'Beef seasoning'), item('chicken', 'Chicken breast'), item('rice', 'Rice')];
+  assert.equal(publishedIngredientCategory('Chicken broth'), 'Pantry & condiments');
+  assert.equal(publishedIngredientCategory('Beef seasoning'), 'Pantry & condiments');
+  assert.equal(publishedIngredientCategory('Chicken breast'), 'Meat & seafood');
+  const ranked = rankPublishedSearchIngredients(inventory, 'main');
+  assert.equal(ranked[0]?.name, 'Chicken breast');
+  assert.equal(ranked.indexOf(inventory[0]!) >= 2, true);
+  const search = buildPublishedRecipeSearch(inventory);
+  assert.equal(search.anchors[0], 'Chicken breast');
+  assert.equal(search.ingredients.includes('Chicken broth'), true);
+});
+
 test('published search checks up to 64 confirmed pantry ingredients with at most 30 anchors', () => {
   const inventory = Array.from({ length: 70 }, (_, index) => ({
     id: `item-${index}`, name: `Ingredient ${index}`, location: 'Pantry' as const,

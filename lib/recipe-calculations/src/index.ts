@@ -55,6 +55,7 @@ export {
   type IngredientAllergenAssessment,
   type RecipeAllergenAssessment,
 } from './allergenSafety';
+export { isPreparedFoodIngredient, primaryProteinSearchTerm, recipeSearchFoodTerm } from './recipeSearchFood';
 
 type Ingredient = {
   name: string;

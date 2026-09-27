@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
+import { assessRecipeAllergens, recipeSearchFoodTerm, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
@@ -24,14 +24,6 @@ type EdamamRecipe = {
 function httpsUrl(value: unknown) {
   if (typeof value !== "string") return undefined;
   try { const url = new URL(value); return url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; }
-}
-
-function edamamQuery(anchor: string) {
-  const key = identity(anchor);
-  if (/^(?:fettuccine|penne|linguine|spaghetti|rigatoni|rotini|elbow|angel hair) pasta$/.test(key)) return "pasta";
-  if (key === "ground beef") return "beef";
-  if (key === "red onion") return "onion";
-  return key;
 }
 
 function titleKey(value: string) {
@@ -99,6 +91,13 @@ export function normalizeEdamamRecipe(
   };
 }
 
+export function edamamSearchQueries(anchors: readonly string[]): string[] {
+  return [...new Set(anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS)
+    .filter((anchor) => !isNonCountedMissingIngredient(anchor))
+    .map(recipeSearchFoodTerm)
+    .filter((query): query is string => Boolean(query)))].slice(0, 3);
+}
+
 export async function searchEdamamRecipes(input: {
   pantry: string[]; anchors: string[]; allergies: string[]; excludedIds: Set<string>;
   excludedTitles: Set<string>; audience: "general" | "kids";
@@ -108,9 +107,7 @@ export async function searchEdamamRecipes(input: {
   if (!appId || !appKey) throw new Error("Edamam is not configured");
   // q is a recipe search term; pantry matching and the missing limit run after it returns hits.
   // Try distinct food anchors one at a time, stopping after the first eligible batch.
-  const queries = [...new Set(input.anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS)
-    .filter((anchor) => !isNonCountedMissingIngredient(anchor))
-    .map(edamamQuery))].slice(0, 3);
+  const queries = edamamSearchQueries(input.anchors);
   for (const query of queries) {
     const url = new URL("https://api.edamam.com/api/recipes/v2");
     url.searchParams.set("type", "public");

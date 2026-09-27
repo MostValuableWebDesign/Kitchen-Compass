@@ -1,4 +1,5 @@
 import type { Ingredient } from '@/context/KitchenContext';
+import { isPreparedFoodIngredient, primaryProteinSearchTerm, recipeSearchFoodTerm } from '@workspace/recipe-calculations';
 
 export const MAX_PUBLISHED_SEARCH_INGREDIENTS = 64;
 export const MAX_PUBLISHED_SEARCH_ANCHORS = 30;
@@ -40,7 +41,8 @@ function normalizeIngredient(value: string) {
 export function publishedIngredientCategory(name: string): PublishedIngredientCategory {
   const identity = normalizeIngredient(name);
   const matches = (terms: string[]) => terms.some((term) => identity === term || identity.includes(` ${term}`) || identity.includes(`${term} `));
-  if (matches(['chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'fish', 'salmon', 'tuna', 'shrimp', 'prawn', 'steak', 'bacon', 'sausage', 'ham', 'meat'])) return 'Meat & seafood';
+  if (isPreparedFoodIngredient(name)) return 'Pantry & condiments';
+  if (primaryProteinSearchTerm(name)) return 'Meat & seafood';
   if (matches(['apple', 'avocado', 'banana', 'lemon', 'lime', 'orange', 'berry', 'strawberry', 'blueberry', 'mango', 'pineapple', 'peach', 'pear', 'grape', 'coconut'])) return 'Fruits';
   if (matches(['carrot', 'tomato', 'onion', 'garlic', 'broccoli', 'bell pepper', 'spinach', 'mushroom', 'cabbage', 'lettuce', 'celery', 'zucchini', 'eggplant', 'corn', 'pea', 'bean', 'asparagus', 'cauliflower', 'green bean'])) return 'Vegetables';
   if (matches(['milk', 'cream', 'cheese', 'butter', 'yogurt', 'egg', 'parmesan', 'mozzarella'])) return 'Dairy & eggs';
@@ -69,6 +71,7 @@ function scoreIngredient(ingredient: PublishedSearchIngredient, focus: DishFocus
     side: { 'Meat & seafood': -8, Vegetables: 18, 'Grains & bakery': 15, 'Dairy & eggs': 8, Fruits: 9, 'Pantry & condiments': 1, Other: 4 },
   };
   let score = categoryScores[focus][category];
+  if (recipeSearchFoodTerm(ingredient.name)) score += 5;
   if (ingredient.quantityKnown === true || (typeof ingredient.quantityValue === 'number' && ingredient.quantityValue > 0)) score += 4;
   if (ingredient.status === 'fresh') score += 3;
   else if (ingredient.status === 'low') score -= 3;

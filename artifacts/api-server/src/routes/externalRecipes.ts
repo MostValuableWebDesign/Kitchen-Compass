@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
+import { assessRecipeAllergens, primaryProteinSearchTerm, recipeSearchFoodTerm, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
-import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
+import { edamamConfigured, edamamSearchQueries, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import {
   MAX_COUNTED_MISSING_INGREDIENTS,
@@ -74,47 +74,59 @@ export function combineProviderRecipeResults(
   groups: readonly ExternalRecipe[][],
   limit: number,
   onDrop?: (groupIndex: number, reason: "duplicate" | "resultLimit") => void,
+  prioritizedAnchors: readonly string[] = [],
 ) {
   const cappedLimit = Math.max(0, Math.min(MAX_TOTAL_PUBLISHED_RECIPES, Math.floor(limit)));
   const candidates: Array<{ recipe: ExternalRecipe; groupIndex: number }> = [];
-  const seenIds = new Set<string>();
-  const seenSourceUrls = new Set<string>();
   const maxLength = Math.max(0, ...groups.map((group) => group.length));
   for (let index = 0; index < maxLength; index += 1) {
     groups.forEach((group, groupIndex) => {
       const recipe = group[index];
       if (!recipe) return;
-      const sourceUrl = recipe.sourceUrl.replace(/\/$/, "");
-      if (seenIds.has(recipe.id) || seenSourceUrls.has(sourceUrl)) {
-        onDrop?.(groupIndex, "duplicate");
-        return;
-      }
-      seenIds.add(recipe.id);
-      seenSourceUrls.add(sourceUrl);
       candidates.push({ recipe, groupIndex });
     });
   }
+  const anchorTerms = [...new Set(prioritizedAnchors.map(recipeSearchFoodTerm).filter((term): term is string => Boolean(term)))].slice(0, 5);
+  const anchorFit = (recipe: ExternalRecipe) => anchorTerms.reduce((score, term, index) =>
+    score + (recipe.matchedIngredients.some((name) => recipeSearchFoodTerm(name) === term) ? 5 - index : 0), 0);
   candidates.sort((left, right) =>
     left.recipe.missingIngredients.length - right.recipe.missingIngredients.length
-    || right.recipe.matchedIngredients.length - left.recipe.matchedIngredients.length);
-  for (const candidate of candidates.slice(cappedLimit)) onDrop?.(candidate.groupIndex, "resultLimit");
-  return candidates.slice(0, cappedLimit).map(({ recipe }) => recipe);
+    || right.recipe.matchedIngredients.length - left.recipe.matchedIngredients.length
+    || anchorFit(right.recipe) - anchorFit(left.recipe));
+  const seenIds = new Set<string>();
+  const seenSourceUrls = new Set<string>();
+  const unique: typeof candidates = [];
+  for (const candidate of candidates) {
+    const sourceUrl = candidate.recipe.sourceUrl.replace(/\/$/, "");
+    if (seenIds.has(candidate.recipe.id) || seenSourceUrls.has(sourceUrl)) {
+      onDrop?.(candidate.groupIndex, "duplicate");
+      continue;
+    }
+    seenIds.add(candidate.recipe.id);
+    seenSourceUrls.add(sourceUrl);
+    unique.push(candidate);
+  }
+  for (const candidate of unique.slice(cappedLimit)) onDrop?.(candidate.groupIndex, "resultLimit");
+  return unique.slice(0, cappedLimit).map(({ recipe }) => recipe);
 }
 
-const mainDishTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat|pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?)\b/i;
+const mainDishTerms = /\b(pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?|meatloaf)\b/i;
+function isMainDishTitle(title: string) {
+  return mainDishTerms.test(title) || Boolean(primaryProteinSearchTerm(title));
+}
 const sideDishTerms = /\b(side|salad|slaw|vegetables?|broccoli|carrots?|spinach|asparagus|cauliflower|peas|corn|beans|rice|quinoa|couscous|potato(?:es)?|fries|wedges|greens)\b/i;
 const strongFlavors = /\b(spicy|hot sauce|chili|chilli|cayenne|jalape[nñ]o|habanero)\b/i;
-const meatTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat)\b/i;
 
 export function suitableMealCourse(recipe: ExternalRecipe, course: "main" | "side", audience: "general" | "kids", mainRecipe?: { title: string; ingredientNames: string[] }, anchors: string[] = []) {
   const names = recipe.ingredients.map((item) => item.name);
   if (!recipe.matchedIngredients.length) return false;
-  if (anchors.length && !recipe.matchedIngredients.some((name) => anchors.some((anchor) => ingredientIdentity(name) === ingredientIdentity(anchor)))) return false;
+  if (anchors.length && !recipe.matchedIngredients.some((name) => anchors.some((anchor) =>
+    ingredientIdentity(name) === ingredientIdentity(anchor)
+    || (recipeSearchFoodTerm(name) && recipeSearchFoodTerm(name) === recipeSearchFoodTerm(anchor))))) return false;
   if (audience === "kids" && (strongFlavors.test(recipe.title) || names.some((name) => strongFlavors.test(name)))) return false;
-  if (course === "main") return mainDishTerms.test(recipe.title) || names.some((name) => meatTerms.test(name));
-  if (!mainRecipe || titleKey(recipe.title) === titleKey(mainRecipe.title) || !sideDishTerms.test(recipe.title) || mainDishTerms.test(recipe.title)) return false;
-  const mainProteins = mainRecipe.ingredientNames.filter((name) => meatTerms.test(name)).map(ingredientIdentity);
-  return !names.some((name) => meatTerms.test(name) || mainProteins.includes(ingredientIdentity(name)));
+  if (course === "main") return isMainDishTitle(recipe.title) || names.some((name) => Boolean(primaryProteinSearchTerm(name)));
+  if (!mainRecipe || titleKey(recipe.title) === titleKey(mainRecipe.title) || !sideDishTerms.test(recipe.title) || isMainDishTitle(recipe.title)) return false;
+  return !names.some((name) => Boolean(primaryProteinSearchTerm(name)));
 }
 
 function interleaveMealIds(
@@ -292,8 +304,8 @@ router.post("/recipes/external", async (req, res) => {
     };
     const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
     const limit = MAX_TOTAL_PUBLISHED_RECIPES;
-    const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
-      { provider: "Edamam", configured: edamamConfigured(), search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
+    const sources: Array<{ provider: OnlineSource; configured: boolean; searchable?: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
+      { provider: "Edamam", configured: edamamConfigured(), searchable: edamamSearchQueries(anchors).length > 0, search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
     ];
@@ -302,6 +314,14 @@ router.post("/recipes/external", async (req, res) => {
         return {
           provider: source.provider,
           sourceResult: { provider: source.provider, status: "not_configured", count: 0 } satisfies OnlineSourceResult,
+          recipes: [] as ExternalRecipe[],
+          diagnostics: undefined,
+        };
+      }
+      if (source.searchable === false) {
+        return {
+          provider: source.provider,
+          sourceResult: { provider: source.provider, status: "not_searched", count: 0 } satisfies OnlineSourceResult,
           recipes: [] as ExternalRecipe[],
           diagnostics: undefined,
         };
@@ -352,7 +372,7 @@ router.post("/recipes/external", async (req, res) => {
       recordCandidateRemoval(diagnostics, reason);
       if (reason === "duplicate") resultCounts.duplicates += 1;
       else resultCounts.capped += 1;
-    });
+    }, anchors);
     resultCounts.returned = recipes.length;
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults, resultCounts, providerDiagnostics }, "Published recipe source results");
     res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, resultCounts, safetyNotice });

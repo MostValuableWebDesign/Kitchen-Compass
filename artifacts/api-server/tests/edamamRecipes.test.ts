@@ -3,7 +3,7 @@ import { once } from "node:events";
 import test from "node:test";
 import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
-import { searchEdamamRecipes } from "../src/routes/edamamRecipes";
+import { edamamSearchQueries, searchEdamamRecipes } from "../src/routes/edamamRecipes";
 import { suitableMealCourse, type ExternalRecipe } from "../src/routes/externalRecipes";
 import { MAX_PROVIDER_SEARCH_ANCHORS } from "../src/routes/providerSearchLimits";
 import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnostics";
@@ -71,7 +71,7 @@ test("Edamam uses focused queries and tries at most three distinct anchors when 
   const originalFetch = globalThis.fetch;
   process.env.EDAMAM_APP_ID = "test-id";
   process.env.EDAMAM_APP_KEY = "test-key";
-  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS + 5 }, (_, index) => `Ingredient ${index + 1}`);
+  const anchors = ["Chicken broth", "Chicken seasoning", "Ground beef", "Broccoli", "Pasta", "Turkey", ...Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS }, (_, index) => `Ingredient ${index + 1}`)];
   const queries: string[] = [];
   globalThis.fetch = async (input) => {
     queries.push(new URL(String(input)).searchParams.get("q") ?? "");
@@ -86,7 +86,41 @@ test("Edamam uses focused queries and tries at most three distinct anchors when 
       excludedTitles: new Set<string>(),
       audience: "general",
     });
-    assert.deepEqual(queries, ["ingredient 1", "ingredient 2", "ingredient 3"]);
+    assert.deepEqual(queries, ["beef", "broccoli", "pasta"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+  }
+});
+
+test("Edamam does not search a pantry with no recognized main food", () => {
+  assert.deepEqual(edamamSearchQueries(["Chicken broth", "Beef seasoning", "Mystery packet"]), []);
+  assert.deepEqual(edamamSearchQueries(["Chicken broth", "Salmon fillet", "Rice"]), ["salmon", "rice"]);
+});
+
+test("Edamam skips broth and unrecognized labels before a single clear meat query", async () => {
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  const queries: string[] = [];
+  globalThis.fetch = async (input) => {
+    queries.push(new URL(String(input)).searchParams.get("q") ?? "");
+    return new Response(JSON.stringify({ hits: [{ recipe: {
+      uri: "clear-chicken", label: "Chicken and rice", image: "https://example.com/chicken.jpg",
+      url: "https://example.com/chicken", ingredients: [{ food: "Chicken breast" }, { food: "Rice" }],
+    } }] }), { status: 200 });
+  };
+  try {
+    const results = await searchEdamamRecipes({
+      pantry: ["Chicken broth", "Mystery packet", "Chicken", "Rice"],
+      anchors: ["Chicken broth", "Mystery packet", "Chicken breast", "Rice"],
+      allergies: [], excludedIds: new Set<string>(), excludedTitles: new Set<string>(), audience: "general",
+    });
+    assert.deepEqual(queries, ["chicken"]);
+    assert.equal(results[0]?.title, "Chicken and rice");
   } finally {
     globalThis.fetch = originalFetch;
     if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
@@ -133,7 +167,7 @@ test("Edamam counts matches from the full pantry beyond the 30 query anchors", a
   const originalFetch = globalThis.fetch;
   process.env.EDAMAM_APP_ID = "test-id";
   process.env.EDAMAM_APP_KEY = "test-key";
-  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS }, (_, index) => `Anchor ${index + 1}`);
+  const anchors = ["Chicken", ...Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS - 1 }, (_, index) => `Anchor ${index + 2}`)];
   const pantry = [...anchors, ...Array.from({ length: 34 }, (_, index) => `Ingredient ${index + 31}`)];
   globalThis.fetch = async () => new Response(JSON.stringify({ hits: [{
     recipe: {
@@ -141,7 +175,7 @@ test("Edamam counts matches from the full pantry beyond the 30 query anchors", a
       label: "Pantry match",
       image: "https://example.com/pantry-match.jpg",
       url: "https://example.com/pantry-match",
-      ingredients: [{ food: "Anchor 1" }, { food: "Ingredient 64" }],
+      ingredients: [{ food: "Chicken" }, { food: "Ingredient 64" }],
     },
   }] }), { status: 200 });
   try {
@@ -153,7 +187,7 @@ test("Edamam counts matches from the full pantry beyond the 30 query anchors", a
       excludedTitles: new Set<string>(),
       audience: "general",
     });
-    assert.deepEqual(results[0]?.matchedIngredients, ["Anchor 1", "Ingredient 64"]);
+    assert.deepEqual(results[0]?.matchedIngredients, ["Chicken", "Ingredient 64"]);
     assert.deepEqual(results[0]?.missingIngredients, []);
   } finally {
     globalThis.fetch = originalFetch;
