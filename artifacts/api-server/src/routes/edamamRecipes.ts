@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
+import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 
 type EdamamRecipe = {
   uri?: string;
@@ -25,8 +26,6 @@ function identity(value: string) {
 function titleKey(value: string) {
   return value.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
 }
-
-const seasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar", "paprika", "cumin", "basil", "oregano", "garlic powder"]);
 
 export function edamamConfigured() {
   return Boolean(process.env.EDAMAM_APP_ID?.trim() && process.env.EDAMAM_APP_KEY?.trim());
@@ -52,7 +51,7 @@ export function normalizeEdamamRecipe(raw: EdamamRecipe, pantry: string[], aller
     if (!key || seen.has(key)) continue;
     seen.add(key);
     if (pantryIds.has(key)) matchedIngredients.push(ingredient.name);
-    else if (!seasonings.has(key)) missingIngredients.push(ingredient.name);
+    else if (!isNonCountedMissingIngredient(ingredient.name)) missingIngredients.push(ingredient.name);
   }
   // Keep only an opaque identifier for exclusions. Edamam recipe details stay in this response.
   const id = `edamam:${createHash("sha256").update(raw.uri).digest("hex")}`;
@@ -91,7 +90,7 @@ export async function searchEdamamRecipes(input: {
   return data.hits.slice(0, 30)
     .flatMap((hit) => hit?.recipe ? [normalizeEdamamRecipe(hit.recipe, input.pantry, input.allergies)] : [])
     .filter((recipe): recipe is ExternalRecipe => recipe !== null)
-    .filter((recipe) => recipe.matchedIngredients.length > 0 && recipe.missingIngredients.length <= 5)
+    .filter((recipe) => recipe.matchedIngredients.length > 0 && recipe.missingIngredients.length <= 7)
     .filter((recipe) => !input.excludedIds.has(recipe.id) && !input.excludedTitles.has(titleKey(recipe.title)))
     .filter((recipe) => input.audience !== "kids" || kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0)
     .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length)

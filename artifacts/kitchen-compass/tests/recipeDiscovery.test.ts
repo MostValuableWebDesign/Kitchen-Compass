@@ -155,7 +155,19 @@ test('automatic ranking selects useful, varied ingredients within 30 and changes
   assert.deepEqual(side.slice(0, 3).map((item) => item.name), ['Broccoli', 'Carrot', 'Rice']);
   const picked = buildPublishedRecipeSearch(inventory, general.slice(0, 30).map((item) => item.id), { manualSelection: true });
   assert.equal(picked.anchors.length, 30);
-  assert.equal(picked.ingredients.length, 30);
+  assert.equal(picked.ingredients.length, 38);
+});
+
+test('published search checks up to 64 confirmed pantry ingredients with at most 30 anchors', () => {
+  const inventory = Array.from({ length: 70 }, (_, index) => ({
+    id: `item-${index}`, name: `Ingredient ${index}`, location: 'Pantry' as const,
+    status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true,
+    source: 'manual' as const,
+  }));
+  const result = buildPublishedRecipeSearch(inventory);
+  assert.equal(result.anchors.length, 30);
+  assert.equal(result.ingredients.length, 64);
+  assert.equal(new Set(result.ingredients).size, 64);
 });
 
 test('main and side requests carry their own ingredient focus and the selected main', () => {

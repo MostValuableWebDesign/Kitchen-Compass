@@ -1,6 +1,7 @@
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
+import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 
 type SpoonacularSummary = {
   id?: number;
@@ -36,8 +37,6 @@ function httpsUrl(value: unknown) {
   if (typeof value !== "string") return undefined;
   try { const url = new URL(value); return url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; }
 }
-
-const seasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar", "paprika", "cumin", "basil", "oregano", "garlic powder"]);
 
 async function spoonacularJson(path: string, params: Record<string, string>) {
   const key = process.env.SPOONACULAR_API_KEY?.trim();
@@ -76,7 +75,7 @@ export function normalizeSpoonacularRecipe(
     if (!key || seen.has(key)) continue;
     seen.add(key);
     if (pantryIds.has(key)) matchedIngredients.push(ingredient.name);
-    else if (!seasonings.has(key)) missingIngredients.push(ingredient.name);
+    else if (!isNonCountedMissingIngredient(ingredient.name)) missingIngredients.push(ingredient.name);
   }
   const host = new URL(sourceUrl).hostname.replace(/^www\./, "");
   return {
@@ -121,7 +120,7 @@ export async function searchSpoonacularRecipes(input: {
       return summary ? [normalizeSpoonacularRecipe(detail, summary, input.pantry, input.allergies)] : [];
     })
     .filter((item): item is ExternalRecipe => item !== null)
-    .filter((item) => item.matchedIngredients.length > 0 && item.missingIngredients.length <= 5)
+    .filter((item) => item.matchedIngredients.length > 0 && item.missingIngredients.length <= 7)
     .filter((item) => !input.excludedTitles.has(titleKey(item.title)))
     .filter((item) => input.audience !== "kids" || kidFriendlyScore(item.title, item.ingredients.map((ingredient) => ingredient.name)) > 0)
     .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);

@@ -5,12 +5,13 @@ import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
+import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 
 const router: IRouter = Router();
 const MAX_PROVIDER_SEARCH_ANCHORS = 30;
-const MAX_COUNTED_MISSING_INGREDIENTS = 5;
+const MAX_COUNTED_MISSING_INGREDIENTS = 7;
 const requestSchema = z.object({
-  ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
+  ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(64),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
   dislikes: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
@@ -55,18 +56,6 @@ function ingredientIdentity(value: string) {
 }
 
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
-const nonCountedMissingTerms = [
-  "salt", "pepper", "paprika", "cayenne", "chilli", "chili", "cumin", "coriander",
-  "turmeric", "cinnamon", "nutmeg", "clove", "allspice", "cardamom", "ginger",
-  "oregano", "basil", "thyme", "rosemary", "parsley", "cilantro", "dill", "sage",
-  "mint", "tarragon", "bay leaf", "garam masala", "curry powder", "spice", "herb",
-];
-
-function isNonCountedMissingIngredient(value: string) {
-  const identity = ingredientIdentity(value);
-  return nonCountedMissingTerms.some((term) => identity === term || identity.includes(` ${term}`) || identity.includes(`${term} `));
-}
-
 function titleKey(title: string) {
   return title.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -209,27 +198,32 @@ router.post("/recipes/external", async (req, res) => {
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: () => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
     ];
-    const sourceResults: OnlineSourceResult[] = [];
-    const providersUnavailable: OnlineSource[] = [];
-    let recipes: ExternalRecipe[] = [];
-    for (const source of sources) {
-      if (!source.configured) {
-        sourceResults.push({ provider: source.provider, status: "not_configured", count: 0 });
-        continue;
-      }
-      if (recipes.length) {
-        sourceResults.push({ provider: source.provider, status: "not_searched", count: 0 });
-        continue;
-      }
+    const searched = await Promise.all(sources.map(async (source): Promise<{ result: OnlineSourceResult; recipes: ExternalRecipe[] }> => {
+      if (!source.configured) return { result: { provider: source.provider, status: "not_configured", count: 0 }, recipes: [] };
       try {
-        const found = await source.search();
-        recipes = found.filter((recipe) => (!parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
-          && !recipe.ingredients.some((ingredient) => dislikes.has(ingredientIdentity(ingredient.name)))).slice(0, limit);
-        sourceResults.push({ provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length });
+        const recipes = (await source.search()).filter((recipe) => (!parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
+          && !recipe.ingredients.some((ingredient) => dislikes.has(ingredientIdentity(ingredient.name))));
+        return { result: { provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length }, recipes };
       } catch (error) {
-        providersUnavailable.push(source.provider);
-        sourceResults.push({ provider: source.provider, status: "unavailable", count: 0 });
         req.log.warn({ provider: source.provider, reason: error instanceof Error ? error.message : "Unknown provider error" }, "Published recipe provider unavailable");
+        return { result: { provider: source.provider, status: "unavailable", count: 0 }, recipes: [] };
+      }
+    }));
+    const sourceResults = searched.map(({ result }) => result);
+    const providersUnavailable = sourceResults.filter((result) => result.status === "unavailable").map((result) => result.provider);
+    const recipes: ExternalRecipe[] = [];
+    const seenIds = new Set<string>();
+    const seenTitles = new Set<string>();
+    for (let index = 0; recipes.length < limit && searched.some((source) => index < source.recipes.length); index += 1) {
+      for (const source of searched) {
+        const recipe = source.recipes[index];
+        if (!recipe) continue;
+        const title = titleKey(recipe.title);
+        if (seenIds.has(recipe.id) || seenTitles.has(title)) continue;
+        seenIds.add(recipe.id);
+        seenTitles.add(title);
+        recipes.push(recipe);
+        if (recipes.length === limit) break;
       }
     }
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults }, "Published recipe source results");

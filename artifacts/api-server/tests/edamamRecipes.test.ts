@@ -62,7 +62,7 @@ test("Edamam uses server credentials and returns safe, online-only recipes for g
   }
 });
 
-test("published search uses Edamam first without spending Spoonacular or TheMealDB requests", async () => {
+test("published search combines every provider in priority order and reports each eligible count", async () => {
   const originalFetch = globalThis.fetch;
   const oldId = process.env.EDAMAM_APP_ID;
   const oldKey = process.env.EDAMAM_APP_KEY;
@@ -111,12 +111,14 @@ test("published search uses Edamam first without spending Spoonacular or TheMeal
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ title: string; provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((recipe) => [recipe.provider, recipe.title]), [
-      ["Edamam", "Shared pasta"], ["Edamam", "Edamam pasta"],
+      ["Edamam", "Shared pasta"], ["TheMealDB", "TheMealDB pasta"],
+      ["Edamam", "Edamam pasta"], ["Spoonacular", "Spoonacular pasta"],
     ]);
     assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.status, source.count]), [
-      ["Edamam", "found", 2], ["Spoonacular", "not_searched", 0], ["TheMealDB", "not_searched", 0],
+      ["Edamam", "found", 2], ["Spoonacular", "found", 2], ["TheMealDB", "found", 1],
     ]);
-    assert.deepEqual(calledProviders, ["api.edamam.com"]);
+    assert.deepEqual(new Set(calledProviders), new Set(["api.edamam.com", "api.spoonacular.com", "www.themealdb.com"]));
+    assert.equal(calledProviders.filter((provider) => provider === "api.spoonacular.com").length, 2);
     edamamHasResults = false;
     calledProviders.length = 0;
     const fallbackResponse = await originalFetch(`http://127.0.0.1:${address.port}/api/recipes/external`, {
@@ -125,11 +127,11 @@ test("published search uses Edamam first without spending Spoonacular or TheMeal
     });
     const fallback = await fallbackResponse.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.equal(fallbackResponse.status, 200);
-    assert.deepEqual(fallback.recipes.map((recipe) => recipe.provider), ["Spoonacular", "Spoonacular"]);
+    assert.deepEqual(fallback.recipes.map((recipe) => recipe.provider), ["Spoonacular", "TheMealDB", "Spoonacular"]);
     assert.deepEqual(fallback.sourceResults.map((source) => [source.provider, source.status]), [
-      ["Edamam", "no_results"], ["Spoonacular", "found"], ["TheMealDB", "not_searched"],
+      ["Edamam", "no_results"], ["Spoonacular", "found"], ["TheMealDB", "found"],
     ]);
-    assert.deepEqual(calledProviders, ["api.edamam.com", "api.spoonacular.com", "api.spoonacular.com"]);
+    assert.deepEqual(new Set(calledProviders), new Set(["api.edamam.com", "api.spoonacular.com", "www.themealdb.com"]));
   } finally {
     globalThis.fetch = originalFetch;
     server.close();

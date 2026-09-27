@@ -1,6 +1,6 @@
 import type { Ingredient } from '@/context/KitchenContext';
 
-export const MAX_PUBLISHED_SEARCH_INGREDIENTS = 30;
+export const MAX_PUBLISHED_SEARCH_INGREDIENTS = 64;
 export const MAX_PUBLISHED_SEARCH_ANCHORS = 30;
 
 const commonSeasonings = new Set([
