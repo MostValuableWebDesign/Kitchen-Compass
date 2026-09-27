@@ -186,7 +186,7 @@ test("Edamam diagnostics count privacy-safe candidate rejection stages", async (
   }
 });
 
-test("published search combines every provider in priority order and reports each eligible count", async () => {
+test("published search queries every source, reports each eligible count, and allows seven missing ingredients", async () => {
   const originalFetch = globalThis.fetch;
   const oldId = process.env.EDAMAM_APP_ID;
   const oldKey = process.env.EDAMAM_APP_KEY;
@@ -199,6 +199,8 @@ test("published search combines every provider in priority order and reports eac
   const server = app.listen(0);
   const calledProviders: string[] = [];
   let edamamHasResults = true;
+  const sevenMissing = ["Chicken", "Broccoli", "Carrot", "Milk", "Cheese", "Tomato", "Mushroom"];
+  const eightMissing = [...sevenMissing, "Celery"];
   try {
     await once(server, "listening");
     const address = server.address();
@@ -208,18 +210,23 @@ test("published search combines every provider in priority order and reports eac
       calledProviders.push(target.hostname);
       if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: edamamHasResults ? [
         { recipe: { uri: "edamam-1", label: "Shared pasta", image: "https://example.com/shared.jpg", url: "https://example.com/shared", ingredients: [{ food: "Pasta", text: "1 cup pasta" }] } },
-        { recipe: { uri: "edamam-2", label: "Edamam pasta", image: "https://example.com/edamam.jpg", url: "https://example.com/edamam", ingredients: [{ food: "Pasta", text: "1 cup pasta" }] } },
+        { recipe: { uri: "edamam-2", label: "Edamam pasta", image: "https://example.com/edamam.jpg", url: "https://example.com/edamam", ingredients: [{ food: "Pasta", text: "1 cup pasta" }, ...sevenMissing.map((food) => ({ food, text: `1 cup ${food}` }))] } },
+        { recipe: { uri: "edamam-3", label: "Rejected pasta", image: "https://example.com/rejected.jpg", url: "https://example.com/rejected", ingredients: [{ food: "Pasta", text: "1 cup pasta" }, ...eightMissing.map((food) => ({ food, text: `1 cup ${food}` }))] } },
       ] : [] }), { status: 200 });
       if (target.hostname === "api.spoonacular.com") {
         if (target.pathname.endsWith("findByIngredients")) return new Response(JSON.stringify([
           { id: 101, title: "Shared pasta", image: "https://example.com/shared.jpg", usedIngredientCount: 1 },
           { id: 102, title: "Spoonacular pasta", image: "https://example.com/spoonacular.jpg", usedIngredientCount: 1 },
+          { id: 103, title: "Rejected Spoonacular pasta", image: "https://example.com/rejected-spoonacular.jpg", usedIngredientCount: 1 },
         ]), { status: 200 });
-        return new Response(JSON.stringify([101, 102].map((id) => ({
+        return new Response(JSON.stringify([101, 102, 103].map((id) => ({
           id, title: id === 101 ? "Shared pasta" : "Spoonacular pasta",
           image: `https://example.com/${id}.jpg`, sourceUrl: `https://example.com/${id}`,
           analyzedInstructions: [{ steps: [{ step: "Cook pasta." }] }],
-          extendedIngredients: [{ name: "Pasta", original: "1 cup pasta" }],
+          extendedIngredients: [
+            { name: "Pasta", original: "1 cup pasta" },
+            ...(id === 102 ? sevenMissing : id === 103 ? eightMissing : []).map((name) => ({ name, original: `1 cup ${name}` })),
+          ],
         }))), { status: 200 });
       }
       if (target.hostname === "www.themealdb.com") {
@@ -241,8 +248,9 @@ test("published search combines every provider in priority order and reports eac
     assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.status, source.count]), [
       ["Edamam", "found", 2], ["Spoonacular", "found", 2], ["TheMealDB", "found", 1],
     ]);
-    assert.deepEqual(new Set(calledProviders), new Set(["api.edamam.com", "api.spoonacular.com", "www.themealdb.com"]));
-    assert.equal(calledProviders.filter((provider) => provider === "api.spoonacular.com").length, 2);
+    assert.deepEqual([...calledProviders].sort(), [
+      "api.edamam.com", "api.spoonacular.com", "api.spoonacular.com", "www.themealdb.com", "www.themealdb.com",
+    ].sort());
     edamamHasResults = false;
     calledProviders.length = 0;
     const fallbackResponse = await originalFetch(`http://127.0.0.1:${address.port}/api/recipes/external`, {
@@ -252,10 +260,12 @@ test("published search combines every provider in priority order and reports eac
     const fallback = await fallbackResponse.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.equal(fallbackResponse.status, 200);
     assert.deepEqual(fallback.recipes.map((recipe) => recipe.provider), ["Spoonacular", "TheMealDB", "Spoonacular"]);
-    assert.deepEqual(fallback.sourceResults.map((source) => [source.provider, source.status]), [
-      ["Edamam", "no_results"], ["Spoonacular", "found"], ["TheMealDB", "found"],
+    assert.deepEqual(fallback.sourceResults.map((source) => [source.provider, source.status, source.count]), [
+      ["Edamam", "no_results", 0], ["Spoonacular", "found", 2], ["TheMealDB", "found", 1],
     ]);
-    assert.deepEqual(new Set(calledProviders), new Set(["api.edamam.com", "api.spoonacular.com", "www.themealdb.com"]));
+    assert.deepEqual([...calledProviders].sort(), [
+      "api.edamam.com", "api.spoonacular.com", "api.spoonacular.com", "www.themealdb.com", "www.themealdb.com",
+    ].sort());
   } finally {
     globalThis.fetch = originalFetch;
     server.close();

@@ -3,7 +3,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
-import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import { MAX_COUNTED_MISSING_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS, MAX_TOTAL_PUBLISHED_RECIPES } from "./providerSearchLimits";
 import {
   recordCandidateRemoval,
   type RecipeNormalizationFailure,
@@ -130,7 +130,7 @@ export async function searchEdamamRecipes(input: {
       recordCandidateRemoval(diagnostics, "noPantryMatch");
       continue;
     }
-    if (recipe.missingIngredients.length > 7) {
+    if (recipe.missingIngredients.length > MAX_COUNTED_MISSING_INGREDIENTS) {
       recordCandidateRemoval(diagnostics, "tooManyMissing");
       continue;
     }
@@ -146,7 +146,7 @@ export async function searchEdamamRecipes(input: {
   }
 
   qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-  const results = qualified.slice(0, input.audience === "kids" ? 12 : 30);
+  const results = qualified.slice(0, input.audience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES);
   recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
   if (diagnostics) diagnostics.eligible = results.length;
   return results;

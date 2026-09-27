@@ -3,7 +3,7 @@ import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
 import { kidFriendlyScore } from "../src/routes/kidFriendly";
-import { externalRecipeRequestSchema } from "../src/routes/externalRecipes";
+import { combineProviderRecipeResults, externalRecipeRequestSchema } from "../src/routes/externalRecipes";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "external-recipes-test-session";
@@ -15,8 +15,10 @@ const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
 const oldEdamamId = process.env.EDAMAM_APP_ID;
 const oldEdamamKey = process.env.EDAMAM_APP_KEY;
+const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
 delete process.env.EDAMAM_APP_ID;
 delete process.env.EDAMAM_APP_KEY;
+delete process.env.SPOONACULAR_API_KEY;
 
 test("published recipe request accepts 64 matching ingredients but keeps search anchors capped at 30", () => {
   const ingredients = Array.from({ length: 64 }, (_, index) => `ingredient-${index + 1}`);
@@ -25,11 +27,35 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients: [...ingredients, "ingredient-65"], searchAnchors: anchors, allergies: [] }).success, false);
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
 });
+
+test("combined provider recipes are interleaved and capped at 30", () => {
+  const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number) => ({
+    id: `${provider}-${index}`,
+    title: `${provider} recipe ${index}`,
+    provider,
+    sourceUrl: `https://example.com/${provider}/${index}`,
+    ingredients: [{ name: "Pasta", measure: "1 cup" }],
+    instructions: "Cook the pasta.",
+    matchedIngredients: ["Pasta"],
+    missingIngredients: [],
+    safetyVerified: false as const,
+  });
+  const groups = (["Edamam", "Spoonacular", "TheMealDB"] as const)
+    .map((provider) => Array.from({ length: 35 }, (_, index) => makeRecipe(provider, index)));
+  const recipes = combineProviderRecipeResults(groups, 35);
+  assert.equal(recipes.length, 30);
+  assert.deepEqual(
+    Object.fromEntries((["Edamam", "Spoonacular", "TheMealDB"] as const)
+      .map((provider) => [provider, recipes.filter((recipe) => recipe.provider === provider).length])),
+    { Edamam: 10, Spoonacular: 10, TheMealDB: 10 },
+  );
+});
 beforeEach(() => resetScanRateLimiter());
 after(() => {
   server.close();
   if (oldEdamamId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldEdamamId;
   if (oldEdamamKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldEdamamKey;
+  if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
 });
 
 test("familiar meal formats are ranked as kid ideas without claiming every child likes them", () => {
@@ -174,7 +200,7 @@ test("published recipes match against 64 pantry ingredients while searching at m
   }
 });
 
-test("published recipes ignore missing herbs and spices, accept seven other missing ingredients, and reject eight", async () => {
+test("published recipes ignore missing herbs and spices, accept seven missing ingredients, and reject eight", async () => {
   const oldKey = process.env.THEMEALDB_API_KEY;
   const originalFetchForFilteringTest = globalThis.fetch;
   process.env.THEMEALDB_API_KEY = "test-key";
@@ -188,8 +214,8 @@ test("published recipes ignore missing herbs and spices, accept seven other miss
       const ingredientNames = id === "many-matches"
         ? ["Chicken", "Rice", "Tomato", "Basil", "Paprika", "Carrot", "Onion", "Garlic", "Lemon", "Celery", "Potato", "Bell pepper"]
         : id === "few-matches"
-          ? ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon"]
-          : ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon", "Celery", "Rice flour", "Mushroom", "Basil"];
+          ? ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon", "Celery", "Mushroom"]
+          : ["Chicken", "Potato", "Carrot", "Onion", "Garlic", "Lemon", "Celery", "Mushroom", "Broccoli"];
       const meal = {
         idMeal: id ?? "",
         strMeal: id ?? "",
@@ -209,7 +235,7 @@ test("published recipes ignore missing herbs and spices, accept seven other miss
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ id: string; matchedIngredients: string[]; missingIngredients: string[] }> };
     assert.deepEqual(payload.recipes.map((recipe) => recipe.id), ["many-matches", "few-matches"]);
-    assert.deepEqual(payload.recipes[0]?.missingIngredients, ["Carrot", "Onion", "Garlic", "Lemon", "Celery", "Potato", "Bell pepper"]);
+    assert.deepEqual(payload.recipes[1]?.missingIngredients, ["Potato", "Carrot", "Onion", "Garlic", "Lemon", "Celery", "Mushroom"]);
     assert.equal(payload.recipes[0]?.missingIngredients.includes("Basil"), false);
     assert.equal(payload.recipes[0]?.missingIngredients.includes("Paprika"), false);
   } finally {

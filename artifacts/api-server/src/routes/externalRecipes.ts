@@ -6,7 +6,12 @@ import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
-import { MAX_PROVIDER_PANTRY_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import {
+  MAX_COUNTED_MISSING_INGREDIENTS,
+  MAX_PROVIDER_PANTRY_INGREDIENTS,
+  MAX_PROVIDER_SEARCH_ANCHORS,
+  MAX_TOTAL_PUBLISHED_RECIPES,
+} from "./providerSearchLimits";
 import {
   createRecipeSearchDiagnostics,
   recordCandidateRemoval,
@@ -15,7 +20,6 @@ import {
 } from "./recipeSearchDiagnostics";
 
 const router: IRouter = Router();
-const MAX_COUNTED_MISSING_INGREDIENTS = 7;
 export const externalRecipeRequestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_PANTRY_INGREDIENTS),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
@@ -64,6 +68,37 @@ function ingredientIdentity(value: string) {
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
 function titleKey(title: string) {
   return title.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function combineProviderRecipeResults(
+  groups: readonly ExternalRecipe[][],
+  limit: number,
+  onDrop?: (groupIndex: number, reason: "duplicate" | "resultLimit") => void,
+) {
+  const cappedLimit = Math.max(0, Math.min(MAX_TOTAL_PUBLISHED_RECIPES, Math.floor(limit)));
+  const results: ExternalRecipe[] = [];
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
+  const maxLength = Math.max(0, ...groups.map((group) => group.length));
+  for (let index = 0; index < maxLength; index += 1) {
+    groups.forEach((group, groupIndex) => {
+      const recipe = group[index];
+      if (!recipe) return;
+      const title = titleKey(recipe.title);
+      if (seenIds.has(recipe.id) || seenTitles.has(title)) {
+        onDrop?.(groupIndex, "duplicate");
+        return;
+      }
+      seenIds.add(recipe.id);
+      seenTitles.add(title);
+      if (results.length >= cappedLimit) {
+        onDrop?.(groupIndex, "resultLimit");
+        return;
+      }
+      results.push(recipe);
+    });
+  }
+  return results;
 }
 
 const mainDishTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat|pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?)\b/i;
@@ -219,7 +254,7 @@ router.post("/recipes/external", async (req, res) => {
         return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
       }));
       if (diagnostics) diagnostics.candidatesReceived += searches.reduce((count, results) => count + results.length, 0);
-      const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles, diagnostics);
+      const ids = interleaveMealIds(searches, MAX_TOTAL_PUBLISHED_RECIPES, excludedIds, excludedTitles, diagnostics);
       const details = await Promise.all(ids.map(async (id) => {
         const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
         return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
@@ -249,30 +284,26 @@ router.post("/recipes/external", async (req, res) => {
         qualified.push(recipe);
       }
       qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-      const recipes = qualified.slice(0, providerAudience === "kids" ? 12 : 30);
+      const recipes = qualified.slice(0, providerAudience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES);
       recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - recipes.length);
       diagnostics.eligible = recipes.length;
       return recipes;
     };
     const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
-    const limit = parsed.data.audience === "kids" ? 12 : 30;
+    const limit = parsed.data.audience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES;
     const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
       { provider: "Edamam", configured: edamamConfigured(), search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
     ];
-    const sourceResults: OnlineSourceResult[] = [];
-    const providerDiagnostics: Array<{ provider: OnlineSource; diagnostics: RecipeSearchDiagnostics }> = [];
-    const providersUnavailable: OnlineSource[] = [];
-    let recipes: ExternalRecipe[] = [];
-    for (const source of sources) {
+    const outcomes = await Promise.all(sources.map(async (source) => {
       if (!source.configured) {
-        sourceResults.push({ provider: source.provider, status: "not_configured", count: 0 });
-        continue;
-      }
-      if (recipes.length) {
-        sourceResults.push({ provider: source.provider, status: "not_searched", count: 0 });
-        continue;
+        return {
+          provider: source.provider,
+          sourceResult: { provider: source.provider, status: "not_configured", count: 0 } satisfies OnlineSourceResult,
+          recipes: [] as ExternalRecipe[],
+          diagnostics: undefined,
+        };
       }
       const diagnostics = createRecipeSearchDiagnostics();
       try {
@@ -289,18 +320,35 @@ router.post("/recipes/external", async (req, res) => {
           }
           afterRouteFilters.push(recipe);
         }
-        recipes = afterRouteFilters.slice(0, limit);
-        recordCandidateRemoval(diagnostics, "resultLimit", afterRouteFilters.length - recipes.length);
-        diagnostics.eligible = recipes.length;
-        providerDiagnostics.push({ provider: source.provider, diagnostics });
-        sourceResults.push({ provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length });
+        diagnostics.eligible = afterRouteFilters.length;
+        return {
+          provider: source.provider,
+          sourceResult: { provider: source.provider, status: afterRouteFilters.length ? "found" : "no_results", count: afterRouteFilters.length } satisfies OnlineSourceResult,
+          recipes: afterRouteFilters,
+          diagnostics,
+        };
       } catch (error) {
-        providersUnavailable.push(source.provider);
-        sourceResults.push({ provider: source.provider, status: "unavailable", count: 0 });
-        providerDiagnostics.push({ provider: source.provider, diagnostics });
         req.log.warn({ provider: source.provider }, "Published recipe provider unavailable");
+        return {
+          provider: source.provider,
+          sourceResult: { provider: source.provider, status: "unavailable", count: 0 } satisfies OnlineSourceResult,
+          recipes: [] as ExternalRecipe[],
+          diagnostics,
+        };
       }
-    }
+    }));
+    const sourceResults = outcomes.map((outcome) => outcome.sourceResult);
+    const providerDiagnostics = outcomes.flatMap((outcome) => outcome.diagnostics
+      ? [{ provider: outcome.provider, diagnostics: outcome.diagnostics }]
+      : []);
+    const providersUnavailable = outcomes
+      .filter((outcome) => outcome.sourceResult.status === "unavailable")
+      .map((outcome) => outcome.provider);
+    const providerRecipes = outcomes.filter((outcome) => outcome.diagnostics);
+    const recipes = combineProviderRecipeResults(providerRecipes.map((source) => source.recipes), limit, (groupIndex, reason) => {
+      const diagnostics = providerRecipes[groupIndex]?.diagnostics;
+      recordCandidateRemoval(diagnostics, reason);
+    });
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults, providerDiagnostics }, "Published recipe source results");
     res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, safetyNotice });
   } catch {
