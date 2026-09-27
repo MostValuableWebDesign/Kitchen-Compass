@@ -186,6 +186,40 @@ test("kid discovery does not label an unrelated generated meal as kid-friendly",
   assert.equal(response.status, 503);
 });
 
+test("side discovery receives the main dish and rejects recipes missing the selected side ingredients", async () => {
+  const body = {
+    ...requestBody(),
+    inventory: [{ name: "spinach", location: "Refrigerator", quantityKnown: true, quantityValue: 2, unit: "cup", status: "fresh", confidence: "confirmed" }],
+    course: "side",
+    focusIngredients: ["spinach"],
+    mainRecipe: { title: "Roast chicken", ingredientNames: ["Chicken", "Garlic"] },
+  };
+  const original = globalThis.fetch;
+  let prompt = "";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) {
+      prompt = (JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }).messages[0]!.content;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: [{ ...validModelRecipe(), title: "Warm spinach side" }] }) } }] }), { status: 200 });
+    }
+    return original(input, init);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` }, body: JSON.stringify(body) });
+    assert.equal(response.status, 200);
+    assert.match(prompt, /side dishes to serve alongside this main dish/);
+    assert.match(prompt, /Roast chicken/);
+    assert.match(prompt, /spinach/);
+    const missingMain = await originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` }, body: JSON.stringify({ ...body, mainRecipe: undefined }) });
+    assert.equal(missingMain.status, 400);
+    const missingFocus = await originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await issueAccess()}` }, body: JSON.stringify({ ...body, focusIngredients: ["broccoli"] }) });
+    assert.equal(missingFocus.status, 400);
+    const unfocused = await discoverModelRecipe({ ...validModelRecipe(), ingredients: [{ name: "eggs", quantity: 2, unit: "egg", required: true }] }, body as ReturnType<typeof requestBody>);
+    assert.equal(unfocused.status, 503);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("recipe discovery includes used and uncertain ingredients as eligible recipe context", async () => {
   const body = requestBody();
   body.inventory.push(

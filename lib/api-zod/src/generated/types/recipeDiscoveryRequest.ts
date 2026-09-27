@@ -9,6 +9,8 @@ import type { RecipeDiscoveryFilters } from './recipeDiscoveryFilters';
 import type { RecipeDiscoveryInventory } from './recipeDiscoveryInventory';
 import type { RecipeDiscoveryPreferences } from './recipeDiscoveryPreferences';
 import type { RecipeDiscoveryRequestAudience } from './recipeDiscoveryRequestAudience';
+import type { RecipeDiscoveryRequestCourse } from './recipeDiscoveryRequestCourse';
+import type { RecipeDiscoveryRequestMainRecipe } from './recipeDiscoveryRequestMainRecipe';
 
 export interface RecipeDiscoveryRequest {
   /** @maxItems 100 */
@@ -27,4 +29,11 @@ export interface RecipeDiscoveryRequest {
   /** @maxItems 200 */
   excludeArchivedRecipeTitles?: string[];
   audience?: RecipeDiscoveryRequestAudience;
+  course?: RecipeDiscoveryRequestCourse;
+  /**
+     * @maxItems 30
+     * @items.maxLength 120
+     */
+  focusIngredients?: string[];
+  mainRecipe?: RecipeDiscoveryRequestMainRecipe;
 }

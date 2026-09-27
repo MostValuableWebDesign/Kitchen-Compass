@@ -373,6 +373,22 @@ components:
         audience:
           type: string
           enum: [general, kids]
+        course:
+          type: string
+          enum: [main, side]
+        focusIngredients:
+          type: array
+          maxItems: 30
+          items: { type: string, maxLength: 120 }
+        mainRecipe:
+          type: object
+          properties:
+            title: { type: string, maxLength: 160 }
+            ingredientNames:
+              type: array
+              maxItems: 40
+              items: { type: string, maxLength: 120 }
+          required: [title, ingredientNames]
       required: [inventory, preferences, filters, variationSeed, excludeRecipeVersions]
     RecipeIngredient:
       type: object

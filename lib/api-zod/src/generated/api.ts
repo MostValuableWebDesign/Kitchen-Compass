@@ -98,6 +98,16 @@ export const discoverRecipesBodyExcludeRecipeTitlesMax = 30;
 
 export const discoverRecipesBodyExcludeArchivedRecipeTitlesMax = 200;
 
+export const discoverRecipesBodyFocusIngredientsItemMax = 120;
+
+export const discoverRecipesBodyFocusIngredientsMax = 30;
+
+export const discoverRecipesBodyMainRecipeTitleMax = 160;
+
+export const discoverRecipesBodyMainRecipeIngredientNamesItemMax = 120;
+
+export const discoverRecipesBodyMainRecipeIngredientNamesMax = 40;
+
 
 
 export const DiscoverRecipesBody = zod.object({
@@ -132,7 +142,13 @@ export const DiscoverRecipesBody = zod.object({
   "excludeRecipeVersions": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeVersionsMax),
   "excludeRecipeTitles": zod.array(zod.string()).max(discoverRecipesBodyExcludeRecipeTitlesMax).optional(),
   "excludeArchivedRecipeTitles": zod.array(zod.string()).max(discoverRecipesBodyExcludeArchivedRecipeTitlesMax).optional(),
-  "audience": zod.enum(['general', 'kids']).optional()
+  "audience": zod.enum(['general', 'kids']).optional(),
+  "course": zod.enum(['main', 'side']).optional(),
+  "focusIngredients": zod.array(zod.string().max(discoverRecipesBodyFocusIngredientsItemMax)).max(discoverRecipesBodyFocusIngredientsMax).optional(),
+  "mainRecipe": zod.object({
+  "title": zod.string().max(discoverRecipesBodyMainRecipeTitleMax),
+  "ingredientNames": zod.array(zod.string().max(discoverRecipesBodyMainRecipeIngredientNamesItemMax)).max(discoverRecipesBodyMainRecipeIngredientNamesMax)
+}).optional()
 })
 
 

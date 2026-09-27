@@ -77,6 +77,7 @@ export interface Recipe {
   source?: 'curated' | 'server-ai' | 'published';
   sourceUrl?: string;
   audience?: 'general' | 'kids';
+  course?: 'main' | 'side';
   storageInstructions: string;
   reheatingInstructions: string;
   servingSuggestions?: string[];

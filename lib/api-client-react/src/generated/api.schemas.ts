@@ -203,6 +203,24 @@ export const RecipeDiscoveryRequestAudience = {
   kids: 'kids',
 } as const;
 
+export type RecipeDiscoveryRequestCourse = typeof RecipeDiscoveryRequestCourse[keyof typeof RecipeDiscoveryRequestCourse];
+
+
+export const RecipeDiscoveryRequestCourse = {
+  main: 'main',
+  side: 'side',
+} as const;
+
+export type RecipeDiscoveryRequestMainRecipe = {
+  /** @maxLength 160 */
+  title: string;
+  /**
+     * @maxItems 40
+     * @items.maxLength 120
+     */
+  ingredientNames: string[];
+};
+
 export interface RecipeDiscoveryRequest {
   /** @maxItems 100 */
   inventory: RecipeDiscoveryInventory[];
@@ -220,6 +238,13 @@ export interface RecipeDiscoveryRequest {
   /** @maxItems 200 */
   excludeArchivedRecipeTitles?: string[];
   audience?: RecipeDiscoveryRequestAudience;
+  course?: RecipeDiscoveryRequestCourse;
+  /**
+     * @maxItems 30
+     * @items.maxLength 120
+     */
+  focusIngredients?: string[];
+  mainRecipe?: RecipeDiscoveryRequestMainRecipe;
 }
 
 export interface RecipeIngredient {

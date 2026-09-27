@@ -137,6 +137,38 @@ test('published recipe search excludes seasonings and ranks useful ingredients b
   assert.equal(publishedIngredientCategory('brown rice'), 'Grains & bakery');
 });
 
+test('automatic ranking selects useful, varied ingredients within 30 and changes focus for sides', () => {
+  const meats = Array.from({ length: 35 }, (_, index) => ({ id: `meat-${index}`, name: `Chicken cut ${index}`, location: 'Freezer' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const }));
+  const vegetables = [
+    { id: 'broccoli', name: 'Broccoli', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const, expires: '2026-09-28', dateConfirmed: true },
+    { id: 'carrot', name: 'Carrot', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
+    { id: 'rice', name: 'Rice', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'purchase' as const },
+  ];
+  const inventory = [...meats, ...vegetables];
+  const general = rankPublishedSearchIngredients(inventory, 'general', [], new Date('2026-09-26T12:00:00'));
+  assert.equal(general[0]?.name, 'Broccoli');
+  assert.equal(general.slice(0, 30).some((item) => item.name === 'Carrot'), true);
+  assert.equal(general.slice(0, 30).some((item) => item.name === 'Rice'), true);
+  const main = rankPublishedSearchIngredients(inventory, 'main', [], new Date('2026-09-26T12:00:00'));
+  assert.equal(main[0]?.name.startsWith('Chicken'), true);
+  const side = rankPublishedSearchIngredients(inventory, 'side', ['Chicken cut 0'], new Date('2026-09-26T12:00:00'));
+  assert.deepEqual(side.slice(0, 3).map((item) => item.name), ['Broccoli', 'Carrot', 'Rice']);
+  const picked = buildPublishedRecipeSearch(inventory, general.slice(0, 30).map((item) => item.id), { manualSelection: true });
+  assert.equal(picked.anchors.length, 30);
+  assert.equal(picked.ingredients.length, 30);
+});
+
+test('main and side requests carry their own ingredient focus and the selected main', () => {
+  const preferences = { allergies: [], dietaryRestrictions: [], dislikes: [], cuisines: [], skill: 'Beginner' as const, cookTime: 30, equipment: [], nutrition: [] };
+  const filters = { mealType: 'Dinner' as const, cuisine: '' };
+  const main = buildRecipeDiscoveryRequest([], preferences, filters, 'main-1', [], [], [], 'general', { course: 'main', focusIngredients: ['Chicken', 'Rice'] });
+  const side = buildRecipeDiscoveryRequest([], preferences, filters, 'side-1', [], [], [], 'general', { course: 'side', focusIngredients: ['Broccoli', 'Carrot'], mainRecipe: { title: 'Roast chicken', ingredientNames: ['Chicken', 'Garlic'] } });
+  assert.deepEqual([main.course, main.focusIngredients], ['main', ['Chicken', 'Rice']]);
+  assert.deepEqual([side.course, side.focusIngredients, side.mainRecipe?.title], ['side', ['Broccoli', 'Carrot'], 'Roast chicken']);
+  const savedSide = mapDiscoveredRecipe(apiRecipe, 'general', 'side');
+  assert.equal(parseCachedRecipes([savedSide])[0]?.course, 'side');
+});
+
 test('published recipes import with source attribution and explicit unverified calculations', () => {
   const imported = mapPublishedRecipe({
     id: 'meal-1',

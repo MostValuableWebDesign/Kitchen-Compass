@@ -23,11 +23,12 @@ const resultFilters: ResultFilter[] = ['All', 'Ready to cook', 'Almost ready', '
 const mealTypes: RecipeDiscoveryFiltersMealType[] = ['Any', 'Breakfast', 'Lunch', 'Dinner'];
 const timeOptions: Array<number | undefined> = [undefined, 30, 45, 60];
 const healthOptions: Array<number | undefined> = [undefined, 70, 85];
-type ActiveSearch = { kind: 'kitchen' | 'published' | 'kids-ai' | 'kids-online'; startedAt: number; complete: boolean };
+type ActiveSearch = { kind: 'kitchen' | 'published' | 'kids-ai' | 'kids-online' | 'main-ai' | 'side-ai'; startedAt: number; complete: boolean };
 type OnlineSourceResult = ExternalRecipesResponse['sourceResults'][number];
 type PublishedSearchStep = 'choice' | 'manual' | 'confirm';
 type PublishedSelectionMode = 'automatic' | 'manual';
 type RecipeSection = 'general' | 'kids';
+type PickerTarget = 'online' | 'main' | 'side';
 const EDAMAM_BADGE_URL = 'https://developer.edamam.com/images/light.png';
 const onlineProviderRank = { Edamam: 0, Spoonacular: 1, TheMealDB: 2, FatSecret: 3 } as const;
 
@@ -79,6 +80,9 @@ export default function RecipesScreen() {
   const [publishedDriverIds, setPublishedDriverIds] = useState<string[]>([]);
   const [publishedSearchStep, setPublishedSearchStep] = useState<PublishedSearchStep>('choice');
   const [publishedSelectionMode, setPublishedSelectionMode] = useState<PublishedSelectionMode>('automatic');
+  const [pickerTarget, setPickerTarget] = useState<PickerTarget>('online');
+  const [mealMain, setMealMain] = useState<Recipe | null>(null);
+  const [mealSide, setMealSide] = useState<Recipe | null>(null);
   const [kidMessage, setKidMessage] = useState('');
   const [kidSourceResults, setKidSourceResults] = useState<OnlineSourceResult[]>([]);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
@@ -140,7 +144,7 @@ export default function RecipesScreen() {
     setActiveSearch(null);
     setDiscoveryBusy(false);
     setExternalBusy(false);
-    if (activeSearch.kind === 'kitchen' || activeSearch.kind === 'kids-ai') {
+    if (activeSearch.kind === 'kitchen' || activeSearch.kind === 'kids-ai' || activeSearch.kind === 'main-ai' || activeSearch.kind === 'side-ai') {
       setDiscoveryError(false);
       setDiscoveryWarning('Recipe search cancelled. Your saved recipes are unchanged.');
     } else if (activeSearch.kind === 'kids-online') {
@@ -157,7 +161,12 @@ export default function RecipesScreen() {
     : 0;
 
   const availableRecipes = useMemo(() => getAvailableRecipes(savedRecipes), [savedRecipes]);
-  const rankedPublishedIngredients = useMemo(() => rankPublishedSearchIngredients(ingredients), [ingredients]);
+  useEffect(() => {
+    if (mealMain && isArchivedRecipe(mealMain, archivedRecipes)) { setMealMain(null); setMealSide(null); }
+    else if (mealSide && isArchivedRecipe(mealSide, archivedRecipes)) setMealSide(null);
+  }, [archivedRecipes, mealMain, mealSide]);
+  const mainIngredientNames = mealMain?.ingredients.map((item) => item.name) ?? [];
+  const rankedPublishedIngredients = useMemo(() => rankPublishedSearchIngredients(ingredients, pickerTarget === 'online' ? 'general' : pickerTarget, mainIngredientNames), [ingredients, pickerTarget, mealMain]);
   const groupedPublishedIngredients = useMemo(() => publishedIngredientCategories.map((category) => ({
     category,
     ingredients: rankedPublishedIngredients.filter((ingredient) => publishedIngredientCategory(ingredient.name) === category),
@@ -216,11 +225,22 @@ export default function RecipesScreen() {
     if (recipesMissingImages.length) void prepareImages(recipesMissingImages);
   }, [hydrated, archivedRecipes]);
 
-  const discover = async (different = false, audience: RecipeSection = 'general') => {
+  const discover = async (different = false, audience: RecipeSection = 'general', course?: 'main' | 'side', selectedIds: string[] = []) => {
+    const selectedSearch = course ? buildPublishedRecipeSearch(ingredients, selectedIds, { manualSelection: true, focus: course, mainIngredientNames }) : null;
+    const focusedNames = selectedSearch?.anchors ?? [];
+    if (course && (!focusedNames.length || (course === 'side' && !mealMain))) {
+      setDiscoveryWarning('Choose confirmed ingredients and a main dish before creating a side.');
+      return;
+    }
+    const focusedInventory = course ? selectedIds.flatMap((id) => {
+      const index = ingredients.findIndex((candidate) => candidate.id === id);
+      const item = inventoryPayload[index];
+      return item ? [item] : [];
+    }) : inventoryPayload;
     const savedMatches = matchingSavedRecipes(savedRecipes, ingredients, preferences, filterState, reservations)
       .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes) && (audience === 'kids' ? isKidFriendlyRecipe(recipe) : recipe.audience !== 'kids'));
     const controller = new AbortController();
-    if (!beginSearch(audience === 'kids' ? 'kids-ai' : 'kitchen', controller)) return;
+    if (!beginSearch(course === 'main' ? 'main-ai' : course === 'side' ? 'side-ai' : audience === 'kids' ? 'kids-ai' : 'kitchen', controller)) return;
     setDiscoveryBusy(true);
     setDiscoveryError(false);
     setDiscoveryWarning(undefined);
@@ -230,7 +250,7 @@ export default function RecipesScreen() {
       const nextVariation = variation + 1;
       setVariation(nextVariation);
       const request = buildRecipeDiscoveryRequest(
-        inventoryPayload,
+        focusedInventory,
         preferences,
         filterState,
         `${different ? 'different' : 'refresh'}-${nextVariation}`,
@@ -238,16 +258,19 @@ export default function RecipesScreen() {
         availableRecipes.map((recipe) => recipe.title).slice(-30),
         [...new Set([...archivedRecipes.map((entry) => entry.title), ...availableRecipes.map((recipe) => recipe.title), ...savedKidPublishedRecipes.map((recipe) => recipe.title)])].slice(0, 200),
         audience,
+        course ? { course, focusIngredients: focusedNames, ...(course === 'side' && mealMain ? { mainRecipe: { title: mealMain.title, ingredientNames: mainIngredientNames } } : {}) } : undefined,
       );
       const result = await discoverRecipes(request, { signal: controller.signal });
       if (searchRequest.current !== controller || controller.signal.aborted) return;
-      const recipes = novelRecipes(availableRecipes, result.recipes.slice(0, MAX_AI_DISCOVERY_RECIPES).map((recipe) => mapDiscoveredRecipe(recipe, audience)))
+      const recipes = novelRecipes(availableRecipes, result.recipes.slice(0, MAX_AI_DISCOVERY_RECIPES).map((recipe) => mapDiscoveredRecipe(recipe, audience, course)))
         .filter((recipe) => !isArchivedRecipe(recipe, archivedRecipes));
       if (recipes.length) saveDiscoveredRecipes(recipes);
+      if (recipes.length && course === 'main') { setMealMain(recipes[0]!); setMealSide(null); }
+      if (recipes.length && course === 'side') setMealSide(recipes[0]!);
       setSearch('');
       setResultFilter('All');
       setDiscoveryWarning(recipes.length
-        ? `${recipes.length} new recipe${recipes.length === 1 ? '' : 's'} added.${result.warning ? ` ${result.warning}` : ''}`
+        ? `${recipes.length} new ${course ? `${course} dish${recipes.length === 1 ? '' : 'es'}` : `recipe${recipes.length === 1 ? '' : 's'}`} added.${result.warning ? ` ${result.warning}` : ''}`
         : savedMatches.length
           ? 'No new recipes were found. Your saved matching recipes are shown below.'
           : result.warning ?? 'No new recipes were found. Your saved recipes are still available.');
@@ -345,12 +368,24 @@ export default function RecipesScreen() {
   };
 
   const openPublishedSearch = () => {
+    setPickerTarget('online');
+    setPublishedSearchStep('choice');
+    setPublishedPickerOpen(true);
+  };
+
+  const openMealPicker = (course: 'main' | 'side') => {
+    if (course === 'side' && !mealMain) return;
+    setPickerTarget(course);
+    setPublishedDriverIds([]);
     setPublishedSearchStep('choice');
     setPublishedPickerOpen(true);
   };
 
   const chooseAutomaticPublishedSearch = () => {
-    setPublishedDriverIds(rankedPublishedIngredients.slice(0, MAX_PUBLISHED_SEARCH_ANCHORS).map((ingredient) => ingredient.id));
+    const automatic = pickerTarget === 'side'
+      ? rankedPublishedIngredients.filter((ingredient) => !mainIngredientNames.some((name) => name.toLowerCase().trim() === ingredient.name.toLowerCase().trim()))
+      : rankedPublishedIngredients;
+    setPublishedDriverIds(automatic.slice(0, MAX_PUBLISHED_SEARCH_ANCHORS).map((ingredient) => ingredient.id));
     setPublishedSelectionMode('automatic');
     setPublishedSearchStep('confirm');
   };
@@ -366,6 +401,18 @@ export default function RecipesScreen() {
   };
 
   const confirmPublishedSearch = () => {
+    if (pickerTarget !== 'online') {
+      const course = pickerTarget;
+      Alert.alert(
+        course === 'main' ? 'Create a main dish?' : 'Create a side dish?',
+        `The ${publishedDriverIds.length} selected confirmed ingredients and saved preferences will be sent to AI${course === 'side' && mealMain ? ` with “${mealMain.title}” as the main dish` : ''}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Create recipe', onPress: () => { setPublishedPickerOpen(false); void discover(false, section, course, publishedDriverIds); } },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       'Find recipes now?',
       'Your selected confirmed ingredients will be sent to the online recipe search service.',
@@ -457,8 +504,8 @@ export default function RecipesScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <AppHeader eyebrow="From what you have" title="Recipes" />
         <View style={[styles.sectionSwitch, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Pressable testID="general-recipes-section" accessibilityRole="tab" accessibilityState={{ selected: section === 'general' }} onPress={() => { setSection('general'); setDiscoveryWarning(undefined); setDiscoveryError(false); }} style={[styles.sectionTab, section === 'general' && { backgroundColor: colors.secondary }]}><Text style={[styles.sectionTabText, { color: section === 'general' ? colors.primary : colors.mutedForeground }]}>General</Text></Pressable>
-          <Pressable testID="kids-recipes-section" accessibilityRole="tab" accessibilityState={{ selected: section === 'kids' }} onPress={() => { setSection('kids'); setDiscoveryWarning(undefined); setDiscoveryError(false); }} style={[styles.sectionTab, section === 'kids' && { backgroundColor: colors.secondary }]}><Text style={[styles.sectionTabText, { color: section === 'kids' ? colors.primary : colors.mutedForeground }]}>Kid-friendly</Text></Pressable>
+          <Pressable testID="general-recipes-section" accessibilityRole="tab" accessibilityState={{ selected: section === 'general' }} onPress={() => { if (section !== 'general') { setMealMain(null); setMealSide(null); } setSection('general'); setDiscoveryWarning(undefined); setDiscoveryError(false); }} style={[styles.sectionTab, section === 'general' && { backgroundColor: colors.secondary }]}><Text style={[styles.sectionTabText, { color: section === 'general' ? colors.primary : colors.mutedForeground }]}>General</Text></Pressable>
+          <Pressable testID="kids-recipes-section" accessibilityRole="tab" accessibilityState={{ selected: section === 'kids' }} onPress={() => { if (section !== 'kids') { setMealMain(null); setMealSide(null); } setSection('kids'); setDiscoveryWarning(undefined); setDiscoveryError(false); }} style={[styles.sectionTab, section === 'kids' && { backgroundColor: colors.secondary }]}><Text style={[styles.sectionTabText, { color: section === 'kids' ? colors.primary : colors.mutedForeground }]}>Kid-friendly</Text></Pressable>
         </View>
         <Pressable testID="archived-recipes-toggle" onPress={() => setArchiveOpen((open) => !open)} style={[styles.archiveToggle, { backgroundColor: colors.card, borderColor: colors.border }]}><Feather name="archive" size={17} color={colors.primary} /><Text style={[styles.archiveToggleText, { color: colors.foreground }]}>Archived recipes ({archivedRecipes.length})</Text><Feather name={archiveOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedForeground} /></Pressable>
         {archiveOpen ? <View style={[styles.archivePanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -486,6 +533,22 @@ export default function RecipesScreen() {
           <View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.secondaryForeground }]}>Create for picky eaters</Text><Text style={[styles.discoveryBody, { color: colors.secondaryForeground }]}>Use AI to create familiar, mild recipes from your kitchen ingredients and saved preferences.</Text></View>
           <Pressable testID="create-kids-recipes" onPress={() => confirmKitchenDiscovery(false, 'kids')} disabled={Boolean(activeSearch) || !hydrated} style={[styles.discoverButton, { backgroundColor: colors.primary }, activeSearch && styles.disabled]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{discoveryBusy ? 'Creating' : 'Create recipes'}</Text></Pressable>
         </View>}
+        <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
+          <View style={{ flex: 1, gap: 10 }}>
+            <Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Build a complete meal</Text>
+            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Choose a main dish, then create a complementary side. Automatic selection prioritizes useful confirmed ingredients; review up to 30 before creating each recipe.</Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <Pressable testID="create-main-dish" disabled={Boolean(activeSearch) || !hydrated} onPress={() => openMealPicker('main')} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Create main dish</Text></Pressable>
+              <Pressable testID="create-side-dish" disabled={Boolean(activeSearch) || !hydrated || !mealMain} onPress={() => openMealPicker('side')} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: mealMain ? colors.secondary : colors.muted }, !mealMain && styles.disabled]}><Text style={[styles.outlineButtonText, { color: mealMain ? colors.primary : colors.mutedForeground }]}>Create side dish</Text></Pressable>
+            </View>
+            {mealMain ? <Pressable onPress={() => router.push(`/recipe/${mealMain.id}`)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Main: {mealMain.title} ↗</Text></Pressable> : <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Choose or create a main dish to start.</Text>}
+            {mealSide ? <Pressable onPress={() => router.push(`/recipe/${mealSide.id}`)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Side: {mealSide.title} ↗</Text></Pressable> : null}
+            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Or choose a saved main dish:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {availableRecipes.filter((recipe) => recipe.course !== 'side' && !isArchivedRecipe(recipe, archivedRecipes) && (section === 'kids' ? isKidFriendlyRecipe(recipe) : recipe.audience !== 'kids')).map((recipe) => <Pressable key={recipeVersion(recipe)} accessibilityLabel={`Use ${recipe.title} as main dish`} onPress={() => { setMealMain(recipe); setMealSide(null); }} style={[styles.outlineButton, { borderColor: mealMain && recipeVersion(mealMain) === recipeVersion(recipe) ? colors.primary : colors.border, backgroundColor: colors.background }]}><Text style={[styles.outlineButtonText, { color: colors.foreground }]}>{recipe.title}</Text></Pressable>)}
+            </ScrollView>
+          </View>
+        </View>
         {section === 'kids' ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="info" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>Familiar foods are a starting point; each child’s likes vary. Adjust size and texture for your child’s age and supervise meals. Review every ingredient and allergy.</Text></View> : null}
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
@@ -552,7 +615,7 @@ export default function RecipesScreen() {
       <Modal visible={Boolean(activeSearch)} transparent animationType="fade" onRequestClose={cancelSearch}>
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : activeSearch?.kind === 'kids-online' ? 'Finding kid-friendly recipes online' : activeSearch?.kind === 'kids-ai' ? 'Creating kid-friendly recipes' : 'Finding recipes from your kitchen'}</Text>
+            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : activeSearch?.kind === 'kids-online' ? 'Finding kid-friendly recipes online' : activeSearch?.kind === 'main-ai' ? 'Creating a main dish' : activeSearch?.kind === 'side-ai' ? 'Creating a side dish' : activeSearch?.kind === 'kids-ai' ? 'Creating kid-friendly recipes' : 'Finding recipes from your kitchen'}</Text>
             <Text style={[styles.progressPercent, { color: colors.primary }]}>{progressPercent}%</Text>
             <View testID="recipe-search-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated recipe search progress" accessibilityValue={{ min: 0, max: 100, now: progressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
               <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${progressPercent}%` }]} />
@@ -567,15 +630,15 @@ export default function RecipesScreen() {
           <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
             <View style={styles.pickerHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.progressTitle, { color: colors.foreground }]}>{publishedSearchStep === 'choice' ? 'Choose how to search' : publishedSearchStep === 'manual' ? 'Choose search ingredients' : 'Confirm search ingredients'}</Text>
-                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses up to 30 confirmed ingredients. Manual selection starts empty.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} · ${publishedDriverIds.length} ingredients`}</Text>
+                <Text style={[styles.progressTitle, { color: colors.foreground }]}>{publishedSearchStep === 'choice' ? pickerTarget === 'online' ? 'Choose how to search' : `Choose ${pickerTarget} ingredients` : publishedSearchStep === 'manual' ? 'Choose ingredients' : 'Confirm ingredients'}</Text>
+                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses food role, freshness, quantity, and category variety to pick up to 30 confirmed ingredients.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} · ${publishedDriverIds.length} ingredients`}</Text>
               </View>
               <Pressable testID="close-published-ingredients" onPress={() => setPublishedPickerOpen(false)} style={[styles.outlineButton, { borderColor: colors.border }]}>
                 <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Close</Text>
               </Pressable>
             </View>
             {publishedSearchStep === 'choice' ? <View style={styles.searchChoiceList}>
-              <Pressable testID="published-ingredients-auto" onPress={chooseAutomaticPublishedSearch} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="zap" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Automatic selection</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Rank known quantities and manual/photo confirmations, then show up to 30 ingredients for approval.</Text></View></Pressable>
+              <Pressable testID="published-ingredients-auto" onPress={chooseAutomaticPublishedSearch} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Feather name="zap" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Automatic selection</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Prioritize {pickerTarget === 'main' ? 'proteins and substantial ingredients' : pickerTarget === 'side' ? 'vegetables and grains that complement the main' : 'meal-building ingredients across food types'}, then review up to 30.</Text></View></Pressable>
               <Pressable testID="published-ingredients-manual" onPress={() => { setPublishedDriverIds([]); setPublishedSelectionMode('manual'); setPublishedSearchStep('manual'); }} style={[styles.searchChoice, { borderColor: colors.border, backgroundColor: colors.background }]}><Feather name="check-square" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.searchOptionsTitle, { color: colors.foreground }]}>Choose manually</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Start with nothing selected, then choose up to 30 ingredients grouped by food type.</Text></View></Pressable>
             </View> : null}
             {publishedSearchStep === 'manual' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
@@ -592,7 +655,7 @@ export default function RecipesScreen() {
               {!rankedPublishedIngredients.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>No eligible confirmed ingredients are available. Common seasonings and used ingredients are excluded from anchors.</Text> : null}
             </ScrollView> : null}
             {publishedSearchStep === 'confirm' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
-              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>These ingredients will drive the published recipe search. Up to 30 confirmed pantry ingredients are sent for matching.</Text>
+              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{pickerTarget === 'online' ? 'These ingredients will drive the published recipe search. Up to 30 confirmed kitchen ingredients are sent for matching.' : `These selected confirmed ingredients will guide the ${pickerTarget} dish. ${pickerTarget === 'side' && mealMain ? `The side will be paired with ${mealMain.title}.` : ''}`}</Text>
               {groupedPublishedIngredients.map((group) => {
                 const selected = group.ingredients.filter((ingredient) => publishedDriverIds.includes(ingredient.id));
                 if (!selected.length) return null;
@@ -614,8 +677,8 @@ export default function RecipesScreen() {
                 <Feather name="arrow-left" size={18} color={colors.primary} />
                 <Text style={[styles.confirmBackText, { color: colors.primary }]}>Back</Text>
               </Pressable>
-              <Pressable testID="confirm-published-search" onPress={confirmPublishedSearch} style={({ pressed }) => [styles.confirmFindButton, { backgroundColor: colors.primary }, pressed && styles.pressed]}>
-                <Text style={[styles.confirmFindText, { color: colors.primaryForeground }]}>Find recipes</Text>
+              <Pressable testID="confirm-published-search" disabled={!publishedDriverIds.length} onPress={confirmPublishedSearch} style={({ pressed }) => [styles.confirmFindButton, { backgroundColor: publishedDriverIds.length ? colors.primary : colors.muted }, pressed && styles.pressed]}>
+                <Text style={[styles.confirmFindText, { color: colors.primaryForeground }]}>{pickerTarget === 'online' ? 'Find recipes' : `Create ${pickerTarget}`}</Text>
                 <Feather name="search" size={18} color={colors.primaryForeground} />
               </Pressable>
             </View> : null}

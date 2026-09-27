@@ -54,6 +54,12 @@ const requestSchema = z.object({
   excludeRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
   excludeArchivedRecipeTitles: z.array(z.string().trim().min(1).max(160)).max(200).default([]),
   audience: z.enum(["general", "kids"]).default("general"),
+  course: z.enum(["main", "side"]).optional(),
+  focusIngredients: z.array(z.string().trim().min(1).max(120)).min(1).max(30).optional(),
+  mainRecipe: z.object({
+    title: z.string().trim().min(1).max(160),
+    ingredientNames: z.array(z.string().trim().min(1).max(120)).min(1).max(40),
+  }).optional(),
 });
 
 const ingredientSchema = z.object({
@@ -360,8 +366,16 @@ router.post("/recipes/discover", async (req, res) => {
     return;
   }
 
-  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience } = parsed.data;
-  const confirmedAvailableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain");
+  const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience, course, focusIngredients, mainRecipe } = parsed.data;
+  if (course && (!focusIngredients?.length || (course === "side" && !mainRecipe))) {
+    sendScanError(req, res, 400, "INVALID_REQUEST", "Choose confirmed ingredients and a main dish before creating this recipe.");
+    return;
+  }
+  const confirmedAvailableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain" && !(item.quantityKnown && item.quantityValue === 0));
+  if (focusIngredients?.some((focus) => !confirmedAvailableInventory.some((item) => normalize(item.name) === normalize(focus)))) {
+    sendScanError(req, res, 400, "INVALID_REQUEST", "Selected recipe ingredients must be confirmed in your kitchen.");
+    return;
+  }
   const allergenAssessableInventory = confirmedAvailableInventory.filter((item) =>
     assessIngredientAllergens([item]).unknownIngredients.length === 0
   );
@@ -377,12 +391,20 @@ router.post("/recipes/discover", async (req, res) => {
       "Keep ingredients recognizable; give optional vegetables or sauces on the side rather than hiding them. Use gentle flavors, manageable portions, and straightforward steps. Do not label a food universally safe for children.",
       "Include age-appropriate cutting or texture guidance in the steps where relevant. Avoid whole grapes, whole nuts, hard rounds, and other common choking shapes; never omit standard cooking temperatures for proteins.",
     ] : []),
+    ...(course === "main" ? [
+      `Create main dishes led by these selected confirmed ingredients: ${JSON.stringify(focusIngredients)}. Make each candidate a substantial main dish rather than a side, snack, or garnish.`,
+      "Return exactly one main dish recipe.",
+    ] : []),
+    ...(course === "side" ? [
+      `Create side dishes to serve alongside this main dish: ${JSON.stringify(mainRecipe)}. Use these selected confirmed ingredients first: ${JSON.stringify(focusIngredients)}. Prefer vegetables, grains, potatoes, or other complementary ingredients; avoid making a second main dish or repeating the main dish's primary protein. Give each side its own complete cooking steps.`,
+      "Return exactly one side dish recipe.",
+    ] : []),
     "Every submitted ingredient is eligible as a recipe ingredient. Prefer confirmed available items when deciding what the user already has, and include only a small number of clearly identified extra ingredients so the app can label the recipe Almost ready or Check quantities.",
     "Never invent an inventory item as if the user owns it. Never claim a required ingredient is available.",
     "Every returned recipe must satisfy all saved allergies, dietary restrictions, dislikes, cuisines, skill, cooking-time, equipment, and selected-filter requirements. Return at least one recipe that satisfies them.",
     "Use only the equipment listed in Saved preferences and Selected filters. Do not require an appliance or specialized tool that is not listed.",
     "Use any submitted ingredient as a recipe ingredient regardless of stock status. For ingredients not in the submitted inventory, use only basic ingredients with an unambiguous allergen profile such as water, salt, pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, and common fresh herbs. Do not add a missing ingredient with uncertain allergen status.",
-     "Return no more than five varied candidates, not minor title changes. The variation seed selects a different direction.",
+    ...(course ? [] : ["Return no more than five varied candidates, not minor title changes. The variation seed selects a different direction."]),
     "All ingredient amounts must be numeric and paired with a unit. Mark pantry garnish or optional additions required=false.",
     "All steps must be ordered from 1 with no gaps. Every step must include exact ingredientAmounts with numeric quantities and units, at least one sensory cue, and at least one common mistake to avoid.",
     "Use Fahrenheit as the authoritative cooking and food-safety temperature and include the equivalent Celsius value in the temperature object. Add safetyTemperature whenever a food safety target applies.",
@@ -414,8 +436,11 @@ router.post("/recipes/discover", async (req, res) => {
         signal: controller.signal,
         body: JSON.stringify({
           model,
-          max_completion_tokens: 12000,
-          response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(responseSchemaForOpenAi) } },
+          max_completion_tokens: course ? 7000 : 12000,
+          response_format: { type: "json_schema", json_schema: { name: "recipe_discovery", strict: true, schema: makeStrictRecipeSchema(course ? {
+            ...responseSchemaForOpenAi,
+            properties: { ...responseSchemaForOpenAi.properties, recipes: { ...responseSchemaForOpenAi.properties.recipes, maxItems: 1 } },
+          } : responseSchemaForOpenAi) } },
           messages: [{ role: "user", content: requestPrompt }],
         }),
       });
@@ -458,6 +483,7 @@ router.post("/recipes/discover", async (req, res) => {
         const preferenceViolation = violatesPreferences(recipe, preferences, filters);
         if (preferenceViolation) return reject(preferenceViolation);
         if (audience === "kids" && !kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name))) return reject("not-kid-friendly");
+        if (focusIngredients?.length && !recipe.ingredients.some((item) => focusIngredients.some((focus) => normalize(focus) === normalize(item.name)))) return reject("no-focused-ingredient");
         const title = recipeTitleKey(recipe.title);
         if (archivedTitles.has(title)) return reject("archived-title");
         if (seenTitles.has(title)) return reject("duplicate-title");

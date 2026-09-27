@@ -70,7 +70,7 @@ export function matchingSavedRecipes(
   });
 }
 
-export function mapDiscoveredRecipe(recipe: DiscoveredRecipe, audience: 'general' | 'kids' = 'general'): Recipe {
+export function mapDiscoveredRecipe(recipe: DiscoveredRecipe, audience: 'general' | 'kids' = 'general', course?: 'main' | 'side'): Recipe {
   return {
     id: recipe.id,
     title: recipe.title,
@@ -101,6 +101,7 @@ export function mapDiscoveredRecipe(recipe: DiscoveredRecipe, audience: 'general
     recipeVersion: recipe.recipeVersion,
     source: 'server-ai',
     audience,
+    ...(course ? { course } : {}),
     storageInstructions: recipe.storageInstructions,
     reheatingInstructions: recipe.reheatingInstructions,
     servingSuggestions: recipe.servingSuggestions,
@@ -169,6 +170,7 @@ export function isCacheableRecipe(value: unknown): value is Recipe {
     && (value.healthScore.status === 'calculated' || value.healthScore.status === 'insufficient-information')
     && nutrition
     && (value.source === 'server-ai' || value.source === 'published' || value.source === 'curated' || value.source === undefined)
+    && (value.course === undefined || value.course === 'main' || value.course === 'side')
     && (value.sourceUrl === undefined || typeof value.sourceUrl === 'string');
 }
 
@@ -185,6 +187,7 @@ export function buildRecipeDiscoveryRequest(
   excludeRecipeTitles: string[] = [],
   excludeArchivedRecipeTitles: string[] = [],
   audience: 'general' | 'kids' = 'general',
+  mealPlan?: { course: 'main' | 'side'; focusIngredients: string[]; mainRecipe?: { title: string; ingredientNames: string[] } },
 ): {
   inventory: RecipeDiscoveryInventory[];
   preferences: RecipeDiscoveryPreferences;
@@ -194,6 +197,9 @@ export function buildRecipeDiscoveryRequest(
   excludeRecipeTitles: string[];
   excludeArchivedRecipeTitles: string[];
   audience: 'general' | 'kids';
+  course?: 'main' | 'side';
+  focusIngredients?: string[];
+  mainRecipe?: { title: string; ingredientNames: string[] };
 } {
   return {
     inventory,
@@ -211,5 +217,6 @@ export function buildRecipeDiscoveryRequest(
     excludeRecipeTitles,
     excludeArchivedRecipeTitles,
     audience,
+    ...(mealPlan ? { course: mealPlan.course, focusIngredients: mealPlan.focusIngredients, ...(mealPlan.mainRecipe ? { mainRecipe: mealPlan.mainRecipe } : {}) } : {}),
   };
 }
