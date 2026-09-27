@@ -98,7 +98,9 @@ export function combineProviderRecipeResults(
       results.push(recipe);
     });
   }
-  return results;
+  return results.sort((left, right) =>
+    right.matchedIngredients.length - left.matchedIngredients.length
+    || left.missingIngredients.length - right.missingIngredients.length);
 }
 
 const mainDishTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat|pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?)\b/i;

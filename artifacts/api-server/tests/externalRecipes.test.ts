@@ -28,22 +28,28 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
 });
 
-test("combined provider recipes are interleaved and capped at 30", () => {
-  const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number) => ({
+test("combined provider recipes are match-ranked and capped at 30", () => {
+  const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number, matchedCount: number) => ({
     id: `${provider}-${index}`,
     title: `${provider} recipe ${index}`,
     provider,
     sourceUrl: `https://example.com/${provider}/${index}`,
     ingredients: [{ name: "Pasta", measure: "1 cup" }],
     instructions: "Cook the pasta.",
-    matchedIngredients: ["Pasta"],
+    matchedIngredients: Array.from({ length: matchedCount }, (_, item) => `${provider} ingredient ${item + 1}`),
     missingIngredients: [],
     safetyVerified: false as const,
   });
+  const matchedCounts = { Edamam: 3, Spoonacular: 4, TheMealDB: 1 } as const;
   const groups = (["Edamam", "Spoonacular", "TheMealDB"] as const)
-    .map((provider) => Array.from({ length: 35 }, (_, index) => makeRecipe(provider, index)));
+    .map((provider) => Array.from({ length: 35 }, (_, index) => makeRecipe(provider, index, matchedCounts[provider])));
   const recipes = combineProviderRecipeResults(groups, 35);
   assert.equal(recipes.length, 30);
+  assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), [
+    ...Array.from({ length: 10 }, () => 4),
+    ...Array.from({ length: 10 }, () => 3),
+    ...Array.from({ length: 10 }, () => 1),
+  ]);
   assert.deepEqual(
     Object.fromEntries((["Edamam", "Spoonacular", "TheMealDB"] as const)
       .map((provider) => [provider, recipes.filter((recipe) => recipe.provider === provider).length])),

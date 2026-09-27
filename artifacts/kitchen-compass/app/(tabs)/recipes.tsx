@@ -13,7 +13,7 @@ import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { onlineFirstMealSearch } from '@/lib/completeMealSearch';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients } from '@/lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByMatchedIngredients } from '@/lib/publishedRecipeSearch';
 import { isArchivedPublished, isArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '@/lib/kidFriendly';
 import type { Recipe } from '@/data/recipes';
@@ -33,8 +33,6 @@ type PickerTarget = 'online' | 'main' | 'side';
 type MealDish = Recipe | ExternalRecipe;
 const isOnlineDish = (dish: MealDish): dish is ExternalRecipe => 'provider' in dish;
 const EDAMAM_BADGE_URL = 'https://developer.edamam.com/images/light.png';
-const onlineProviderRank = { Edamam: 0, Spoonacular: 1, TheMealDB: 2, FatSecret: 3 } as const;
-
 function onlineSourceDescription(source: OnlineSourceResult) {
   if (source.status === 'unavailable') return 'could not be reached';
   if (source.status === 'not_configured') return 'not configured';
@@ -197,13 +195,16 @@ export default function RecipesScreen() {
     ...(item.confidence ? { confidence: item.confidence } : {}),
   })), [ingredients]);
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
-  const visibleExternalRecipes = useMemo(() => externalRecipes
+  const visibleExternalRecipes = useMemo(() => sortPublishedRecipesByMatchedIngredients(externalRecipes
     .filter((item) => !discardedExternalRecipeIds.includes(item.id)
       && !isArchivedPublished(item, archivedRecipes)
-      && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes))
-    .sort((left, right) => onlineProviderRank[left.provider] - onlineProviderRank[right.provider]
-      || right.matchedIngredients.length - left.matchedIngredients.length || left.missingIngredients.length - right.missingIngredients.length),
+      && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes))),
     [archivedRecipes, discardedExternalRecipeIds, externalRecipes, preferences.allergies, preferences.dislikes]);
+  const visibleKidPublishedRecipes = useMemo(() => sortPublishedRecipesByMatchedIngredients(
+    [...kidOnlineRecipes, ...savedKidPublishedRecipes]
+      .filter((item) => !isArchivedPublished(item, archivedRecipes)
+        && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)),
+  ), [archivedRecipes, kidOnlineRecipes, preferences.allergies, preferences.dislikes, savedKidPublishedRecipes]);
 
   const prepareImages = async (recipes: Recipe[]) => {
     const missing = recipes.filter((recipe) => !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)
@@ -667,7 +668,7 @@ export default function RecipesScreen() {
           </View>;
         })}
         </ScrollView> : null}
-        {section === 'kids' && [...kidOnlineRecipes, ...savedKidPublishedRecipes].filter((item) => !isArchivedPublished(item, archivedRecipes) && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)).map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {publishedMatchedCount(item)} matching ingredients · {item.ingredients.length - publishedMatchedCount(item)} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
+        {section === 'kids' && visibleKidPublishedRecipes.map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {publishedMatchedCount(item)} matching ingredients · {item.ingredients.length - publishedMatchedCount(item)} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}

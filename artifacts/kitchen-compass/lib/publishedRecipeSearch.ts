@@ -147,3 +147,11 @@ export function buildPublishedRecipeSearch(
     ingredients: orderedPantry,
   };
 }
+
+export function sortPublishedRecipesByMatchedIngredients<
+  T extends { matchedIngredients: readonly string[]; missingIngredients: readonly string[] },
+>(recipes: readonly T[]): T[] {
+  return [...recipes].sort((left, right) =>
+    right.matchedIngredients.length - left.matchedIngredients.length
+    || left.missingIngredients.length - right.missingIngredients.length);
+}
