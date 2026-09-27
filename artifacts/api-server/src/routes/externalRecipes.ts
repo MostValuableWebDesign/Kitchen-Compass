@@ -6,9 +6,9 @@ import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
+import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
 
 const router: IRouter = Router();
-const MAX_PROVIDER_SEARCH_ANCHORS = 30;
 const MAX_COUNTED_MISSING_INGREDIENTS = 7;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(64),

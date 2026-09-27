@@ -3,6 +3,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
+import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
 
 type EdamamRecipe = {
   uri?: string;
@@ -79,7 +80,7 @@ export async function searchEdamamRecipes(input: {
   if (!appId || !appKey) throw new Error("Edamam is not configured");
   const url = new URL("https://api.edamam.com/api/recipes/v2");
   url.searchParams.set("type", "public");
-  url.searchParams.set("q", input.anchors.slice(0, 2).join(" "));
+  url.searchParams.set("q", input.anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(" "));
   url.searchParams.set("app_id", appId);
   url.searchParams.set("app_key", appKey);
   for (const field of ["uri", "label", "image", "source", "url", "ingredientLines", "ingredients"]) url.searchParams.append("field", field);

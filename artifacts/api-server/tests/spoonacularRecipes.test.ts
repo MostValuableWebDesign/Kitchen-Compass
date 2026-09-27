@@ -3,6 +3,8 @@ import { once } from "node:events";
 import test, { after } from "node:test";
 import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
+import { searchSpoonacularRecipes } from "../src/routes/spoonacularRecipes";
+import { MAX_PROVIDER_SEARCH_ANCHORS } from "../src/routes/providerSearchLimits";
 
 process.env.SESSION_SECRET = "spoonacular-recipes-test-session";
 const server = app.listen(0);
@@ -166,5 +168,32 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
     if (oldFatSecretId === undefined) delete process.env.FATSECRET_CLIENT_ID; else process.env.FATSECRET_CLIENT_ID = oldFatSecretId;
     if (oldFatSecretSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET; else process.env.FATSECRET_CLIENT_SECRET = oldFatSecretSecret;
+  }
+});
+
+test("Spoonacular caps its ingredient query at the shared provider search limit", async () => {
+  const oldKey = process.env.SPOONACULAR_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SPOONACULAR_API_KEY = "test-key";
+  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS + 5 }, (_, index) => `Ingredient ${index + 1}`);
+  let query = "";
+  globalThis.fetch = async (input) => {
+    const target = new URL(String(input));
+    query = target.searchParams.get("ingredients") ?? "";
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await searchSpoonacularRecipes({
+      pantry: anchors,
+      anchors,
+      allergies: [],
+      excludedIds: new Set<string>(),
+      excludedTitles: new Set<string>(),
+      audience: "general",
+    });
+    assert.equal(query, anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(","));
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
   }
 });

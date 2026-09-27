@@ -1,0 +1,1 @@
+export const MAX_PROVIDER_SEARCH_ANCHORS = 30;

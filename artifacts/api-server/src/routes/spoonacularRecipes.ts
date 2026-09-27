@@ -2,6 +2,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
+import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
 
 type SpoonacularSummary = {
   id?: number;
@@ -99,7 +100,7 @@ export async function searchSpoonacularRecipes(input: {
 }): Promise<ExternalRecipe[]> {
   const maxCandidates = Math.max(1, Math.min(12, input.maxCandidates ?? 12));
   const rawSearch = await spoonacularJson("findByIngredients", {
-    ingredients: input.anchors.slice(0, 30).join(","),
+    ingredients: input.anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(","),
     number: String(maxCandidates * 2),
     ranking: "1",
     ignorePantry: "true",

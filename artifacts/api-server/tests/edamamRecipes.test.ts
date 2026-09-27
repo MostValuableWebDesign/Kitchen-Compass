@@ -5,6 +5,7 @@ import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
 import { searchEdamamRecipes } from "../src/routes/edamamRecipes";
 import { suitableMealCourse, type ExternalRecipe } from "../src/routes/externalRecipes";
+import { MAX_PROVIDER_SEARCH_ANCHORS } from "../src/routes/providerSearchLimits";
 
 test("complete meal course checks distinguish mains from mild complementary sides", () => {
   const recipe = (title: string, ingredients: string[]): ExternalRecipe => ({
@@ -55,6 +56,35 @@ test("Edamam uses server credentials and returns safe, online-only recipes for g
     assert.equal(requests[0]?.searchParams.get("q"), "Pasta Tomato");
     assert.equal(requests[0]?.searchParams.get("app_id"), "test-id");
     assert.equal(requests[0]?.searchParams.get("app_key"), "test-key");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+  }
+});
+
+test("Edamam caps its ingredient query at the shared provider search limit", async () => {
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS + 5 }, (_, index) => `Ingredient ${index + 1}`);
+  let query = "";
+  globalThis.fetch = async (input) => {
+    query = new URL(String(input)).searchParams.get("q") ?? "";
+    return new Response(JSON.stringify({ hits: [] }), { status: 200 });
+  };
+  try {
+    await searchEdamamRecipes({
+      pantry: anchors,
+      anchors,
+      allergies: [],
+      excludedIds: new Set<string>(),
+      excludedTitles: new Set<string>(),
+      audience: "general",
+    });
+    assert.equal(query, anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(" "));
   } finally {
     globalThis.fetch = originalFetch;
     if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
