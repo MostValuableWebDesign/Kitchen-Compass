@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
 import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '../lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, filterPublishedRecipesBySource, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '../lib/publishedRecipeSearch';
 import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, parseArchivedRecipes, restoreArchivedRecipe } from '../lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '../lib/kidFriendly';
 
@@ -195,6 +195,20 @@ test('online food categories find meat types and filter ranked recipes without a
   assert.equal(categoriesForPublishedRecipe(recipes[2]).includes('Chicken'), false);
   assert.deepEqual(filterPublishedRecipesByCategory(recipes, 'Chicken').map((recipe) => recipe.title), ['Chicken pasta']);
   assert.deepEqual(filterPublishedRecipesByCategory(recipes, 'All'), recipes);
+});
+
+test('online source filter combines with food categories and preserves recipe order', () => {
+  const recipes = [
+    { title: 'Chicken rice', provider: 'Edamam' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: [] },
+    { title: 'Chicken pasta', provider: 'Spoonacular' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: ['Pasta'] },
+    { title: 'Chicken tacos', provider: 'Edamam' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: ['Tortilla', 'Onion'] },
+    { title: 'Beef stew', provider: 'TheMealDB' as const, ingredients: [{ name: 'Beef' }], matchedIngredients: ['Beef'], missingIngredients: [] },
+  ];
+  const ranked = sortPublishedRecipesByIngredientFit(recipes);
+  const chicken = filterPublishedRecipesByCategory(ranked, 'Chicken');
+  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'Edamam').map((recipe) => recipe.title), ['Chicken rice', 'Chicken tacos']);
+  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'Spoonacular').map((recipe) => recipe.title), ['Chicken pasta']);
+  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'All'), chicken);
 });
 
 test('main and side requests carry their own ingredient focus and the selected main', () => {

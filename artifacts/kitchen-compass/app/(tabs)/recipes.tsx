@@ -13,7 +13,7 @@ import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { onlineFirstMealSearch } from '@/lib/completeMealSearch';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, publishedRecipeFoodCategories, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit, type PublishedRecipeFoodCategory } from '@/lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, filterPublishedRecipesBySource, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, publishedRecipeFoodCategories, publishedRecipeSources, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit, type PublishedRecipeFoodCategory, type PublishedRecipeSource } from '@/lib/publishedRecipeSearch';
 import { isArchivedPublished, isArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '@/lib/kidFriendly';
 import type { Recipe } from '@/data/recipes';
@@ -102,6 +102,7 @@ export default function RecipesScreen() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [section, setSection] = useState<RecipeSection>('general');
   const [publishedFoodCategories, setPublishedFoodCategories] = useState<Record<RecipeSection, PublishedRecipeFoodCategory | 'All'>>({ general: 'All', kids: 'All' });
+  const [publishedSources, setPublishedSources] = useState<Record<RecipeSection, PublishedRecipeSource | 'All'>>({ general: 'All', kids: 'All' });
   const searchGuard = useRef(false);
   const imageJob = useRef(0);
   const pendingImages = useRef(new Set<string>());
@@ -220,7 +221,15 @@ export default function RecipesScreen() {
   }, [currentPublishedRecipes]);
   const selectedPublishedCategory = publishedFoodCategories[section];
   const activePublishedCategory = selectedPublishedCategory === 'All' || categoryCounts.has(selectedPublishedCategory) ? selectedPublishedCategory : 'All';
-  const displayedPublishedRecipes = useMemo(() => filterPublishedRecipesByCategory(currentPublishedRecipes, activePublishedCategory), [currentPublishedRecipes, activePublishedCategory]);
+  const categoryFilteredRecipes = useMemo(() => filterPublishedRecipesByCategory(currentPublishedRecipes, activePublishedCategory), [currentPublishedRecipes, activePublishedCategory]);
+  const sourceCounts = useMemo(() => {
+    const counts = new Map<PublishedRecipeSource, number>();
+    for (const recipe of categoryFilteredRecipes) counts.set(recipe.provider, (counts.get(recipe.provider) ?? 0) + 1);
+    return counts;
+  }, [categoryFilteredRecipes]);
+  const selectedPublishedSource = publishedSources[section];
+  const activePublishedSource = selectedPublishedSource === 'All' || sourceCounts.has(selectedPublishedSource) ? selectedPublishedSource : 'All';
+  const displayedPublishedRecipes = useMemo(() => filterPublishedRecipesBySource(categoryFilteredRecipes, activePublishedSource), [categoryFilteredRecipes, activePublishedSource]);
 
   const prepareImages = async (recipes: Recipe[]) => {
     const missing = recipes.filter((recipe) => !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)
@@ -657,8 +666,13 @@ export default function RecipesScreen() {
         {currentPublishedRecipes.length ? <View style={{ marginTop: 12 }}>
           <Text style={[styles.filterTitle, { color: colors.foreground }]}>Browse online recipes by food</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-            <Chip label={`All (${currentPublishedRecipes.length})`} selected={activePublishedCategory === 'All'} onPress={() => setPublishedFoodCategories((current) => ({ ...current, [section]: 'All' }))} />
-            {publishedRecipeFoodCategories.filter((category) => categoryCounts.has(category)).map((category) => <Chip key={category} label={`${category} (${categoryCounts.get(category)})`} selected={activePublishedCategory === category} onPress={() => setPublishedFoodCategories((current) => ({ ...current, [section]: category }))} />)}
+            <Chip label={`All foods (${currentPublishedRecipes.length})`} selected={activePublishedCategory === 'All'} onPress={() => { setPublishedFoodCategories((current) => ({ ...current, [section]: 'All' })); setPublishedSources((current) => ({ ...current, [section]: 'All' })); }} />
+            {publishedRecipeFoodCategories.filter((category) => categoryCounts.has(category)).map((category) => <Chip key={category} label={`${category} (${categoryCounts.get(category)})`} selected={activePublishedCategory === category} onPress={() => { setPublishedFoodCategories((current) => ({ ...current, [section]: category })); setPublishedSources((current) => ({ ...current, [section]: 'All' })); }} />)}
+          </ScrollView>
+          <Text style={[styles.filterTitle, { color: colors.foreground }]}>Filter by source</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            <Chip label={`All sources (${categoryFilteredRecipes.length})`} selected={activePublishedSource === 'All'} onPress={() => setPublishedSources((current) => ({ ...current, [section]: 'All' }))} />
+            {publishedRecipeSources.filter((source) => sourceCounts.has(source)).map((source) => <Chip key={source} label={`${source} (${sourceCounts.get(source)})`} selected={activePublishedSource === source} onPress={() => setPublishedSources((current) => ({ ...current, [section]: source }))} />)}
           </ScrollView>
         </View> : null}
         {section === 'general' && visibleExternalRecipes.length ? <View style={styles.externalResultsHeader}>

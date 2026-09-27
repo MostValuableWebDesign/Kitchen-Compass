@@ -15,6 +15,7 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 - General and Kid-friendly published recipes are ordered by fewest counted missing ingredients, then by most confirmed pantry matches. This order is applied before selecting the combined 50 results and on both result screens.
 - General and Kid-friendly online result chips filter the current recipes by food type (including specific meats) without another provider request.
 - The API deduplicates published recipes by exact recipe ID or source link. Recipes with the same title but different source links remain distinct. `resultCounts` reports eligible provider recipes, duplicate links removed, recipes cut by the 50-result cap, and recipes returned; the app displays these counts after each online search.
+- General and Kid-friendly online results also have source chips for Edamam, Spoonacular, and TheMealDB when each source has visible recipes. Food and source filters work together on already returned results, with no extra provider requests; results retain their missing-ingredient ranking.
 - Keep `OPENAI_API_KEY`, `THEMEALDB_API_KEY`, `SPOONACULAR_API_KEY`, `EDAMAM_APP_ID`, and `EDAMAM_APP_KEY` on the API server. The Expo bundle should receive only its API domain.
 
 ### Activate Spoonacular in Replit
