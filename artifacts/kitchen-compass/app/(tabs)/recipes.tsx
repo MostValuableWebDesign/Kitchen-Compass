@@ -38,6 +38,7 @@ const onlineProviderRank = { Edamam: 0, Spoonacular: 1, TheMealDB: 2, FatSecret:
 function onlineSourceDescription(source: OnlineSourceResult) {
   if (source.status === 'unavailable') return 'could not be reached';
   if (source.status === 'not_configured') return 'not configured';
+  if (source.status === 'not_searched') return 'not searched because an earlier source found recipes';
   if (source.status === 'no_results') return 'no eligible recipes returned';
   return `${source.count} eligible recipe${source.count === 1 ? '' : 's'} returned`;
 }
@@ -328,6 +329,7 @@ export default function RecipesScreen() {
             section,
             course,
             mainRecipe,
+            preferences.dislikes,
           );
           if (controller.signal.aborted || searchRequest.current !== controller) return undefined;
           setMealSourceResults(online.sourceResults);
@@ -393,6 +395,9 @@ export default function RecipesScreen() {
           ...(audience === 'kids' ? [...availableRecipes, ...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.title) : []),
         ])].slice(0, 200),
         audience,
+        undefined,
+        undefined,
+        preferences.dislikes,
       );
       if (searchRequest.current !== controller || controller.signal.aborted) return;
       const searchedOnlineSource = result.sourceResults?.some((source) => source.status === 'found' || source.status === 'no_results') ?? true;

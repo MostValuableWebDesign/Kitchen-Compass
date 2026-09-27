@@ -62,7 +62,7 @@ test("Edamam uses server credentials and returns safe, online-only recipes for g
   }
 });
 
-test("published search orders Edamam, Spoonacular, then TheMealDB and keeps the first duplicate", async () => {
+test("published search uses Edamam first without spending Spoonacular or TheMealDB requests", async () => {
   const originalFetch = globalThis.fetch;
   const oldId = process.env.EDAMAM_APP_ID;
   const oldKey = process.env.EDAMAM_APP_KEY;
@@ -73,16 +73,19 @@ test("published search orders Edamam, Spoonacular, then TheMealDB and keeps the 
   process.env.SPOONACULAR_API_KEY = "test-spoonacular-key";
   process.env.SESSION_SECRET = "edamam-priority-test-session";
   const server = app.listen(0);
+  const calledProviders: string[] = [];
+  let edamamHasResults = true;
   try {
     await once(server, "listening");
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Test server has no port");
     globalThis.fetch = async (input) => {
       const target = new URL(String(input));
-      if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: [
+      calledProviders.push(target.hostname);
+      if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: edamamHasResults ? [
         { recipe: { uri: "edamam-1", label: "Shared pasta", image: "https://example.com/shared.jpg", url: "https://example.com/shared", ingredients: [{ food: "Pasta", text: "1 cup pasta" }] } },
         { recipe: { uri: "edamam-2", label: "Edamam pasta", image: "https://example.com/edamam.jpg", url: "https://example.com/edamam", ingredients: [{ food: "Pasta", text: "1 cup pasta" }] } },
-      ] }), { status: 200 });
+      ] : [] }), { status: 200 });
       if (target.hostname === "api.spoonacular.com") {
         if (target.pathname.endsWith("findByIngredients")) return new Response(JSON.stringify([
           { id: 101, title: "Shared pasta", image: "https://example.com/shared.jpg", usedIngredientCount: 1 },
@@ -109,11 +112,24 @@ test("published search orders Edamam, Spoonacular, then TheMealDB and keeps the 
     const payload = await response.json() as { recipes: Array<{ title: string; provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((recipe) => [recipe.provider, recipe.title]), [
       ["Edamam", "Shared pasta"], ["Edamam", "Edamam pasta"],
-      ["Spoonacular", "Spoonacular pasta"], ["TheMealDB", "TheMealDB pasta"],
     ]);
     assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.status, source.count]), [
-      ["Edamam", "found", 2], ["Spoonacular", "found", 2], ["TheMealDB", "found", 1],
+      ["Edamam", "found", 2], ["Spoonacular", "not_searched", 0], ["TheMealDB", "not_searched", 0],
     ]);
+    assert.deepEqual(calledProviders, ["api.edamam.com"]);
+    edamamHasResults = false;
+    calledProviders.length = 0;
+    const fallbackResponse = await originalFetch(`http://127.0.0.1:${address.port}/api/recipes/external`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [] }),
+    });
+    const fallback = await fallbackResponse.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
+    assert.equal(fallbackResponse.status, 200);
+    assert.deepEqual(fallback.recipes.map((recipe) => recipe.provider), ["Spoonacular", "Spoonacular"]);
+    assert.deepEqual(fallback.sourceResults.map((source) => [source.provider, source.status]), [
+      ["Edamam", "no_results"], ["Spoonacular", "found"], ["TheMealDB", "not_searched"],
+    ]);
+    assert.deepEqual(calledProviders, ["api.edamam.com", "api.spoonacular.com", "api.spoonacular.com"]);
   } finally {
     globalThis.fetch = originalFetch;
     server.close();

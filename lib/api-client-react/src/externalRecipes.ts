@@ -18,7 +18,7 @@ export type ExternalRecipesResponse = {
   recipes: ExternalRecipe[];
   provider: "Multiple sources";
   providersUnavailable: Array<"Edamam" | "Spoonacular" | "TheMealDB">;
-  sourceResults: Array<{ provider: "Edamam" | "Spoonacular" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured"; count: number }>;
+  sourceResults: Array<{ provider: "Edamam" | "Spoonacular" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number }>;
   safetyNotice: string;
 };
 
@@ -32,6 +32,7 @@ export function findExternalRecipes(
   audience: "general" | "kids" = "general",
   course?: "main" | "side",
   mainRecipe?: { title: string; ingredientNames: string[] },
+  dislikes: string[] = [],
 ) {
   return customFetch<ExternalRecipesResponse>("/api/recipes/external", {
     method: "POST",
@@ -40,6 +41,7 @@ export function findExternalRecipes(
     body: JSON.stringify({
       ingredients,
       allergies,
+      dislikes: dislikes.map((item) => item.trim()).filter((item) => item.length > 0 && item.length <= 80).slice(0, 30),
       ...(searchAnchors?.length ? { searchAnchors } : {}),
       excludedRecipeIds,
       excludedRecipeTitles,

@@ -96,11 +96,12 @@ export function normalizeSpoonacularRecipe(
 
 export async function searchSpoonacularRecipes(input: {
   pantry: string[]; anchors: string[]; allergies: string[]; excludedIds: Set<string>;
-  excludedTitles: Set<string>; audience: "general" | "kids";
+  excludedTitles: Set<string>; audience: "general" | "kids"; maxCandidates?: number;
 }): Promise<ExternalRecipe[]> {
+  const maxCandidates = Math.max(1, Math.min(12, input.maxCandidates ?? 12));
   const rawSearch = await spoonacularJson("findByIngredients", {
     ingredients: input.anchors.slice(0, 30).join(","),
-    number: "24",
+    number: String(maxCandidates * 2),
     ranking: "1",
     ignorePantry: "true",
   });
@@ -109,7 +110,7 @@ export async function searchSpoonacularRecipes(input: {
     && !input.excludedIds.has(`spoonacular:${item.id}`)
     && (!item.title || !input.excludedTitles.has(titleKey(item.title)))
     && (item.usedIngredientCount === undefined || item.usedIngredientCount > 0));
-  const selected = summaries.slice(0, 12);
+  const selected = summaries.slice(0, maxCandidates);
   if (!selected.length) return [];
   const rawDetails = await spoonacularJson("informationBulk", { ids: selected.map((item) => String(item.id)).join(","), includeNutrition: "false" });
   if (!Array.isArray(rawDetails)) throw new Error("Spoonacular details returned an invalid response");

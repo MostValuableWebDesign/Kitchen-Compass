@@ -12,6 +12,7 @@ const MAX_COUNTED_MISSING_INGREDIENTS = 5;
 const requestSchema = z.object({
   ingredients: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
   allergies: z.array(z.string().trim().min(1).max(80)).max(30),
+  dislikes: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   searchAnchors: z.array(z.string().trim().min(1).max(80)).min(1).max(MAX_PROVIDER_SEARCH_ANCHORS).optional(),
   excludeRecipeIds: z.array(z.string().trim().min(1).max(80)).max(120).optional(),
   excludedRecipeIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
@@ -40,7 +41,7 @@ export type ExternalRecipe = {
   safetyVerified: false;
 };
 type OnlineSource = "Edamam" | "Spoonacular" | "TheMealDB";
-type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured"; count: number };
+type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number };
 const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular and Edamam recipes are available online only.";
 
 function providerKey() {
@@ -163,6 +164,8 @@ router.post("/recipes/external", async (req, res) => {
   }
   const key = providerKey();
   if (!key && !spoonacularConfigured() && !edamamConfigured()) {
+    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null,
+      sourceResults: ["Edamam", "Spoonacular", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
       sourceResults: [
         { provider: "Edamam", status: "not_configured", count: 0 },
@@ -199,43 +202,37 @@ router.post("/recipes/external", async (req, res) => {
       if (providerAudience === "kids") recipes.splice(12);
       return recipes;
     };
-    const spoonacularEnabled = spoonacularConfigured();
-    const edamamEnabled = edamamConfigured();
-    const results = await Promise.allSettled([
-      edamamEnabled ? searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) : Promise.resolve([] as ExternalRecipe[]),
-      spoonacularEnabled ? searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) : Promise.resolve([] as ExternalRecipe[]),
-      key ? mealSearch() : Promise.resolve([] as ExternalRecipe[]),
-    ]);
-    const configured = [edamamEnabled, spoonacularEnabled, Boolean(key)];
-    const providerNames = ["Edamam", "Spoonacular", "TheMealDB"] as const;
-    const providersUnavailable = results.flatMap((result, index) => configured[index] && result.status === "rejected" ? [providerNames[index]!] : []);
-    results.forEach((result, index) => {
-      if (configured[index] && result.status === "rejected") {
-        req.log.warn({ provider: providerNames[index], reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error" }, "Published recipe provider unavailable");
-      }
-    });
-    const recipes: ExternalRecipe[] = [];
-    const seenTitles = new Set<string>();
+    const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
     const limit = parsed.data.audience === "kids" ? 12 : 30;
-    const providerRecipes = results.map((result) => result.status === "fulfilled"
-      ? result.value.filter((recipe) => !parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
-      : []);
-    const sourceResults: OnlineSourceResult[] = results.map((result, index) => ({
-      provider: providerNames[index]!,
-      status: !configured[index] ? "not_configured" : result.status === "rejected" ? "unavailable" : providerRecipes[index]!.length ? "found" : "no_results",
-      count: configured[index] ? providerRecipes[index]!.length : 0,
-    }));
-    // Edamam has priority; Spoonacular and TheMealDB fill remaining slots.
-    for (const items of providerRecipes) {
-      for (const recipe of items) {
-        const title = titleKey(recipe.title);
-        if (seenTitles.has(title)) continue;
-        seenTitles.add(title);
-        recipes.push(recipe);
-        if (recipes.length >= limit) break;
+    const sources: Array<{ provider: OnlineSource; configured: boolean; search: () => Promise<ExternalRecipe[]> }> = [
+      { provider: "Edamam", configured: edamamConfigured(), search: () => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) },
+      { provider: "Spoonacular", configured: spoonacularConfigured(), search: () => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }) },
+      { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
+    ];
+    const sourceResults: OnlineSourceResult[] = [];
+    const providersUnavailable: OnlineSource[] = [];
+    let recipes: ExternalRecipe[] = [];
+    for (const source of sources) {
+      if (!source.configured) {
+        sourceResults.push({ provider: source.provider, status: "not_configured", count: 0 });
+        continue;
       }
-      if (recipes.length >= limit) break;
+      if (recipes.length) {
+        sourceResults.push({ provider: source.provider, status: "not_searched", count: 0 });
+        continue;
+      }
+      try {
+        const found = await source.search();
+        recipes = found.filter((recipe) => (!parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
+          && !recipe.ingredients.some((ingredient) => dislikes.has(ingredientIdentity(ingredient.name)))).slice(0, limit);
+        sourceResults.push({ provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length });
+      } catch (error) {
+        providersUnavailable.push(source.provider);
+        sourceResults.push({ provider: source.provider, status: "unavailable", count: 0 });
+        req.log.warn({ provider: source.provider, reason: error instanceof Error ? error.message : "Unknown provider error" }, "Published recipe provider unavailable");
+      }
     }
+    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults }, "Published recipe source results");
     res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, safetyNotice });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
