@@ -3,6 +3,11 @@ import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import {
+  recordCandidateRemoval,
+  type RecipeNormalizationFailure,
+  type RecipeSearchDiagnostics,
+} from "./recipeSearchDiagnostics";
 
 type SpoonacularSummary = {
   id?: number;
@@ -54,19 +59,36 @@ export function normalizeSpoonacularRecipe(
   summary: SpoonacularSummary,
   pantry: string[],
   allergies: string[],
+  onFailure?: (reason: RecipeNormalizationFailure) => void,
 ): ExternalRecipe | null {
-  if (!Number.isSafeInteger(detail.id) || detail.id! <= 0 || detail.id !== summary.id || !detail.title?.trim()) return null;
+  if (!Number.isSafeInteger(detail.id) || detail.id! <= 0 || detail.id !== summary.id || !detail.title?.trim()) {
+    onFailure?.("invalid");
+    return null;
+  }
   const sourceUrl = httpsUrl(detail.sourceUrl);
   const imageUrl = httpsUrl(detail.image) ?? httpsUrl(summary.image);
-  if (!sourceUrl || !imageUrl) return null;
+  if (!sourceUrl || !imageUrl) {
+    onFailure?.("invalid");
+    return null;
+  }
   const ingredients = (detail.extendedIngredients ?? []).flatMap((item) => item?.name?.trim()
     ? [{ name: item.name.trim(), measure: item.original?.trim() ?? "" }]
     : []);
-  if (!ingredients.length || requestedAllergenConflicts(assessRecipeAllergens(ingredients.flatMap((item) => [item.name, item.measure]), []), allergies)) return null;
+  if (!ingredients.length) {
+    onFailure?.("invalid");
+    return null;
+  }
+  if (requestedAllergenConflicts(assessRecipeAllergens(ingredients.flatMap((item) => [item.name, item.measure]), []), allergies)) {
+    onFailure?.("allergy");
+    return null;
+  }
   const steps = (detail.analyzedInstructions ?? []).flatMap((part) => part.steps ?? [])
     .flatMap((item) => item.step?.trim() ? [item.step.trim()] : []);
   const instructions = steps.length ? steps.join("\n") : (detail.instructions ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  if (!instructions) return null;
+  if (!instructions) {
+    onFailure?.("invalid");
+    return null;
+  }
   const pantryIds = new Set(pantry.map(identity));
   const matchedIngredients: string[] = [];
   const missingIngredients: string[] = [];
@@ -97,7 +119,7 @@ export function normalizeSpoonacularRecipe(
 export async function searchSpoonacularRecipes(input: {
   pantry: string[]; anchors: string[]; allergies: string[]; excludedIds: Set<string>;
   excludedTitles: Set<string>; audience: "general" | "kids"; maxCandidates?: number;
-}): Promise<ExternalRecipe[]> {
+}, diagnostics?: RecipeSearchDiagnostics): Promise<ExternalRecipe[]> {
   const maxCandidates = Math.max(1, Math.min(12, input.maxCandidates ?? 12));
   const rawSearch = await spoonacularJson("findByIngredients", {
     ingredients: input.anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(","),
@@ -106,24 +128,67 @@ export async function searchSpoonacularRecipes(input: {
     ignorePantry: "true",
   });
   if (!Array.isArray(rawSearch)) throw new Error("Spoonacular search returned an invalid response");
-  const summaries = (rawSearch as SpoonacularSummary[]).filter((item) => Number.isSafeInteger(item?.id) && item.id! > 0
-    && !input.excludedIds.has(`spoonacular:${item.id}`)
-    && (!item.title || !input.excludedTitles.has(titleKey(item.title)))
-    && (item.usedIngredientCount === undefined || item.usedIngredientCount > 0));
+  if (diagnostics) diagnostics.candidatesReceived += rawSearch.length;
+  const summaries: SpoonacularSummary[] = [];
+  for (const item of rawSearch as SpoonacularSummary[]) {
+    if (!Number.isSafeInteger(item?.id) || item.id! <= 0) {
+      recordCandidateRemoval(diagnostics, "invalid");
+      continue;
+    }
+    if (input.excludedIds.has(`spoonacular:${item.id}`) || (item.title && input.excludedTitles.has(titleKey(item.title)))) {
+      recordCandidateRemoval(diagnostics, "excluded");
+      continue;
+    }
+    if (item.usedIngredientCount !== undefined && item.usedIngredientCount <= 0) {
+      recordCandidateRemoval(diagnostics, "noPantryMatch");
+      continue;
+    }
+    summaries.push(item);
+  }
   const selected = summaries.slice(0, maxCandidates);
+  recordCandidateRemoval(diagnostics, "candidateLimit", summaries.length - selected.length);
   if (!selected.length) return [];
   const rawDetails = await spoonacularJson("informationBulk", { ids: selected.map((item) => String(item.id)).join(","), includeNutrition: "false" });
   if (!Array.isArray(rawDetails)) throw new Error("Spoonacular details returned an invalid response");
   const byId = new Map(selected.map((item) => [item.id, item]));
-  const results = (rawDetails as SpoonacularDetail[])
-    .flatMap((detail) => {
-      const summary = byId.get(detail?.id);
-      return summary ? [normalizeSpoonacularRecipe(detail, summary, input.pantry, input.allergies)] : [];
-    })
-    .filter((item): item is ExternalRecipe => item !== null)
-    .filter((item) => item.matchedIngredients.length > 0 && item.missingIngredients.length <= 7)
-    .filter((item) => !input.excludedTitles.has(titleKey(item.title)))
-    .filter((item) => input.audience !== "kids" || kidFriendlyScore(item.title, item.ingredients.map((ingredient) => ingredient.name)) > 0)
-    .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-  return results.slice(0, input.audience === "kids" ? 12 : 30);
+  const details = new Map<number, SpoonacularDetail>();
+  for (const detail of rawDetails as SpoonacularDetail[]) {
+    if (byId.has(detail?.id) && !details.has(detail.id!)) details.set(detail.id!, detail);
+  }
+
+  const qualified: ExternalRecipe[] = [];
+  for (const summary of selected) {
+    const detail = details.get(summary.id!);
+    if (!detail) {
+      recordCandidateRemoval(diagnostics, "invalid");
+      continue;
+    }
+    const recipe = normalizeSpoonacularRecipe(detail, summary, input.pantry, input.allergies, (reason) => {
+      recordCandidateRemoval(diagnostics, reason);
+    });
+    if (!recipe) continue;
+    if (!recipe.matchedIngredients.length) {
+      recordCandidateRemoval(diagnostics, "noPantryMatch");
+      continue;
+    }
+    if (recipe.missingIngredients.length > 7) {
+      recordCandidateRemoval(diagnostics, "tooManyMissing");
+      continue;
+    }
+    if (input.excludedTitles.has(titleKey(recipe.title))) {
+      recordCandidateRemoval(diagnostics, "excluded");
+      continue;
+    }
+    if (input.audience === "kids" && kidFriendlyScore(recipe.title, recipe.ingredients.map((ingredient) => ingredient.name)) <= 0) {
+      recordCandidateRemoval(diagnostics, "notKidFriendly");
+      continue;
+    }
+    qualified.push(recipe);
+  }
+
+  qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+  const results = qualified.slice(0, input.audience === "kids" ? 12 : 30);
+  recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
+  if (diagnostics) diagnostics.eligible = results.length;
+  return results;
 }

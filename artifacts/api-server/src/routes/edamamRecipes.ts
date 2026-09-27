@@ -4,6 +4,11 @@ import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import { MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import {
+  recordCandidateRemoval,
+  type RecipeNormalizationFailure,
+  type RecipeSearchDiagnostics,
+} from "./recipeSearchDiagnostics";
 
 type EdamamRecipe = {
   uri?: string;
@@ -32,17 +37,35 @@ export function edamamConfigured() {
   return Boolean(process.env.EDAMAM_APP_ID?.trim() && process.env.EDAMAM_APP_KEY?.trim());
 }
 
-export function normalizeEdamamRecipe(raw: EdamamRecipe, pantry: string[], allergies: string[]): ExternalRecipe | null {
-  if (!raw.uri?.trim() || !raw.label?.trim()) return null;
+export function normalizeEdamamRecipe(
+  raw: EdamamRecipe,
+  pantry: string[],
+  allergies: string[],
+  onFailure?: (reason: RecipeNormalizationFailure) => void,
+): ExternalRecipe | null {
+  if (!raw.uri?.trim() || !raw.label?.trim()) {
+    onFailure?.("invalid");
+    return null;
+  }
   const sourceUrl = httpsUrl(raw.url);
   const imageUrl = httpsUrl(raw.image);
-  if (!sourceUrl || !imageUrl) return null;
+  if (!sourceUrl || !imageUrl) {
+    onFailure?.("invalid");
+    return null;
+  }
   const ingredients = (raw.ingredients ?? []).flatMap((item) => item?.food?.trim()
     ? [{ name: item.food.trim(), measure: item.text?.trim() ?? "" }]
     : []);
-  if (!ingredients.length || requestedAllergenConflicts(assessRecipeAllergens([
+  if (!ingredients.length) {
+    onFailure?.("invalid");
+    return null;
+  }
+  if (requestedAllergenConflicts(assessRecipeAllergens([
     ...ingredients.flatMap((item) => [item.name, item.measure]), ...(raw.ingredientLines ?? []),
-  ], []), allergies)) return null;
+  ], []), allergies)) {
+    onFailure?.("allergy");
+    return null;
+  }
   const pantryIds = new Set(pantry.map(identity));
   const matchedIngredients: string[] = [];
   const missingIngredients: string[] = [];
@@ -74,7 +97,7 @@ export function normalizeEdamamRecipe(raw: EdamamRecipe, pantry: string[], aller
 export async function searchEdamamRecipes(input: {
   pantry: string[]; anchors: string[]; allergies: string[]; excludedIds: Set<string>;
   excludedTitles: Set<string>; audience: "general" | "kids";
-}): Promise<ExternalRecipe[]> {
+}, diagnostics?: RecipeSearchDiagnostics): Promise<ExternalRecipe[]> {
   const appId = process.env.EDAMAM_APP_ID?.trim();
   const appKey = process.env.EDAMAM_APP_KEY?.trim();
   if (!appId || !appKey) throw new Error("Edamam is not configured");
@@ -88,12 +111,43 @@ export async function searchEdamamRecipes(input: {
   if (!response.ok) throw new Error(`Edamam responded ${response.status}`);
   const data = await response.json() as { hits?: Array<{ recipe?: EdamamRecipe }> };
   if (!Array.isArray(data.hits)) throw new Error("Edamam search returned an invalid response");
-  return data.hits.slice(0, 30)
-    .flatMap((hit) => hit?.recipe ? [normalizeEdamamRecipe(hit.recipe, input.pantry, input.allergies)] : [])
-    .filter((recipe): recipe is ExternalRecipe => recipe !== null)
-    .filter((recipe) => recipe.matchedIngredients.length > 0 && recipe.missingIngredients.length <= 7)
-    .filter((recipe) => !input.excludedIds.has(recipe.id) && !input.excludedTitles.has(titleKey(recipe.title)))
-    .filter((recipe) => input.audience !== "kids" || kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0)
-    .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length)
-    .slice(0, input.audience === "kids" ? 12 : 30);
+  const hits = data.hits;
+  const selectedHits = hits.slice(0, 30);
+  if (diagnostics) diagnostics.candidatesReceived += hits.length;
+  recordCandidateRemoval(diagnostics, "candidateLimit", hits.length - selectedHits.length);
+
+  const qualified: ExternalRecipe[] = [];
+  for (const hit of selectedHits) {
+    if (!hit?.recipe) {
+      recordCandidateRemoval(diagnostics, "invalid");
+      continue;
+    }
+    const recipe = normalizeEdamamRecipe(hit.recipe, input.pantry, input.allergies, (reason) => {
+      recordCandidateRemoval(diagnostics, reason);
+    });
+    if (!recipe) continue;
+    if (!recipe.matchedIngredients.length) {
+      recordCandidateRemoval(diagnostics, "noPantryMatch");
+      continue;
+    }
+    if (recipe.missingIngredients.length > 7) {
+      recordCandidateRemoval(diagnostics, "tooManyMissing");
+      continue;
+    }
+    if (input.excludedIds.has(recipe.id) || input.excludedTitles.has(titleKey(recipe.title))) {
+      recordCandidateRemoval(diagnostics, "excluded");
+      continue;
+    }
+    if (input.audience === "kids" && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) <= 0) {
+      recordCandidateRemoval(diagnostics, "notKidFriendly");
+      continue;
+    }
+    qualified.push(recipe);
+  }
+
+  qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+  const results = qualified.slice(0, input.audience === "kids" ? 12 : 30);
+  recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
+  if (diagnostics) diagnostics.eligible = results.length;
+  return results;
 }

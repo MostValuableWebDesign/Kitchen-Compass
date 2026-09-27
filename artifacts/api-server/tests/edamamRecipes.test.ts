@@ -6,6 +6,7 @@ import { createScanAccessToken } from "../src/middleware/scanSecurity";
 import { searchEdamamRecipes } from "../src/routes/edamamRecipes";
 import { suitableMealCourse, type ExternalRecipe } from "../src/routes/externalRecipes";
 import { MAX_PROVIDER_SEARCH_ANCHORS } from "../src/routes/providerSearchLimits";
+import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnostics";
 
 test("complete meal course checks distinguish mains from mild complementary sides", () => {
   const recipe = (title: string, ingredients: string[]): ExternalRecipe => ({
@@ -120,6 +121,64 @@ test("Edamam counts matches from the full pantry beyond the 30 query anchors", a
     });
     assert.deepEqual(results[0]?.matchedIngredients, ["Anchor 1", "Ingredient 64"]);
     assert.deepEqual(results[0]?.missingIngredients, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+  }
+});
+
+test("Edamam diagnostics count privacy-safe candidate rejection stages", async () => {
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  const recipe = (uri: string, label: string, foods: string[], image = "https://example.com/recipe.jpg") => ({
+    uri,
+    label,
+    image,
+    url: "https://example.com/recipe",
+    ingredients: foods.map((food) => ({ food })),
+  });
+  globalThis.fetch = async () => new Response(JSON.stringify({ hits: [
+    { recipe: recipe("eligible", "Eligible pasta", ["Pasta"]) },
+    { recipe: recipe("allergy", "Peanut pasta", ["Pasta", "Peanut butter"]) },
+    { recipe: recipe("no-match", "No pantry match", ["Farro"]) },
+    { recipe: recipe("too-many", "Too many missing", ["Pasta", "Food 1", "Food 2", "Food 3", "Food 4", "Food 5", "Food 6", "Food 7", "Food 8"]) },
+    { recipe: recipe("excluded", "Excluded pasta", ["Pasta"]) },
+    { recipe: recipe("invalid", "Invalid image", ["Pasta"], "http://example.com/invalid.jpg") },
+  ] }), { status: 200 });
+  try {
+    const diagnostics = createRecipeSearchDiagnostics();
+    const results = await searchEdamamRecipes({
+      pantry: ["Pasta"],
+      anchors: ["Pasta"],
+      allergies: ["peanut"],
+      excludedIds: new Set<string>(),
+      excludedTitles: new Set(["excluded pasta"]),
+      audience: "general",
+    }, diagnostics);
+
+    assert.deepEqual(results.map((item) => item.title), ["Eligible pasta"]);
+    assert.deepEqual(diagnostics, {
+      candidatesReceived: 6,
+      candidatesRemoved: {
+        candidateLimit: 0,
+        invalid: 1,
+        allergy: 1,
+        duplicate: 0,
+        noPantryMatch: 1,
+        tooManyMissing: 1,
+        excluded: 1,
+        notKidFriendly: 0,
+        courseMismatch: 0,
+        disliked: 0,
+        resultLimit: 0,
+      },
+      eligible: 1,
+    });
+    assert.doesNotMatch(JSON.stringify(diagnostics), /Pasta|Peanut|test-id|test-key/);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;

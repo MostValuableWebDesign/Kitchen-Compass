@@ -5,6 +5,7 @@ import app from "../src/app";
 import { createScanAccessToken } from "../src/middleware/scanSecurity";
 import { searchSpoonacularRecipes } from "../src/routes/spoonacularRecipes";
 import { MAX_PROVIDER_SEARCH_ANCHORS } from "../src/routes/providerSearchLimits";
+import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnostics";
 
 process.env.SESSION_SECRET = "spoonacular-recipes-test-session";
 const server = app.listen(0);
@@ -230,6 +231,77 @@ test("Spoonacular counts matches from the full pantry beyond the 30 query anchor
     });
     assert.deepEqual(results[0]?.matchedIngredients, ["Anchor 1", "Ingredient 64"]);
     assert.deepEqual(results[0]?.missingIngredients, []);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
+  }
+});
+
+test("Spoonacular diagnostics count provider and recipe qualification rejections", async () => {
+  const oldKey = process.env.SPOONACULAR_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SPOONACULAR_API_KEY = "test-key";
+  const details = [
+    { id: 801, title: "Eligible pasta", ingredients: ["Pasta"] },
+    { id: 804, title: "Peanut pasta", ingredients: ["Pasta", "Peanut butter"] },
+    { id: 805, title: "Unmatched farro", ingredients: ["Farro"] },
+    { id: 806, title: "Too many missing", ingredients: ["Pasta", "Food 1", "Food 2", "Food 3", "Food 4", "Food 5", "Food 6", "Food 7", "Food 8"] },
+  ];
+  globalThis.fetch = async (input) => {
+    const target = new URL(String(input));
+    if (target.pathname.endsWith("/findByIngredients")) {
+      return new Response(JSON.stringify([
+        { id: 801, title: "Eligible pasta", usedIngredientCount: 1 },
+        { id: 802, title: "No provider match", usedIngredientCount: 0 },
+        { id: 803, title: "Excluded by id", usedIngredientCount: 1 },
+        { id: 804, title: "Peanut pasta", usedIngredientCount: 1 },
+        { id: 805, title: "Unmatched farro", usedIngredientCount: 1 },
+        { id: 806, title: "Too many missing", usedIngredientCount: 1 },
+        { id: 807, title: "Excluded by title", usedIngredientCount: 1 },
+        { id: 808, title: "Candidate limit", usedIngredientCount: 1 },
+      ]), { status: 200 });
+    }
+    const ids = new Set((target.searchParams.get("ids") ?? "").split(",").map(Number));
+    return new Response(JSON.stringify(details.filter((item) => ids.has(item.id)).map((item) => ({
+      id: item.id,
+      title: item.title,
+      image: "https://example.com/recipe.jpg",
+      sourceUrl: "https://example.com/recipe",
+      instructions: "Cook.",
+      extendedIngredients: item.ingredients.map((name) => ({ name })),
+    }))), { status: 200 });
+  };
+  try {
+    const diagnostics = createRecipeSearchDiagnostics();
+    const results = await searchSpoonacularRecipes({
+      pantry: ["Pasta"],
+      anchors: ["Pasta"],
+      allergies: ["peanut"],
+      excludedIds: new Set(["spoonacular:803"]),
+      excludedTitles: new Set(["excluded by title"]),
+      audience: "general",
+      maxCandidates: 4,
+    }, diagnostics);
+
+    assert.deepEqual(results.map((item) => item.title), ["Eligible pasta"]);
+    assert.deepEqual(diagnostics, {
+      candidatesReceived: 8,
+      candidatesRemoved: {
+        candidateLimit: 1,
+        invalid: 0,
+        allergy: 1,
+        duplicate: 0,
+        noPantryMatch: 2,
+        tooManyMissing: 1,
+        excluded: 2,
+        notKidFriendly: 0,
+        courseMismatch: 0,
+        disliked: 0,
+        resultLimit: 0,
+      },
+      eligible: 1,
+    });
+    assert.doesNotMatch(JSON.stringify(diagnostics), /Pasta|Peanut|test-key/);
   } finally {
     globalThis.fetch = previousFetch;
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;

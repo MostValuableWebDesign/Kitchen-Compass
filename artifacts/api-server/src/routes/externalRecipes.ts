@@ -7,6 +7,12 @@ import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRe
 import { edamamConfigured, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import { MAX_PROVIDER_PANTRY_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import {
+  createRecipeSearchDiagnostics,
+  recordCandidateRemoval,
+  type RecipeNormalizationFailure,
+  type RecipeSearchDiagnostics,
+} from "./recipeSearchDiagnostics";
 
 const router: IRouter = Router();
 const MAX_COUNTED_MISSING_INGREDIENTS = 7;
@@ -76,15 +82,35 @@ export function suitableMealCourse(recipe: ExternalRecipe, course: "main" | "sid
   return !names.some((name) => meatTerms.test(name) || mainProteins.includes(ingredientIdentity(name)));
 }
 
-function interleaveMealIds(searches: MealSummary[][], limit: number, excludedIds = new Set<string>(), excludedTitles = new Set<string>()) {
+function interleaveMealIds(
+  searches: MealSummary[][],
+  limit: number,
+  excludedIds = new Set<string>(),
+  excludedTitles = new Set<string>(),
+  diagnostics?: RecipeSearchDiagnostics,
+) {
   const ids: string[] = [];
   const seen = new Set<string>();
-  for (let index = 0; ids.length < limit && searches.some((results) => index < results.length); index += 1) {
+  const maxLength = Math.max(0, ...searches.map((results) => results.length));
+  for (let index = 0; index < maxLength; index += 1) {
     for (const results of searches) {
-      const id = results[index]?.idMeal;
-      if (id && !seen.has(id) && !excludedIds.has(id)
-        && (!results[index]?.strMeal || !excludedTitles.has(titleKey(results[index].strMeal!)))) { ids.push(id); seen.add(id); }
-      if (ids.length >= limit) break;
+      const summary = results[index];
+      if (!summary?.idMeal) {
+        recordCandidateRemoval(diagnostics, "invalid");
+        continue;
+      }
+      const id = summary.idMeal;
+      if (excludedIds.has(id) || (summary.strMeal && excludedTitles.has(titleKey(summary.strMeal)))) {
+        recordCandidateRemoval(diagnostics, "excluded");
+        continue;
+      }
+      if (seen.has(id)) {
+        recordCandidateRemoval(diagnostics, "duplicate");
+        continue;
+      }
+      seen.add(id);
+      if (ids.length < limit) ids.push(id);
+      else recordCandidateRemoval(diagnostics, "candidateLimit");
     }
   }
   return ids;
@@ -104,13 +130,28 @@ async function providerJson(url: string): Promise<{ meals: unknown }> {
   return response.json() as Promise<{ meals: unknown }>;
 }
 
-export function normalizeExternalMeal(meal: MealDetail, pantry: string[], allergies: string[]): ExternalRecipe | null {
-  if (!meal.idMeal || !meal.strMeal || !meal.strInstructions?.trim()) return null;
+export function normalizeExternalMeal(
+  meal: MealDetail,
+  pantry: string[],
+  allergies: string[],
+  onFailure?: (reason: RecipeNormalizationFailure) => void,
+): ExternalRecipe | null {
+  if (!meal.idMeal || !meal.strMeal || !meal.strInstructions?.trim()) {
+    onFailure?.("invalid");
+    return null;
+  }
   const ingredients = Array.from({ length: 20 }, (_, index) => ({
     name: meal[`strIngredient${index + 1}`]?.trim() ?? "",
     measure: meal[`strMeasure${index + 1}`]?.trim() ?? "",
   })).filter((item) => item.name);
-  if (!ingredients.length || requestedAllergenConflicts(assessRecipeAllergens(ingredients.map((item) => item.name), []), allergies)) return null;
+  if (!ingredients.length) {
+    onFailure?.("invalid");
+    return null;
+  }
+  if (requestedAllergenConflicts(assessRecipeAllergens(ingredients.map((item) => item.name), []), allergies)) {
+    onFailure?.("allergy");
+    return null;
+  }
   const pantryIds = new Set(pantry.map(ingredientIdentity));
   const matchedIngredients: string[] = [];
   const missingIngredients: string[] = [];
@@ -171,62 +212,96 @@ router.post("/recipes/external", async (req, res) => {
   try {
     const anchors = parsed.data.searchAnchors ?? (searchIngredients.length ? searchIngredients : pantry).slice(0, MAX_PROVIDER_SEARCH_ANCHORS);
     const providerAudience = parsed.data.course === "side" ? "general" : parsed.data.audience;
-    const mealSearch = async () => {
+    const mealSearch = async (diagnostics: RecipeSearchDiagnostics) => {
       const searches = await Promise.all(anchors.map(async (ingredient) => {
         const value = encodeURIComponent(ingredient.replace(/\s+/g, "_"));
         const response = await providerJson(`${base}/filter.php?i=${value}`);
         return Array.isArray(response.meals) ? response.meals as MealSummary[] : [];
       }));
-      const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles);
+      if (diagnostics) diagnostics.candidatesReceived += searches.reduce((count, results) => count + results.length, 0);
+      const ids = interleaveMealIds(searches, 30, excludedIds, excludedTitles, diagnostics);
       const details = await Promise.all(ids.map(async (id) => {
         const response = await providerJson(`${base}/lookup.php?i=${encodeURIComponent(id)}`);
         return Array.isArray(response.meals) ? response.meals[0] as MealDetail | undefined : undefined;
       }));
-      const recipes = details
-        .flatMap((meal) => meal ? [normalizeExternalMeal(meal, pantry, parsed.data.allergies)].filter((item): item is ExternalRecipe => item !== null) : [])
-        .filter((recipe) => recipe.missingIngredients.length <= MAX_COUNTED_MISSING_INGREDIENTS)
-        .filter((recipe) => !excludedTitles.has(titleKey(recipe.title)))
-        .filter((recipe) => providerAudience !== "kids" || (recipe.matchedIngredients.length > 0 && kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) > 0))
-        .sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-      if (providerAudience === "kids") recipes.splice(12);
+      const qualified: ExternalRecipe[] = [];
+      for (const meal of details) {
+        if (!meal) {
+          recordCandidateRemoval(diagnostics, "invalid");
+          continue;
+        }
+        const recipe = normalizeExternalMeal(meal, pantry, parsed.data.allergies, (reason) => {
+          recordCandidateRemoval(diagnostics, reason);
+        });
+        if (!recipe) continue;
+        if (recipe.missingIngredients.length > MAX_COUNTED_MISSING_INGREDIENTS) {
+          recordCandidateRemoval(diagnostics, "tooManyMissing");
+          continue;
+        }
+        if (excludedTitles.has(titleKey(recipe.title))) {
+          recordCandidateRemoval(diagnostics, "excluded");
+          continue;
+        }
+        if (providerAudience === "kids" && (!recipe.matchedIngredients.length || kidFriendlyScore(recipe.title, recipe.ingredients.map((item) => item.name)) <= 0)) {
+          recordCandidateRemoval(diagnostics, "notKidFriendly");
+          continue;
+        }
+        qualified.push(recipe);
+      }
+      qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
+      const recipes = qualified.slice(0, providerAudience === "kids" ? 12 : 30);
+      recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - recipes.length);
+      diagnostics.eligible = recipes.length;
       return recipes;
     };
     const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
     const limit = parsed.data.audience === "kids" ? 12 : 30;
-    const sources: Array<{ provider: OnlineSource; configured: boolean; search: () => Promise<ExternalRecipe[]> }> = [
-      { provider: "Edamam", configured: edamamConfigured(), search: () => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }) },
-      { provider: "Spoonacular", configured: spoonacularConfigured(), search: () => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }) },
+    const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
+      { provider: "Edamam", configured: edamamConfigured(), search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
+      { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
     ];
-    const searched = await Promise.all(sources.map(async (source): Promise<{ result: OnlineSourceResult; recipes: ExternalRecipe[] }> => {
-      if (!source.configured) return { result: { provider: source.provider, status: "not_configured", count: 0 }, recipes: [] };
-      try {
-        const recipes = (await source.search()).filter((recipe) => (!parsed.data.course || suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors))
-          && !recipe.ingredients.some((ingredient) => dislikes.has(ingredientIdentity(ingredient.name))));
-        return { result: { provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length }, recipes };
-      } catch (error) {
-        req.log.warn({ provider: source.provider, reason: error instanceof Error ? error.message : "Unknown provider error" }, "Published recipe provider unavailable");
-        return { result: { provider: source.provider, status: "unavailable", count: 0 }, recipes: [] };
+    const sourceResults: OnlineSourceResult[] = [];
+    const providerDiagnostics: Array<{ provider: OnlineSource; diagnostics: RecipeSearchDiagnostics }> = [];
+    const providersUnavailable: OnlineSource[] = [];
+    let recipes: ExternalRecipe[] = [];
+    for (const source of sources) {
+      if (!source.configured) {
+        sourceResults.push({ provider: source.provider, status: "not_configured", count: 0 });
+        continue;
       }
-    }));
-    const sourceResults = searched.map(({ result }) => result);
-    const providersUnavailable = sourceResults.filter((result) => result.status === "unavailable").map((result) => result.provider);
-    const recipes: ExternalRecipe[] = [];
-    const seenIds = new Set<string>();
-    const seenTitles = new Set<string>();
-    for (let index = 0; recipes.length < limit && searched.some((source) => index < source.recipes.length); index += 1) {
-      for (const source of searched) {
-        const recipe = source.recipes[index];
-        if (!recipe) continue;
-        const title = titleKey(recipe.title);
-        if (seenIds.has(recipe.id) || seenTitles.has(title)) continue;
-        seenIds.add(recipe.id);
-        seenTitles.add(title);
-        recipes.push(recipe);
-        if (recipes.length === limit) break;
+      if (recipes.length) {
+        sourceResults.push({ provider: source.provider, status: "not_searched", count: 0 });
+        continue;
+      }
+      const diagnostics = createRecipeSearchDiagnostics();
+      try {
+        const found = await source.search(diagnostics);
+        const afterRouteFilters: ExternalRecipe[] = [];
+        for (const recipe of found) {
+          if (parsed.data.course && !suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors)) {
+            recordCandidateRemoval(diagnostics, "courseMismatch");
+            continue;
+          }
+          if (recipe.ingredients.some((ingredient) => dislikes.has(ingredientIdentity(ingredient.name)))) {
+            recordCandidateRemoval(diagnostics, "disliked");
+            continue;
+          }
+          afterRouteFilters.push(recipe);
+        }
+        recipes = afterRouteFilters.slice(0, limit);
+        recordCandidateRemoval(diagnostics, "resultLimit", afterRouteFilters.length - recipes.length);
+        diagnostics.eligible = recipes.length;
+        providerDiagnostics.push({ provider: source.provider, diagnostics });
+        sourceResults.push({ provider: source.provider, status: recipes.length ? "found" : "no_results", count: recipes.length });
+      } catch (error) {
+        providersUnavailable.push(source.provider);
+        sourceResults.push({ provider: source.provider, status: "unavailable", count: 0 });
+        providerDiagnostics.push({ provider: source.provider, diagnostics });
+        req.log.warn({ provider: source.provider }, "Published recipe provider unavailable");
       }
     }
-    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults }, "Published recipe source results");
+    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults, providerDiagnostics }, "Published recipe source results");
     res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, safetyNotice });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
