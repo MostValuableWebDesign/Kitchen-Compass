@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { analyzeIngredientPhotos, IngredientSuggestion } from '@workspace/api-client-react';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { Chip, FoodIdentityIcon, SectionTitle } from '@/components/KitchenUI';
 import { StorageLocation, useKitchen } from '@/context/KitchenContext';
 import { useColors } from '@/hooks/useColors';
@@ -18,6 +19,15 @@ import { lookupBarcodeProduct, normalizeFoodBarcode, type BarcodeProduct } from 
 
 const MAX_SCAN_PHOTOS = 10;
 type ScanPhotoAsset = { uri: string; width: number; height: number };
+type ManualIngredientDraft = {
+  id: string;
+  name: string;
+  quantity: string;
+  location: StorageLocation;
+  source: 'manual' | 'barcode';
+  barcode?: string;
+  brand?: string;
+};
 
 async function prepareScanPhoto(asset: ScanPhotoAsset, index: number) {
   for (const [width, quality] of [[1200, 0.6], [900, 0.45], [700, 0.35]]) {
@@ -69,6 +79,8 @@ export default function ScanScreen() {
   const [quantity, setQuantity] = useState('1 ea');
   const [quantityEdited, setQuantityEdited] = useState(false);
   const [location, setLocation] = useState<StorageLocation>('Refrigerator');
+  const [manualEntries, setManualEntries] = useState<ManualIngredientDraft[]>([]);
+  const manualEntryId = useRef(0);
   const [mode, setMode] = useState<'choose' | 'review'>('choose');
   const [keepPhotos, setKeepPhotos] = useState(false);
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
@@ -106,6 +118,7 @@ export default function ScanScreen() {
     setName('');
     setQuantity('1 ea');
     setQuantityEdited(false);
+    setManualEntries([]);
     setMode('review');
     const startedAt = Date.now();
     setAnalysisProgressClock(startedAt);
@@ -312,11 +325,62 @@ export default function ScanScreen() {
       : undefined;
     return quantityWithDefaultUnit(photoQuantity, defaultUnit);
   };
-  const matchingManualInventory = (candidateName: string) => candidateName.trim()
-    ? ingredients.find((item) => item.status !== 'used' && item.location === location
-      && ((scannedBarcode && item.barcode === scannedBarcode)
+  const matchingManualInventory = (candidateName: string, candidateLocation = location, candidateBarcode?: string) => candidateName.trim()
+    ? ingredients.find((item) => item.status !== 'used' && item.location === candidateLocation
+      && ((candidateBarcode && item.barcode === candidateBarcode)
         || normalizeIngredientName(item.name) === normalizeIngredientName(candidateName)))
     : undefined;
+  const matchingQueuedManualEntry = (candidateName: string, candidateLocation = location) => [...manualEntries].reverse().find((entry) =>
+    entry.location === candidateLocation
+    && normalizeIngredientName(entry.name) === normalizeIngredientName(candidateName),
+  );
+  const matchingManualStock = (candidateName: string, candidateLocation = location, candidateBarcode?: string) => {
+    const existing = matchingManualInventory(candidateName, candidateLocation, candidateBarcode);
+    if (existing) return existing;
+    const queued = matchingQueuedManualEntry(candidateName, candidateLocation);
+    return queued ? { name: queued.name, ...parseQuantityText(queued.quantity) } : undefined;
+  };
+  const stageManualIngredient = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      Alert.alert('Add an ingredient name', 'Enter an ingredient before adding it to this batch.');
+      return;
+    }
+    const existing = matchingManualStock(trimmedName, location, scannedBarcode ?? undefined);
+    const defaultUnit = existing?.quantityKnown && existing.unit ? existing.unit : 'ea';
+    const quantityText = quantityWithDefaultUnit(
+      quantityEdited ? quantity : `1 ${defaultUnit}`,
+      defaultUnit,
+    );
+    if (hasInvalidMinimumQuantity(quantityText)) {
+      Alert.alert('Quantity must be at least 1', `Enter 1 or more for ${trimmedName}.`);
+      return;
+    }
+    if (existing && !canCombineIngredientQuantities(existing, parseQuantityText(quantityText))) {
+      Alert.alert('Quantity needs review', `${existing.name} is already in this location with a different or unknown unit. Enter a compatible amount before adding more.`);
+      return;
+    }
+    const id = `manual-${manualEntryId.current + 1}`;
+    manualEntryId.current += 1;
+    setManualEntries((current) => [...current, {
+      id,
+      name: existing?.name ?? trimmedName,
+      quantity: quantityText,
+      location,
+      source: scannedBarcode ? 'barcode' : 'manual',
+      ...(scannedBarcode ? { barcode: scannedBarcode } : {}),
+      ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}),
+    }]);
+    setName('');
+    setQuantity('1 ea');
+    setQuantityEdited(false);
+    if (scannedBarcode) {
+      setScannedBarcode(null);
+      setBarcodeProduct(null);
+      setBarcodeMessage('');
+      setBarcodeInput('');
+    }
+  };
   const removeSuggestion = (suggestionId: string) => {
     setSuggestions((current) => current.filter((item) => item.suggestionId !== suggestionId));
   };
@@ -340,6 +404,7 @@ export default function ScanScreen() {
     setName('');
     setQuantity('1 ea');
     setQuantityEdited(false);
+    setManualEntries([]);
     setKeepPhotos(false);
     setBarcodeOpen(false);
     setBarcodeProduct(null);
@@ -349,7 +414,24 @@ export default function ScanScreen() {
   };
   const saveIngredient = () => {
     if (saveGuard.current || recognitionState === 'analyzing') return;
-    if (!name.trim() && !suggestions.length) {
+    const currentManualStock = matchingManualStock(name, location, scannedBarcode ?? undefined);
+    const currentManualDefaultUnit = currentManualStock?.quantityKnown && currentManualStock.unit
+      ? currentManualStock.unit
+      : 'ea';
+    const currentManualDraft: ManualIngredientDraft | null = name.trim() ? {
+      id: 'current-manual-draft',
+      name: name.trim(),
+      quantity: quantityWithDefaultUnit(
+        quantityEdited ? quantity : `1 ${currentManualDefaultUnit}`,
+        currentManualDefaultUnit,
+      ),
+      location,
+      source: scannedBarcode ? 'barcode' : 'manual',
+      ...(scannedBarcode ? { barcode: scannedBarcode } : {}),
+      ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}),
+    } : null;
+    const manualDrafts = currentManualDraft ? [...manualEntries, currentManualDraft] : manualEntries;
+    if (!manualDrafts.length && !suggestions.length) {
       Alert.alert('Review an ingredient first', 'Confirm at least one recognized item or add an ingredient manually.');
       return;
     }
@@ -358,19 +440,9 @@ export default function ScanScreen() {
       Alert.alert('Quantity must be at least 1', `Enter 1 or more for ${invalidSuggestion.displayName}. Blank quantities default to 1 ea.`);
       return;
     }
-    if (name.trim() && hasInvalidMinimumQuantity(quantity)) {
-      Alert.alert('Quantity must be at least 1', 'Enter 1 or more. Blank quantities default to 1 ea.');
-      return;
-    }
-    const manualExisting = matchingManualInventory(name);
-    const manualDefaultUnit = manualExisting?.quantityKnown && manualExisting.unit ? manualExisting.unit : 'ea';
-    const manualQuantityText = quantityWithDefaultUnit(
-      quantityEdited ? quantity : `1 ${manualDefaultUnit}`,
-      manualDefaultUnit,
-    );
-    const manualQuantity = parseQuantityText(manualQuantityText);
-    if (name.trim() && manualExisting && !canCombineIngredientQuantities(manualExisting, manualQuantity)) {
-      Alert.alert('Quantity needs review', `${manualExisting.name} is already in your kitchen with a different or unknown unit. Edit the existing quantity or enter a compatible amount before adding more.`);
+    const invalidManualDraft = manualDrafts.find((draft) => hasInvalidMinimumQuantity(draft.quantity));
+    if (invalidManualDraft) {
+      Alert.alert('Quantity must be at least 1', `Enter 1 or more for ${invalidManualDraft.name}. Blank quantities default to 1 ea.`);
       return;
     }
     const unresolvedCorrection = suggestions.find((suggestion) => {
@@ -395,6 +467,26 @@ export default function ScanScreen() {
       known.add(key);
       return true;
     });
+    const manualRowsToSave = manualDrafts.filter((draft) => !acceptedSuggestions.some((suggestion) =>
+      normalizeIngredientName(suggestion.displayName) === normalizeIngredientName(draft.name)
+      && suggestion.storageLocation === draft.location,
+    ));
+    for (const [index, draft] of manualRowsToSave.entries()) {
+      const incoming = parseQuantityText(draft.quantity);
+      const existing = matchingManualInventory(draft.name, draft.location, draft.barcode);
+      if (existing && !canCombineIngredientQuantities(existing, incoming)) {
+        Alert.alert('Quantity needs review', `${existing.name} is already in your kitchen. Edit its quantity or use a compatible amount before adding more.`);
+        return;
+      }
+      const previousBatchMatch = manualRowsToSave.slice(0, index).reverse().find((previous) =>
+        previous.location === draft.location
+        && normalizeIngredientName(previous.name) === normalizeIngredientName(draft.name),
+      );
+      if (previousBatchMatch && !canCombineIngredientQuantities(parseQuantityText(previousBatchMatch.quantity), incoming)) {
+        Alert.alert('Quantity needs review', `${draft.name} appears more than once in this batch. Use compatible units for both quantities.`);
+        return;
+      }
+    }
     for (const suggestion of acceptedSuggestions) {
       const decision = scanDecisions[suggestion.suggestionId] ?? (suggestion.existingInventoryMatch ? 'same' : 'additional');
       if (!suggestion.existingInventoryMatch || decision !== 'additional') continue;
@@ -470,36 +562,37 @@ export default function ScanScreen() {
         reviewedAt,
       }, { additionalStock: Boolean(suggestion.existingInventoryMatch && decision === 'additional') });
     }
-    const manualWasInAcceptedSuggestions = acceptedSuggestions.some((suggestion) =>
-      normalizeIngredientName(suggestion.displayName) === normalizeIngredientName(name)
-      && suggestion.storageLocation === location,
-    );
-    const manualShouldSave = Boolean(name.trim()) && !manualWasInAcceptedSuggestions;
-    if (manualShouldSave) {
+    const savedManualKeys = new Set<string>();
+    for (const draft of manualRowsToSave) {
+      const manualExisting = matchingManualInventory(draft.name, draft.location, draft.barcode);
+      const savedName = manualExisting?.name ?? draft.name.trim();
+      const manualKey = `${normalizeIngredientName(savedName)}|${draft.location}`;
+      const additionalStock = Boolean(manualExisting) || savedManualKeys.has(manualKey);
       addIngredient({
-        name: manualExisting?.name ?? name.trim(),
-        quantity: manualQuantityText,
-        location,
+        name: savedName,
+        quantity: draft.quantity,
+        location: draft.location,
         status: 'fresh',
         confidence: 'confirmed',
-        source: scannedBarcode ? 'barcode' : 'manual',
-        ...(scannedBarcode ? { barcode: scannedBarcode } : {}),
-        ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}),
+        source: draft.source,
+        ...(draft.barcode ? { barcode: draft.barcode } : {}),
+        ...(draft.brand ? { brand: draft.brand } : {}),
         reviewedAt,
-      }, { additionalStock: Boolean(manualExisting) });
-      if (manualExisting && scannedBarcode) {
-        updateIngredient(manualExisting.id, { barcode: scannedBarcode, ...(barcodeProduct?.brand ? { brand: barcodeProduct.brand } : {}), reviewedAt });
+      }, { additionalStock });
+      if (manualExisting && draft.barcode) {
+        updateIngredient(manualExisting.id, { barcode: draft.barcode, ...(draft.brand ? { brand: draft.brand } : {}), reviewedAt });
       }
+      savedManualKeys.add(manualKey);
     }
     if (savedModelUri) {
       saveSpaceScan({ id: `space-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         location: spaceLocation, modelUri: savedModelUri, createdAt: reviewedAt,
-        ingredientNames: [...new Set([...suggestions.map((item) => item.displayName.trim()), name.trim()].filter(Boolean))] });
+        ingredientNames: [...new Set([...suggestions.map((item) => item.displayName.trim()), ...manualDrafts.map((draft) => draft.name.trim())].filter(Boolean))] });
     }
-    const skipped = suggestions.length - acceptedSuggestions.length + (name.trim() && !manualShouldSave ? 1 : 0);
-    Alert.alert('Kitchen updated', `${acceptedSuggestions.length + Number(manualShouldSave)} reviewed item(s) saved. ${skipped} existing item(s) skipped. New items default to 1 ea; added stock uses the existing item’s unit.`, [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
+    const skipped = suggestions.length - acceptedSuggestions.length + manualDrafts.length - manualRowsToSave.length;
+    Alert.alert('Kitchen updated', `${acceptedSuggestions.length + manualRowsToSave.length} reviewed item(s) saved. ${skipped} existing item(s) skipped. New items default to 1 ea; added stock uses the existing item’s unit.`, [{ text: 'Done', onPress: () => { resetScan(); router.push('/kitchen'); } }]);
   };
-  const manualExistingForDisplay = matchingManualInventory(name);
+  const manualExistingForDisplay = matchingManualStock(name, location, scannedBarcode ?? undefined);
   const manualDefaultUnit = manualExistingForDisplay?.quantityKnown && manualExistingForDisplay.unit
     ? manualExistingForDisplay.unit
     : 'ea';
@@ -507,7 +600,7 @@ export default function ScanScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
-      <ScrollView ref={scanScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" pointerEvents={barcodeBusy ? 'none' : 'auto'}>
+      <KeyboardAwareScrollViewCompat ref={scanScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" bottomOffset={72} pointerEvents={barcodeBusy ? 'none' : 'auto'}>
         <View style={styles.header}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>ADD TO YOUR KITCHEN</Text><Text style={[styles.title, { color: colors.foreground }]}>{mode === 'review' ? 'Review scan' : 'Scan ingredients'}</Text></View>{mode === 'review' ? <Pressable onPress={resetScan}><Feather name="x" size={22} color={colors.foreground} /></Pressable> : null}</View>
         {mode === 'choose' ? (
           <>
@@ -576,6 +669,14 @@ export default function ScanScreen() {
                  </View> : null}
                </View>;
              })}
+            {manualEntries.length ? <View style={[styles.stagedList, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.stagedHeader}><Text style={[styles.stagedTitle, { color: colors.foreground }]}>Ready to save</Text><Text style={[styles.stagedCount, { color: colors.mutedForeground }]}>{manualEntries.length}</Text></View>
+              {manualEntries.map((entry) => <View key={entry.id} style={[styles.stagedRow, { borderTopColor: colors.border }]}>
+                <FoodIdentityIcon name={entry.name} size={34} />
+                <View style={{ flex: 1 }}><Text style={[styles.stagedName, { color: colors.foreground }]}>{entry.name}</Text><Text style={[styles.stagedMeta, { color: colors.mutedForeground }]}>{entry.quantity} · {entry.location}</Text></View>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${entry.name} from batch`} testID={`remove-manual-${entry.id}`} onPress={() => setManualEntries((current) => current.filter((item) => item.id !== entry.id))}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable>
+              </View>)}
+            </View> : null}
             <Text style={[styles.label, { color: colors.foreground }]}>Ingredient name</Text>
              <View style={styles.nameInputRow}>
                <FoodIdentityIcon name={name} size={44} />
@@ -585,12 +686,13 @@ export default function ScanScreen() {
              <TextInput testID="manual-quantity" value={displayedManualQuantity} onChangeText={(value) => { setQuantity(value); setQuantityEdited(true); }} placeholder="e.g. 1 ea" placeholderTextColor={colors.mutedForeground} style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.label, { color: colors.foreground }]}>Storage location</Text>
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
+             <Pressable testID="add-manual-to-batch" onPress={stageManualIngredient} style={({ pressed }) => [styles.stageButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}><Feather name="plus" size={17} color={colors.primary} /><Text style={[styles.stageButtonText, { color: colors.primary }]}>Add to batch</Text></Pressable>
             {scannedBarcode && ingredients.some((item) => item.status !== 'used' && item.location === location && (item.barcode === scannedBarcode || normalizeIngredientName(item.name) === normalizeIngredientName(name))) ? <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground, marginTop: 12 }]}>This food is already in your kitchen at this location. Saving will attach its barcode without adding duplicate stock. Edit the existing item to change its quantity.</Text> : null}
               {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>Photos do not determine quantities. New items default to 1 ea, and additional stock uses the existing item’s unit; review or edit these values before saving.</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
-            <Pressable testID="save-ingredient" disabled={recognitionState === 'analyzing'} onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, recognitionState === 'analyzing' && styles.disabled]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>Save to My Kitchen</Text></Pressable>
+            <Pressable testID="save-ingredient" disabled={recognitionState === 'analyzing'} onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, recognitionState === 'analyzing' && styles.disabled]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>{manualEntries.length > 0 ? 'Save all to My Kitchen' : 'Save to My Kitchen'}</Text></Pressable>
           </>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
       <Modal visible={recognitionState === 'analyzing'} transparent animationType="fade" onRequestClose={() => undefined}>
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
@@ -701,6 +803,15 @@ const styles = StyleSheet.create({
   quantityInput: { flex: 1 },
   unitInput: { flex: 2 },
   confidenceText: { fontSize: 11, marginTop: 10 },
+  stagedList: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 8, marginBottom: 8 },
+  stagedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 7 },
+  stagedTitle: { fontSize: 13, fontFamily: 'Inter_700Bold' },
+  stagedCount: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  stagedRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderTopWidth: 1, paddingVertical: 10 },
+  stagedName: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  stagedMeta: { fontSize: 11, marginTop: 3 },
+  stageButton: { minHeight: 47, borderWidth: 1, borderRadius: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14 },
+  stageButtonText: { fontSize: 13, fontFamily: 'Inter_700Bold' },
   duplicateBox: { borderRadius: 14, padding: 11, marginTop: 11, gap: 6 },
   duplicateTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   duplicateBody: { fontSize: 11, lineHeight: 16 },
