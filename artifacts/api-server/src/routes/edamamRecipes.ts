@@ -122,7 +122,7 @@ export async function searchEdamamRecipes(input: {
     if (!response.ok) throw new Error(`Edamam responded ${response.status}`);
     const data = await response.json() as { hits?: Array<{ recipe?: EdamamRecipe }> };
     if (!Array.isArray(data.hits)) throw new Error("Edamam search returned an invalid response");
-    const selectedHits = data.hits.slice(0, 30);
+    const selectedHits = data.hits.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
     if (diagnostics) diagnostics.candidatesReceived += data.hits.length;
     recordCandidateRemoval(diagnostics, "candidateLimit", data.hits.length - selectedHits.length);
 
@@ -155,8 +155,8 @@ export async function searchEdamamRecipes(input: {
       qualified.push(recipe);
     }
     if (!qualified.length) continue;
-    qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-    const results = qualified.slice(0, input.audience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES);
+    qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length || b.matchedIngredients.length - a.matchedIngredients.length);
+    const results = qualified.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
     recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
     if (diagnostics) diagnostics.eligible = results.length;
     return results;

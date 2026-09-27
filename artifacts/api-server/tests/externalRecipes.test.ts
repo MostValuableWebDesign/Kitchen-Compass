@@ -28,7 +28,7 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
 });
 
-test("combined provider recipes choose the best ingredient fits before the 30-recipe cap", () => {
+test("combined provider recipes choose the best ingredient fits before the 50-recipe cap", () => {
   const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number, matchedCount: number) => ({
     id: `${provider}-${index}`,
     title: `${provider} recipe ${index}`,
@@ -42,14 +42,14 @@ test("combined provider recipes choose the best ingredient fits before the 30-re
   });
   const matchedCounts = { Edamam: 3, Spoonacular: 4, TheMealDB: 1 } as const;
   const groups = (["Edamam", "Spoonacular", "TheMealDB"] as const)
-    .map((provider) => Array.from({ length: 35 }, (_, index) => makeRecipe(provider, index, matchedCounts[provider])));
-  const recipes = combineProviderRecipeResults(groups, 35);
-  assert.equal(recipes.length, 30);
-  assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), Array.from({ length: 30 }, () => 4));
+    .map((provider) => Array.from({ length: 55 }, (_, index) => makeRecipe(provider, index, matchedCounts[provider])));
+  const recipes = combineProviderRecipeResults(groups, 55);
+  assert.equal(recipes.length, 50);
+  assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), Array.from({ length: 50 }, () => 4));
   assert.deepEqual(
     Object.fromEntries((["Edamam", "Spoonacular", "TheMealDB"] as const)
       .map((provider) => [provider, recipes.filter((recipe) => recipe.provider === provider).length])),
-    { Edamam: 0, Spoonacular: 30, TheMealDB: 0 },
+    { Edamam: 0, Spoonacular: 50, TheMealDB: 0 },
   );
 });
 
@@ -263,7 +263,7 @@ test("published recipes ignore missing herbs and spices, accept seven missing in
   }
 });
 
-test("provider counts precede the combined 30-recipe cap", async () => {
+test("provider counts precede the combined 50-recipe cap for general and kids", async () => {
   const oldMealKey = process.env.THEMEALDB_API_KEY;
   const oldId = process.env.EDAMAM_APP_ID;
   const oldKey = process.env.EDAMAM_APP_KEY;
@@ -274,7 +274,7 @@ test("provider counts precede the combined 30-recipe cap", async () => {
   delete process.env.SPOONACULAR_API_KEY;
   globalThis.fetch = async (input) => {
     const target = new URL(String(input));
-    if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: Array.from({ length: 30 }, (_, index) => ({ recipe: {
+    if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: Array.from({ length: 50 }, (_, index) => ({ recipe: {
       uri: `recipe-${index}`, label: `Pasta ${index}`, image: "https://example.com/image.jpg", url: `https://example.com/${index}`,
       ingredients: [{ food: "Pasta" }],
     } })) }), { status: 200 });
@@ -285,15 +285,15 @@ test("provider counts precede the combined 30-recipe cap", async () => {
     const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [] }) });
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; count: number }> };
-    assert.equal(payload.recipes.length, 30);
+    assert.equal(payload.recipes.length, 50);
     assert.equal(payload.recipes[0]?.provider, "Edamam");
     assert.equal(payload.recipes[1]?.provider, "TheMealDB");
-    assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 30], ["Spoonacular", 0], ["TheMealDB", 1]]);
+    assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 50], ["Spoonacular", 0], ["TheMealDB", 1]]);
     const kidsResponse = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [], audience: "kids" }) });
     assert.equal(kidsResponse.status, 200);
     const kids = await kidsResponse.json() as { recipes: unknown[]; sourceResults: Array<{ provider: string; count: number }> };
-    assert.equal(kids.recipes.length, 12);
-    assert.deepEqual(kids.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 12], ["Spoonacular", 0], ["TheMealDB", 1]]);
+    assert.equal(kids.recipes.length, 50);
+    assert.deepEqual(kids.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 50], ["Spoonacular", 0], ["TheMealDB", 1]]);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldMealKey === undefined) delete process.env.THEMEALDB_API_KEY; else process.env.THEMEALDB_API_KEY = oldMealKey;

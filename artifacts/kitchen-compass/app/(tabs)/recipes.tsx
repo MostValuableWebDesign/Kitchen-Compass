@@ -13,7 +13,7 @@ import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { onlineFirstMealSearch } from '@/lib/completeMealSearch';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '@/lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, publishedRecipeFoodCategories, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit, type PublishedRecipeFoodCategory } from '@/lib/publishedRecipeSearch';
 import { isArchivedPublished, isArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '@/lib/kidFriendly';
 import type { Recipe } from '@/data/recipes';
@@ -98,6 +98,7 @@ export default function RecipesScreen() {
   const [imageMessage, setImageMessage] = useState('');
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [section, setSection] = useState<RecipeSection>('general');
+  const [publishedFoodCategories, setPublishedFoodCategories] = useState<Record<RecipeSection, PublishedRecipeFoodCategory | 'All'>>({ general: 'All', kids: 'All' });
   const searchGuard = useRef(false);
   const imageJob = useRef(0);
   const pendingImages = useRef(new Set<string>());
@@ -205,6 +206,17 @@ export default function RecipesScreen() {
       .filter((item) => !isArchivedPublished(item, archivedRecipes)
         && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)),
   ), [archivedRecipes, kidOnlineRecipes, preferences.allergies, preferences.dislikes, savedKidPublishedRecipes]);
+  const currentPublishedRecipes = section === 'kids' ? visibleKidPublishedRecipes : visibleExternalRecipes;
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<PublishedRecipeFoodCategory, number>();
+    for (const recipe of currentPublishedRecipes) {
+      for (const category of categoriesForPublishedRecipe(recipe)) counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    return counts;
+  }, [currentPublishedRecipes]);
+  const selectedPublishedCategory = publishedFoodCategories[section];
+  const activePublishedCategory = selectedPublishedCategory === 'All' || categoryCounts.has(selectedPublishedCategory) ? selectedPublishedCategory : 'All';
+  const displayedPublishedRecipes = useMemo(() => filterPublishedRecipesByCategory(currentPublishedRecipes, activePublishedCategory), [currentPublishedRecipes, activePublishedCategory]);
 
   const prepareImages = async (recipes: Recipe[]) => {
     const missing = recipes.filter((recipe) => !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)
@@ -632,18 +644,25 @@ export default function RecipesScreen() {
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
         {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search Edamam, Spoonacular, and TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {section === 'kids' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Kid-friendly recipes online</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search Edamam, Spoonacular, and TheMealDB. Choose automatic or manual ingredient anchors.</Text></View><Pressable testID="find-kids-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
-        {(section === 'kids' ? kidSourceResults : externalSourceResults).length ? <View style={[styles.sourceStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.sourceStatusTitle, { color: colors.foreground }]}>Online source results</Text><Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>Counts are eligible recipes per provider; at most 30 recipes are shown total.</Text>{(section === 'kids' ? kidSourceResults : externalSourceResults).map((source) => <Text key={source.provider} style={[styles.sourceStatusRow, { color: source.status === 'found' ? colors.primary : source.status === 'unavailable' ? colors.destructive : colors.mutedForeground }]}>{source.provider}: {onlineSourceDescription(source)}</Text>)}</View> : null}
+        {(section === 'kids' ? kidSourceResults : externalSourceResults).length ? <View style={[styles.sourceStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.sourceStatusTitle, { color: colors.foreground }]}>Online source results</Text><Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>Counts are eligible recipes per provider; up to 50 are returned per search.</Text>{(section === 'kids' ? kidSourceResults : externalSourceResults).map((source) => <Text key={source.provider} style={[styles.sourceStatusRow, { color: source.status === 'found' ? colors.primary : source.status === 'unavailable' ? colors.destructive : colors.mutedForeground }]}>{source.provider}: {onlineSourceDescription(source)}</Text>)}</View> : null}
         {(section === 'kids' ? kidSourceResults : externalSourceResults).some((source) => source.provider === 'Edamam' && source.status === 'found') ? <Image source={{ uri: EDAMAM_BADGE_URL }} accessibilityLabel="Powered by Edamam" style={{ width: 150, height: 35, resizeMode: 'contain', marginBottom: 8 }} /> : null}
         {(section === 'kids' ? kidMessage : externalMessage) ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{section === 'kids' ? kidMessage : externalMessage}</Text> : null}
+        {currentPublishedRecipes.length ? <View style={{ marginTop: 12 }}>
+          <Text style={[styles.filterTitle, { color: colors.foreground }]}>Browse online recipes by food</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            <Chip label={`All (${currentPublishedRecipes.length})`} selected={activePublishedCategory === 'All'} onPress={() => setPublishedFoodCategories((current) => ({ ...current, [section]: 'All' }))} />
+            {publishedRecipeFoodCategories.filter((category) => categoryCounts.has(category)).map((category) => <Chip key={category} label={`${category} (${categoryCounts.get(category)})`} selected={activePublishedCategory === category} onPress={() => setPublishedFoodCategories((current) => ({ ...current, [section]: category }))} />)}
+          </ScrollView>
+        </View> : null}
         {section === 'general' && visibleExternalRecipes.length ? <View style={styles.externalResultsHeader}>
           <View>
-            <Text style={[styles.externalResultsTitle, { color: colors.foreground }]}>{visibleExternalRecipes.length} recipe{visibleExternalRecipes.length === 1 ? '' : 's'} found</Text>
+            <Text style={[styles.externalResultsTitle, { color: colors.foreground }]}>{displayedPublishedRecipes.length} of {visibleExternalRecipes.length} recipes</Text>
             <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Edamam, Spoonacular, and TheMealDB · Swipe to browse</Text>
           </View>
           <Feather name="arrow-right" size={18} color={colors.primary} />
         </View> : null}
         {section === 'general' && visibleExternalRecipes.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} decelerationRate="fast" snapToInterval={302} contentContainerStyle={styles.externalResults}>
-        {visibleExternalRecipes.map((item) => {
+        {displayedPublishedRecipes.map((item) => {
           const saved = savedRecipes.some((recipe) => recipeVersion(recipe) === publishedRecipeVersion(item.id) || recipeTitleKey(recipe) === recipeTitleKey({ title: item.title }));
           return <View key={item.id} style={[styles.externalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.externalImage} /> : null}
@@ -664,7 +683,8 @@ export default function RecipesScreen() {
           </View>;
         })}
         </ScrollView> : null}
-        {section === 'kids' && visibleKidPublishedRecipes.map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
+        {section === 'kids' && currentPublishedRecipes.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{displayedPublishedRecipes.length} of {currentPublishedRecipes.length} online recipes</Text> : null}
+        {section === 'kids' && displayedPublishedRecipes.map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}

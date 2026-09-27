@@ -155,3 +155,38 @@ export function sortPublishedRecipesByIngredientFit<
     left.missingIngredients.length - right.missingIngredients.length
     || right.matchedIngredients.length - left.matchedIngredients.length);
 }
+
+export const publishedRecipeFoodCategories = [
+  'Chicken', 'Beef', 'Pork', 'Turkey', 'Lamb', 'Duck', 'Fish', 'Shellfish',
+  'Pasta & noodles', 'Vegetables', 'Grains & bread', 'Eggs & dairy', 'Other',
+] as const;
+export type PublishedRecipeFoodCategory = typeof publishedRecipeFoodCategories[number];
+
+type CategorizedPublishedRecipe = { title: string; ingredients: readonly { name: string }[] };
+
+export function categoriesForPublishedRecipe(recipe: CategorizedPublishedRecipe): PublishedRecipeFoodCategory[] {
+  const names = [recipe.title, ...recipe.ingredients
+    .map((ingredient) => ingredient.name)
+    .filter((name) => !/\b(broth|stock|bouillon|seasoning|flavor(?:ing)?)\b/i.test(name))];
+  const has = (pattern: RegExp) => names.some((name) => pattern.test(name));
+  const categories: PublishedRecipeFoodCategory[] = [];
+  if (has(/\b(chicken|hen)\b/i)) categories.push('Chicken');
+  if (has(/\b(beef|steak|veal)\b/i)) categories.push('Beef');
+  if (has(/\b(pork|bacon|ham|prosciutto|sausage)\b/i)) categories.push('Pork');
+  if (has(/\b(turkey)\b/i)) categories.push('Turkey');
+  if (has(/\b(lamb)\b/i)) categories.push('Lamb');
+  if (has(/\b(duck)\b/i)) categories.push('Duck');
+  if (has(/\b(fish|salmon|tuna|cod|tilapia|trout|halibut)\b/i)) categories.push('Fish');
+  if (has(/\b(shrimp|prawn|crab|lobster|scallop|clam|mussel)\b/i)) categories.push('Shellfish');
+  if (has(/\b(pasta|spaghetti|fettuccine|linguine|penne|macaroni|noodles?|ramen)\b/i)) categories.push('Pasta & noodles');
+  if (has(/\b(vegetables?|carrots?|broccoli|spinach|cabbage|lettuce|tomatoes?|peppers?|zucchini|potatoes?)\b/i)) categories.push('Vegetables');
+  if (has(/\b(rice|bread|rolls?|tortillas?|quinoa|oats?|barley)\b/i)) categories.push('Grains & bread');
+  if (has(/\b(eggs?|cheese|milk|yogurt)\b/i)) categories.push('Eggs & dairy');
+  return categories.length ? categories : ['Other'];
+}
+
+export function filterPublishedRecipesByCategory<T extends CategorizedPublishedRecipe>(
+  recipes: readonly T[], category: PublishedRecipeFoodCategory | 'All',
+): T[] {
+  return category === 'All' ? [...recipes] : recipes.filter((recipe) => categoriesForPublishedRecipe(recipe).includes(category));
+}

@@ -283,14 +283,14 @@ router.post("/recipes/external", async (req, res) => {
         }
         qualified.push(recipe);
       }
-      qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-      const recipes = qualified.slice(0, providerAudience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES);
+      qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length || b.matchedIngredients.length - a.matchedIngredients.length);
+      const recipes = qualified.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
       recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - recipes.length);
       diagnostics.eligible = recipes.length;
       return recipes;
     };
     const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
-    const limit = parsed.data.audience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES;
+    const limit = MAX_TOTAL_PUBLISHED_RECIPES;
     const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
       { provider: "Edamam", configured: edamamConfigured(), search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },

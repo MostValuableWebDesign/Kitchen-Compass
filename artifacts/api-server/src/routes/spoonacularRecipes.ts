@@ -182,8 +182,8 @@ export async function searchSpoonacularRecipes(input: {
     qualified.push(recipe);
   }
 
-  qualified.sort((a, b) => b.matchedIngredients.length - a.matchedIngredients.length || a.missingIngredients.length - b.missingIngredients.length);
-  const results = qualified.slice(0, input.audience === "kids" ? 12 : MAX_TOTAL_PUBLISHED_RECIPES);
+  qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length || b.matchedIngredients.length - a.matchedIngredients.length);
+  const results = qualified.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
   recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
   if (diagnostics) diagnostics.eligible = results.length;
   return results;

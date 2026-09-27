@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
 import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '../lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, categoriesForPublishedRecipe, filterPublishedRecipesByCategory, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '../lib/publishedRecipeSearch';
 import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, parseArchivedRecipes, restoreArchivedRecipe } from '../lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '../lib/kidFriendly';
 
@@ -182,6 +182,19 @@ test('published online recipes sort by fewer missing ingredients, then more pant
     sortPublishedRecipesByIngredientFit(recipes).map((recipe) => recipe.title),
     ['One match', 'Three matches', 'Two matches, fewer missing', 'Five missing'],
   );
+});
+
+test('online food categories find meat types and filter ranked recipes without a new search', () => {
+  const recipes = [
+    { title: 'Beef tacos', ingredients: [{ name: 'Ground beef' }, { name: 'Tortillas' }], matchedIngredients: ['Beef'], missingIngredients: [] },
+    { title: 'Chicken pasta', ingredients: [{ name: 'Chicken breast' }, { name: 'Penne pasta' }], matchedIngredients: ['Chicken'], missingIngredients: ['Pasta'] },
+    { title: 'Vegetable rice', ingredients: [{ name: 'Carrots' }, { name: 'Rice' }, { name: 'Chicken broth' }], matchedIngredients: ['Rice'], missingIngredients: ['Carrots', 'Chicken broth'] },
+  ];
+  assert.deepEqual(categoriesForPublishedRecipe(recipes[0]), ['Beef', 'Grains & bread']);
+  assert.deepEqual(categoriesForPublishedRecipe(recipes[1]), ['Chicken', 'Pasta & noodles']);
+  assert.equal(categoriesForPublishedRecipe(recipes[2]).includes('Chicken'), false);
+  assert.deepEqual(filterPublishedRecipesByCategory(recipes, 'Chicken').map((recipe) => recipe.title), ['Chicken pasta']);
+  assert.deepEqual(filterPublishedRecipesByCategory(recipes, 'All'), recipes);
 });
 
 test('main and side requests carry their own ingredient focus and the selected main', () => {
