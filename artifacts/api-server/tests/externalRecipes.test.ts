@@ -3,7 +3,7 @@ import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
 import { kidFriendlyScore } from "../src/routes/kidFriendly";
-import { combineProviderRecipeResults, externalRecipeRequestSchema } from "../src/routes/externalRecipes";
+import { combineProviderRecipeResults, externalRecipeRequestSchema, type ExternalRecipe } from "../src/routes/externalRecipes";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "external-recipes-test-session";
@@ -28,7 +28,7 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
 });
 
-test("combined provider recipes are match-ranked and capped at 30", () => {
+test("combined provider recipes choose the best ingredient fits before the 30-recipe cap", () => {
   const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number, matchedCount: number) => ({
     id: `${provider}-${index}`,
     title: `${provider} recipe ${index}`,
@@ -45,16 +45,28 @@ test("combined provider recipes are match-ranked and capped at 30", () => {
     .map((provider) => Array.from({ length: 35 }, (_, index) => makeRecipe(provider, index, matchedCounts[provider])));
   const recipes = combineProviderRecipeResults(groups, 35);
   assert.equal(recipes.length, 30);
-  assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), [
-    ...Array.from({ length: 10 }, () => 4),
-    ...Array.from({ length: 10 }, () => 3),
-    ...Array.from({ length: 10 }, () => 1),
-  ]);
+  assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), Array.from({ length: 30 }, () => 4));
   assert.deepEqual(
     Object.fromEntries((["Edamam", "Spoonacular", "TheMealDB"] as const)
       .map((provider) => [provider, recipes.filter((recipe) => recipe.provider === provider).length])),
-    { Edamam: 10, Spoonacular: 10, TheMealDB: 10 },
+    { Edamam: 0, Spoonacular: 30, TheMealDB: 0 },
   );
+});
+
+test("one missing ingredient outranks five even with fewer pantry matches", () => {
+  const recipe = (id: string, matched: number, missing: number): ExternalRecipe => ({
+    id, title: id, provider: "Edamam", sourceUrl: "https://example.com/recipe", instructions: "",
+    ingredients: [{ name: "Chicken", measure: "1" }],
+    matchedIngredients: Array.from({ length: matched }, (_, index) => `Have ${index}`),
+    missingIngredients: Array.from({ length: missing }, (_, index) => `Need ${index}`), safetyVerified: false,
+  });
+  const manyMissing = Array.from({ length: 30 }, (_, index) => recipe(`five-${index}`, 5, 5));
+  const oneMissing = recipe("one-missing", 1, 1);
+  const noneMissing = recipe("none-missing", 1, 0);
+  const combined = combineProviderRecipeResults([manyMissing, [oneMissing], [noneMissing]], 30);
+  assert.deepEqual(combined.slice(0, 2).map((item) => item.id), ["none-missing", "one-missing"]);
+  assert.equal(combined.length, 30);
+  assert.equal(combined.some((item) => item.id === "five-29"), false);
 });
 beforeEach(() => resetScanRateLimiter());
 after(() => {

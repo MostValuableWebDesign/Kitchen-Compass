@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildRecipeDiscoveryRequest, mapDiscoveredRecipe, matchingSavedRecipes, mergeRecipes, novelRecipes, parseCachedRecipes, recipeVersion, recipesNeedingImages } from '../lib/recipeDiscovery';
 import { mapPublishedRecipe } from '../lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByMatchedIngredients } from '../lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '../lib/publishedRecipeSearch';
 import { archiveLocalRecipe, archivePublishedRecipe, isArchivedPublished, isArchivedRecipe, parseArchivedRecipes, restoreArchivedRecipe } from '../lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '../lib/kidFriendly';
 
@@ -170,17 +170,17 @@ test('published search checks up to 64 confirmed pantry ingredients with at most
   assert.equal(new Set(result.ingredients).size, 64);
 });
 
-test('published online recipes sort by most pantry matches, then fewer missing ingredients', () => {
+test('published online recipes sort by fewer missing ingredients, then more pantry matches', () => {
   const recipes = [
     { title: 'One match', matchedIngredients: ['Beef'], missingIngredients: [] },
     { title: 'Three matches', matchedIngredients: ['Beef', 'Rice', 'Cabbage'], missingIngredients: ['Onion'] },
-    { title: 'Two matches, more missing', matchedIngredients: ['Beef', 'Rice'], missingIngredients: ['Onion', 'Garlic'] },
+    { title: 'Five missing', matchedIngredients: ['Beef', 'Rice', 'Cabbage', 'Tomato'], missingIngredients: ['Onion', 'Garlic', 'Lemon', 'Carrot', 'Milk'] },
     { title: 'Two matches, fewer missing', matchedIngredients: ['Beef', 'Rice'], missingIngredients: ['Onion'] },
   ];
 
   assert.deepEqual(
-    sortPublishedRecipesByMatchedIngredients(recipes).map((recipe) => recipe.title),
-    ['Three matches', 'Two matches, fewer missing', 'Two matches, more missing', 'One match'],
+    sortPublishedRecipesByIngredientFit(recipes).map((recipe) => recipe.title),
+    ['One match', 'Three matches', 'Two matches, fewer missing', 'Five missing'],
   );
 });
 

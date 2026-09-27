@@ -76,7 +76,7 @@ export function combineProviderRecipeResults(
   onDrop?: (groupIndex: number, reason: "duplicate" | "resultLimit") => void,
 ) {
   const cappedLimit = Math.max(0, Math.min(MAX_TOTAL_PUBLISHED_RECIPES, Math.floor(limit)));
-  const results: ExternalRecipe[] = [];
+  const candidates: Array<{ recipe: ExternalRecipe; groupIndex: number }> = [];
   const seenIds = new Set<string>();
   const seenTitles = new Set<string>();
   const maxLength = Math.max(0, ...groups.map((group) => group.length));
@@ -91,16 +91,14 @@ export function combineProviderRecipeResults(
       }
       seenIds.add(recipe.id);
       seenTitles.add(title);
-      if (results.length >= cappedLimit) {
-        onDrop?.(groupIndex, "resultLimit");
-        return;
-      }
-      results.push(recipe);
+      candidates.push({ recipe, groupIndex });
     });
   }
-  return results.sort((left, right) =>
-    right.matchedIngredients.length - left.matchedIngredients.length
-    || left.missingIngredients.length - right.missingIngredients.length);
+  candidates.sort((left, right) =>
+    left.recipe.missingIngredients.length - right.recipe.missingIngredients.length
+    || right.recipe.matchedIngredients.length - left.recipe.matchedIngredients.length);
+  for (const candidate of candidates.slice(cappedLimit)) onDrop?.(candidate.groupIndex, "resultLimit");
+  return candidates.slice(0, cappedLimit).map(({ recipe }) => recipe);
 }
 
 const mainDishTerms = /\b(chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|steak|sausage|meat|pasta|spaghetti|noodles?|pizza|sandwich|burgers?|burritos?|quesadillas?|tacos?|lasagna|bowls?|curry|stew|casserole|omelet|pancakes?|waffles?)\b/i;

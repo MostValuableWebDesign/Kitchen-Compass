@@ -148,10 +148,10 @@ export function buildPublishedRecipeSearch(
   };
 }
 
-export function sortPublishedRecipesByMatchedIngredients<
+export function sortPublishedRecipesByIngredientFit<
   T extends { matchedIngredients: readonly string[]; missingIngredients: readonly string[] },
 >(recipes: readonly T[]): T[] {
   return [...recipes].sort((left, right) =>
-    right.matchedIngredients.length - left.matchedIngredients.length
-    || left.missingIngredients.length - right.missingIngredients.length);
+    left.missingIngredients.length - right.missingIngredients.length
+    || right.matchedIngredients.length - left.matchedIngredients.length);
 }

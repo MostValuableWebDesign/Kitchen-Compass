@@ -13,7 +13,7 @@ import { getAvailableRecipes } from '@/lib/recipeLookup';
 import { loadRecipeImages } from '@/lib/loadRecipeImages';
 import { onlineFirstMealSearch } from '@/lib/completeMealSearch';
 import { mapPublishedRecipe, publishedRecipeVersion } from '@/lib/publishedRecipeImport';
-import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByMatchedIngredients } from '@/lib/publishedRecipeSearch';
+import { buildPublishedRecipeSearch, MAX_PUBLISHED_SEARCH_ANCHORS, publishedIngredientCategories, publishedIngredientCategory, rankPublishedSearchIngredients, sortPublishedRecipesByIngredientFit } from '@/lib/publishedRecipeSearch';
 import { isArchivedPublished, isArchivedRecipe, type ArchivedRecipe } from '@/lib/recipeArchive';
 import { isKidFriendlyRecipe, publishedRecipeAllowed } from '@/lib/kidFriendly';
 import type { Recipe } from '@/data/recipes';
@@ -195,12 +195,12 @@ export default function RecipesScreen() {
     ...(item.confidence ? { confidence: item.confidence } : {}),
   })), [ingredients]);
   const filterState: RecipeFilterState = { mealType, cuisine, maxMinutes, equipment, dietaryPreference, minHealthScore };
-  const visibleExternalRecipes = useMemo(() => sortPublishedRecipesByMatchedIngredients(externalRecipes
+  const visibleExternalRecipes = useMemo(() => sortPublishedRecipesByIngredientFit(externalRecipes
     .filter((item) => !discardedExternalRecipeIds.includes(item.id)
       && !isArchivedPublished(item, archivedRecipes)
       && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes))),
     [archivedRecipes, discardedExternalRecipeIds, externalRecipes, preferences.allergies, preferences.dislikes]);
-  const visibleKidPublishedRecipes = useMemo(() => sortPublishedRecipesByMatchedIngredients(
+  const visibleKidPublishedRecipes = useMemo(() => sortPublishedRecipesByIngredientFit(
     [...kidOnlineRecipes, ...savedKidPublishedRecipes]
       .filter((item) => !isArchivedPublished(item, archivedRecipes)
         && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)),
@@ -544,10 +544,6 @@ export default function RecipesScreen() {
     && item.dateConfirmed === true
     && Boolean(confirmedDateStatus(item.expires)),
   ));
-  const publishedMatchedCount = (recipe: ExternalRecipe) => recipe.ingredients.filter((ingredient) => ingredients.some((item) =>
-    item.status !== 'used' && item.confidence === 'confirmed' && ingredientIdentitiesMatch(ingredient.name, item),
-  )).length;
-
   const filtered = useMemo(() => availableRecipes.filter((recipe) => {
     if (isArchivedRecipe(recipe, archivedRecipes) || (section === 'kids' ? !isKidFriendlyRecipe(recipe) : recipe.audience === 'kids')) return false;
     const safety = recipeReadiness(recipe, ingredients, preferences.allergies, preferences.servings, reservations);
@@ -668,7 +664,7 @@ export default function RecipesScreen() {
           </View>;
         })}
         </ScrollView> : null}
-        {section === 'kids' && visibleKidPublishedRecipes.map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {publishedMatchedCount(item)} matching ingredients · {item.ingredients.length - publishedMatchedCount(item)} to check</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
+        {section === 'kids' && visibleKidPublishedRecipes.map((item) => <View key={item.id} style={[styles.kidExternalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.kidExternalImage} /> : null}<View style={{ flex: 1 }}><Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.externalTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text><Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens and quantities unverified. Open original recipe ↗</Text></Pressable>{(item.provider === 'Spoonacular' || item.provider === 'Edamam') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}</View><Pressable accessibilityLabel={`Archive ${item.title}`} onPress={() => confirmArchivePublished(item)} style={styles.archiveIconButton}><Feather name="archive" size={17} color={colors.mutedForeground} /></Pressable></View>)}
         <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Fine-tune ideas</Text><Text style={[styles.filterHint, { color: colors.mutedForeground }]}>Optional</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {mealTypes.map((item) => <Chip key={item} label={item === 'Any' ? 'Any meal' : item} selected={mealType === item} onPress={() => setMealType(item)} />)}
