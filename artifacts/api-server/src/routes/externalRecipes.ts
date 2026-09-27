@@ -78,19 +78,19 @@ export function combineProviderRecipeResults(
   const cappedLimit = Math.max(0, Math.min(MAX_TOTAL_PUBLISHED_RECIPES, Math.floor(limit)));
   const candidates: Array<{ recipe: ExternalRecipe; groupIndex: number }> = [];
   const seenIds = new Set<string>();
-  const seenTitles = new Set<string>();
+  const seenSourceUrls = new Set<string>();
   const maxLength = Math.max(0, ...groups.map((group) => group.length));
   for (let index = 0; index < maxLength; index += 1) {
     groups.forEach((group, groupIndex) => {
       const recipe = group[index];
       if (!recipe) return;
-      const title = titleKey(recipe.title);
-      if (seenIds.has(recipe.id) || seenTitles.has(title)) {
+      const sourceUrl = recipe.sourceUrl.replace(/\/$/, "");
+      if (seenIds.has(recipe.id) || seenSourceUrls.has(sourceUrl)) {
         onDrop?.(groupIndex, "duplicate");
         return;
       }
       seenIds.add(recipe.id);
-      seenTitles.add(title);
+      seenSourceUrls.add(sourceUrl);
       candidates.push({ recipe, groupIndex });
     });
   }
@@ -232,6 +232,7 @@ router.post("/recipes/external", async (req, res) => {
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null,
       sourceResults: ["Edamam", "Spoonacular", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
+      resultCounts: { eligible: 0, duplicates: 0, capped: 0, returned: 0, limit: MAX_TOTAL_PUBLISHED_RECIPES },
       sourceResults: [
         { provider: "Edamam", status: "not_configured", count: 0 },
         { provider: "Spoonacular", status: "not_configured", count: 0 },
@@ -345,12 +346,16 @@ router.post("/recipes/external", async (req, res) => {
       .filter((outcome) => outcome.sourceResult.status === "unavailable")
       .map((outcome) => outcome.provider);
     const providerRecipes = outcomes.filter((outcome) => outcome.diagnostics);
+    const resultCounts = { eligible: sourceResults.reduce((total, source) => total + source.count, 0), duplicates: 0, capped: 0, returned: 0, limit };
     const recipes = combineProviderRecipeResults(providerRecipes.map((source) => source.recipes), limit, (groupIndex, reason) => {
       const diagnostics = providerRecipes[groupIndex]?.diagnostics;
       recordCandidateRemoval(diagnostics, reason);
+      if (reason === "duplicate") resultCounts.duplicates += 1;
+      else resultCounts.capped += 1;
     });
-    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults, providerDiagnostics }, "Published recipe source results");
-    res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, safetyNotice });
+    resultCounts.returned = recipes.length;
+    req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null, sourceResults, resultCounts, providerDiagnostics }, "Published recipe source results");
+    res.json({ recipes, provider: "Multiple sources", providersUnavailable, sourceResults, resultCounts, safetyNotice });
   } catch {
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Published recipes are temporarily unavailable. Saved recipes remain available.");
   }

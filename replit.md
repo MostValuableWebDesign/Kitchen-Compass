@@ -14,6 +14,7 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 - Spoonacular online cards may link to its HTTPS recipe page when the publisher's `sourceUrl` is HTTP, and can link out when embedded instructions or an image are absent. The API still requires an HTTPS link, a pantry match, no requested allergen conflict, and at most seven counted missing ingredients.
 - General and Kid-friendly published recipes are ordered by fewest counted missing ingredients, then by most confirmed pantry matches. This order is applied before selecting the combined 50 results and on both result screens.
 - General and Kid-friendly online result chips filter the current recipes by food type (including specific meats) without another provider request.
+- The API deduplicates published recipes by exact recipe ID or source link. Recipes with the same title but different source links remain distinct. `resultCounts` reports eligible provider recipes, duplicate links removed, recipes cut by the 50-result cap, and recipes returned; the app displays these counts after each online search.
 - Keep `OPENAI_API_KEY`, `THEMEALDB_API_KEY`, `SPOONACULAR_API_KEY`, `EDAMAM_APP_ID`, and `EDAMAM_APP_KEY` on the API server. The Expo bundle should receive only its API domain.
 
 ### Activate Spoonacular in Replit

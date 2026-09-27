@@ -26,6 +26,7 @@ const timeOptions: Array<number | undefined> = [undefined, 30, 45, 60];
 const healthOptions: Array<number | undefined> = [undefined, 70, 85];
 type ActiveSearch = { kind: 'kitchen' | 'published' | 'kids-ai' | 'kids-online' | 'main-online' | 'side-online' | 'main-ai' | 'side-ai'; startedAt: number; complete: boolean };
 type OnlineSourceResult = ExternalRecipesResponse['sourceResults'][number];
+type OnlineResultCounts = NonNullable<ExternalRecipesResponse['resultCounts']>;
 type PublishedSearchStep = 'choice' | 'manual' | 'confirm';
 type PublishedSelectionMode = 'automatic' | 'manual';
 type RecipeSection = 'general' | 'kids';
@@ -78,6 +79,7 @@ export default function RecipesScreen() {
   const [externalBusy, setExternalBusy] = useState(false);
   const [externalMessage, setExternalMessage] = useState('');
   const [externalSourceResults, setExternalSourceResults] = useState<OnlineSourceResult[]>([]);
+  const [externalResultCounts, setExternalResultCounts] = useState<OnlineResultCounts>();
   const [publishedPickerOpen, setPublishedPickerOpen] = useState(false);
   const [publishedDriverIds, setPublishedDriverIds] = useState<string[]>([]);
   const [publishedSearchStep, setPublishedSearchStep] = useState<PublishedSearchStep>('choice');
@@ -89,6 +91,7 @@ export default function RecipesScreen() {
   const [mealSourceResults, setMealSourceResults] = useState<OnlineSourceResult[]>([]);
   const [kidMessage, setKidMessage] = useState('');
   const [kidSourceResults, setKidSourceResults] = useState<OnlineSourceResult[]>([]);
+  const [kidResultCounts, setKidResultCounts] = useState<OnlineResultCounts>();
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [discoveryError, setDiscoveryError] = useState(false);
   const [discoveryWarning, setDiscoveryWarning] = useState<string>();
@@ -207,6 +210,7 @@ export default function RecipesScreen() {
         && publishedRecipeAllowed(item, preferences.allergies, preferences.dislikes)),
   ), [archivedRecipes, kidOnlineRecipes, preferences.allergies, preferences.dislikes, savedKidPublishedRecipes]);
   const currentPublishedRecipes = section === 'kids' ? visibleKidPublishedRecipes : visibleExternalRecipes;
+  const currentResultCounts = section === 'kids' ? kidResultCounts : externalResultCounts;
   const categoryCounts = useMemo(() => {
     const counts = new Map<PublishedRecipeFoodCategory, number>();
     for (const recipe of currentPublishedRecipes) {
@@ -390,8 +394,8 @@ export default function RecipesScreen() {
     const controller = new AbortController();
     if (!beginSearch(audience === 'kids' ? 'kids-online' : 'published', controller)) return;
     setExternalBusy(true);
-    if (audience === 'kids') { setKidMessage(''); setKidSourceResults([]); }
-    else { setExternalMessage(''); setExternalSourceResults([]); }
+    if (audience === 'kids') { setKidMessage(''); setKidSourceResults([]); setKidResultCounts(undefined); }
+    else { setExternalMessage(''); setExternalSourceResults([]); setExternalResultCounts(undefined); }
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       const result = await findExternalRecipes(
@@ -416,6 +420,7 @@ export default function RecipesScreen() {
       const searchedOnlineSource = result.sourceResults?.some((source) => source.status === 'found' || source.status === 'no_results') ?? true;
       if (audience === 'kids') {
         setKidSourceResults(result.sourceResults ?? []);
+        setKidResultCounts(result.resultCounts);
         const knownIds = new Set([...savedKidPublishedRecipes, ...kidOnlineRecipes].map((recipe) => recipe.id));
         const knownTitles = new Set([...availableRecipes, ...savedKidPublishedRecipes, ...kidOnlineRecipes].map(recipeTitleKey));
         const newRecipes = result.recipes.filter((recipe) => {
@@ -436,6 +441,7 @@ export default function RecipesScreen() {
             : 'No online recipe source was available. Saved and archived recipes remain unchanged.');
       } else {
         setExternalSourceResults(result.sourceResults ?? []);
+        setExternalResultCounts(result.resultCounts);
         const visible = result.recipes.filter((recipe) => !isArchivedPublished(recipe, archivedRecipes));
         setExternalRecipes(visible);
         setDiscardedExternalRecipeIds([]);
@@ -645,6 +651,7 @@ export default function RecipesScreen() {
         {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search Edamam, Spoonacular, and TheMealDB using your confirmed ingredients. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {section === 'kids' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Kid-friendly recipes online</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search Edamam, Spoonacular, and TheMealDB. Choose automatic or manual ingredient anchors.</Text></View><Pressable testID="find-kids-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {(section === 'kids' ? kidSourceResults : externalSourceResults).length ? <View style={[styles.sourceStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.sourceStatusTitle, { color: colors.foreground }]}>Online source results</Text><Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>Counts are eligible recipes per provider; up to 50 are returned per search.</Text>{(section === 'kids' ? kidSourceResults : externalSourceResults).map((source) => <Text key={source.provider} style={[styles.sourceStatusRow, { color: source.status === 'found' ? colors.primary : source.status === 'unavailable' ? colors.destructive : colors.mutedForeground }]}>{source.provider}: {onlineSourceDescription(source)}</Text>)}</View> : null}
+        {currentResultCounts ? <Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>{currentResultCounts.eligible} eligible · {currentResultCounts.duplicates} duplicate links removed · {currentResultCounts.capped} beyond the {currentResultCounts.limit} limit · {currentResultCounts.returned} returned</Text> : null}
         {(section === 'kids' ? kidSourceResults : externalSourceResults).some((source) => source.provider === 'Edamam' && source.status === 'found') ? <Image source={{ uri: EDAMAM_BADGE_URL }} accessibilityLabel="Powered by Edamam" style={{ width: 150, height: 35, resizeMode: 'contain', marginBottom: 8 }} /> : null}
         {(section === 'kids' ? kidMessage : externalMessage) ? <Text style={[styles.serviceText, { color: colors.mutedForeground, marginTop: 8 }]}>{section === 'kids' ? kidMessage : externalMessage}</Text> : null}
         {currentPublishedRecipes.length ? <View style={{ marginTop: 12 }}>

@@ -19,6 +19,7 @@ export type ExternalRecipesResponse = {
   provider: "Multiple sources";
   providersUnavailable: Array<"Edamam" | "Spoonacular" | "TheMealDB">;
   sourceResults: Array<{ provider: "Edamam" | "Spoonacular" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number }>;
+  resultCounts?: { eligible: number; duplicates: number; capped: number; returned: number; limit: number };
   safetyNotice: string;
 };
 

@@ -107,7 +107,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     const response = await originalFetch(url, { method: "POST", headers, body: JSON.stringify(request) });
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ id: string; provider: string; sourceName: string; sourceUrl: string; imageUrl: string; instructions: string; matchedIngredients: string[] }>; providersUnavailable: string[]; sourceResults: Array<{ provider: string; status: string; count: number }> };
-    assert.deepEqual(payload.recipes.map((item) => item.id), ["spoonacular:101", "202"]);
+    assert.deepEqual(payload.recipes.map((item) => item.id), ["spoonacular:101", "201", "202"]);
     assert.equal(payload.recipes[0]?.provider, "Spoonacular");
     assert.equal(payload.recipes[0]?.sourceName, "Example Kitchen");
     assert.equal(payload.recipes[0]?.sourceUrl, "https://example.com/recipes/101");

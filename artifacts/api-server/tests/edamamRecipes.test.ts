@@ -276,7 +276,7 @@ test("published search queries every source, reports each eligible count, and al
     assert.equal(response.status, 200);
     const payload = await response.json() as { recipes: Array<{ title: string; provider: string }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((recipe) => [recipe.provider, recipe.title]), [
-      ["Edamam", "Shared pasta"], ["TheMealDB", "TheMealDB pasta"],
+      ["Edamam", "Shared pasta"], ["Spoonacular", "Shared pasta"], ["TheMealDB", "TheMealDB pasta"],
       ["Edamam", "Edamam pasta"], ["Spoonacular", "Spoonacular pasta"],
     ]);
     assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.status, source.count]), [
