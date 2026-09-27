@@ -172,6 +172,47 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
   }
 });
 
+test("Spoonacular returns a pantry recipe to the app when the original link is HTTP and instructions are absent", async () => {
+  const oldKey = process.env.SPOONACULAR_API_KEY;
+  const originalMealKey = process.env.THEMEALDB_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SPOONACULAR_API_KEY = "test-key";
+  delete process.env.THEMEALDB_API_KEY;
+  const spoonCalls: URL[] = [];
+  globalThis.fetch = async (input) => {
+    const target = new URL(String(input));
+    if (target.hostname === "api.spoonacular.com") {
+      spoonCalls.push(target);
+      if (target.pathname.endsWith("/findByIngredients")) {
+        assert.equal(target.searchParams.get("ranking"), "1");
+        return new Response(JSON.stringify([{ id: 900, title: "Chicken and tomato dinner", usedIngredientCount: 1 }]), { status: 200 });
+      }
+      return new Response(JSON.stringify([{ id: 900, title: "Chicken and tomato dinner", sourceName: "Example Kitchen",
+        sourceUrl: "http://example.com/chicken", spoonacularSourceUrl: "https://spoonacular.com/chicken-and-tomato-dinner-900",
+        analyzedInstructions: [], extendedIngredients: ["Chicken breasts", "Tomato", "Fresh basil leaves", "Potato", "Carrot", "Onion", "Milk", "Cheese", "Mushroom", "Lemon"].map((name) => ({ name })),
+      }]), { status: 200 });
+    }
+    if (target.hostname === "www.themealdb.com") return new Response(JSON.stringify({ meals: [] }), { status: 200 });
+    throw new Error(`Unexpected provider: ${target.hostname}`);
+  };
+  try {
+    const response = await previousFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` },
+      body: JSON.stringify({ ingredients: ["Chicken", "Tomatoes", "Fresh basil leaves"], searchAnchors: ["Chicken"], allergies: [] }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { recipes: Array<{ provider: string; sourceUrl: string; missingIngredients: string[] }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
+    assert.equal(payload.recipes[0]?.provider, "Spoonacular");
+    assert.equal(payload.recipes[0]?.sourceUrl, "https://spoonacular.com/chicken-and-tomato-dinner-900");
+    assert.equal(payload.recipes[0]?.missingIngredients.length, 7);
+    assert.deepEqual(payload.sourceResults[1], { provider: "Spoonacular", status: "found", count: 1 });
+    assert.equal(spoonCalls.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
+    if (originalMealKey === undefined) delete process.env.THEMEALDB_API_KEY; else process.env.THEMEALDB_API_KEY = originalMealKey;
+  }
+});
+
 test("Spoonacular caps its ingredient query at the shared provider search limit", async () => {
   const oldKey = process.env.SPOONACULAR_API_KEY;
   const previousFetch = globalThis.fetch;
@@ -208,7 +249,7 @@ test("Spoonacular counts matches from the full pantry beyond the 30 query anchor
   globalThis.fetch = async (input) => {
     const target = new URL(String(input));
     if (target.pathname.endsWith("/findByIngredients")) {
-      return new Response(JSON.stringify([{ id: 640, title: "Pantry match", image: "https://example.com/pantry-match.jpg", usedIngredientCount: 1 }]), { status: 200 });
+      return new Response(JSON.stringify([{ id: 640, title: "Pantry match", image: "https://example.com/pantry-match.jpg", usedIngredientCount: 0 }]), { status: 200 });
     }
     return new Response(JSON.stringify([{
       id: 640,

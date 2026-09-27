@@ -51,10 +51,11 @@ test("Edamam uses server credentials and returns safe, online-only recipes for g
     assert.match(general[0]?.id ?? "", /^edamam:[a-f0-9]{64}$/);
     const kids = await searchEdamamRecipes({ ...input, audience: "kids", excludedIds: new Set([general[0]!.id]) });
     assert.deepEqual(kids, []);
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.equal(requests[0]?.pathname, "/api/recipes/v2");
     assert.equal(requests[0]?.searchParams.get("type"), "public");
-    assert.equal(requests[0]?.searchParams.get("q"), "Pasta Tomato");
+    assert.equal(requests[0]?.searchParams.get("q"), "pasta");
+    assert.equal(requests[2]?.searchParams.get("q"), "tomato");
     assert.equal(requests[0]?.searchParams.get("app_id"), "test-id");
     assert.equal(requests[0]?.searchParams.get("app_key"), "test-key");
   } finally {
@@ -64,16 +65,16 @@ test("Edamam uses server credentials and returns safe, online-only recipes for g
   }
 });
 
-test("Edamam caps its ingredient query at the shared provider search limit", async () => {
+test("Edamam uses focused queries and tries at most three distinct anchors when nothing qualifies", async () => {
   const oldId = process.env.EDAMAM_APP_ID;
   const oldKey = process.env.EDAMAM_APP_KEY;
   const originalFetch = globalThis.fetch;
   process.env.EDAMAM_APP_ID = "test-id";
   process.env.EDAMAM_APP_KEY = "test-key";
   const anchors = Array.from({ length: MAX_PROVIDER_SEARCH_ANCHORS + 5 }, (_, index) => `Ingredient ${index + 1}`);
-  let query = "";
+  const queries: string[] = [];
   globalThis.fetch = async (input) => {
-    query = new URL(String(input)).searchParams.get("q") ?? "";
+    queries.push(new URL(String(input)).searchParams.get("q") ?? "");
     return new Response(JSON.stringify({ hits: [] }), { status: 200 });
   };
   try {
@@ -85,7 +86,40 @@ test("Edamam caps its ingredient query at the shared provider search limit", asy
       excludedTitles: new Set<string>(),
       audience: "general",
     });
-    assert.equal(query, anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS).join(" "));
+    assert.deepEqual(queries, ["ingredient 1", "ingredient 2", "ingredient 3"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
+    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
+  }
+});
+
+test("Edamam finds a recipe from photographed pantry names after an empty first anchor", async () => {
+  const oldId = process.env.EDAMAM_APP_ID;
+  const oldKey = process.env.EDAMAM_APP_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.EDAMAM_APP_ID = "test-id";
+  process.env.EDAMAM_APP_KEY = "test-key";
+  const queries: string[] = [];
+  globalThis.fetch = async (input) => {
+    const query = new URL(String(input)).searchParams.get("q") ?? "";
+    queries.push(query);
+    return new Response(JSON.stringify({ hits: query === "chicken" ? [{ recipe: {
+      uri: "photographed-pantry", label: "Chicken and tomato dinner",
+      image: "https://example.com/dinner.jpg", url: "https://example.com/dinner",
+      ingredients: ["Chicken breasts", "Tomato", "Fresh basil leaves", "Potato", "Carrot", "Onion", "Milk", "Cheese", "Mushroom", "Lemon"].map((food) => ({ food })),
+    } }] : [] }), { status: 200 });
+  };
+  try {
+    const results = await searchEdamamRecipes({
+      pantry: ["Beef", "Chicken", "Tomatoes", "Fresh basil leaves"],
+      anchors: ["Beef", "Chicken", "Ground beef", "Fettuccine pasta"],
+      allergies: [], excludedIds: new Set<string>(), excludedTitles: new Set<string>(), audience: "general",
+    });
+    assert.deepEqual(queries, ["beef", "chicken"]);
+    assert.equal(results.length, 1);
+    assert.deepEqual(results[0]?.matchedIngredients, ["Chicken breasts", "Tomato", "Fresh basil leaves"]);
+    assert.equal(results[0]?.missingIngredients.length, 7);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;

@@ -2,6 +2,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
+import { matchesPantryIngredient, recipeIngredientIdentity as identity } from "./recipeIngredientMatch";
 import { MAX_COUNTED_MISSING_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS, MAX_TOTAL_PUBLISHED_RECIPES } from "./providerSearchLimits";
 import {
   recordCandidateRemoval,
@@ -22,6 +23,7 @@ type SpoonacularDetail = {
   image?: string;
   sourceName?: string;
   sourceUrl?: string;
+  spoonacularSourceUrl?: string;
   instructions?: string | null;
   analyzedInstructions?: Array<{ steps?: Array<{ step?: string }> }>;
   extendedIngredients?: Array<{ name?: string; original?: string }>;
@@ -29,10 +31,6 @@ type SpoonacularDetail = {
 
 export function spoonacularConfigured() {
   return Boolean(process.env.SPOONACULAR_API_KEY?.trim());
-}
-
-function identity(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/s$/, "");
 }
 
 function titleKey(value: string) {
@@ -65,9 +63,9 @@ export function normalizeSpoonacularRecipe(
     onFailure?.("invalid");
     return null;
   }
-  const sourceUrl = httpsUrl(detail.sourceUrl);
+  const sourceUrl = httpsUrl(detail.sourceUrl) ?? httpsUrl(detail.spoonacularSourceUrl);
   const imageUrl = httpsUrl(detail.image) ?? httpsUrl(summary.image);
-  if (!sourceUrl || !imageUrl) {
+  if (!sourceUrl) {
     onFailure?.("invalid");
     return null;
   }
@@ -85,10 +83,6 @@ export function normalizeSpoonacularRecipe(
   const steps = (detail.analyzedInstructions ?? []).flatMap((part) => part.steps ?? [])
     .flatMap((item) => item.step?.trim() ? [item.step.trim()] : []);
   const instructions = steps.length ? steps.join("\n") : (detail.instructions ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  if (!instructions) {
-    onFailure?.("invalid");
-    return null;
-  }
   const pantryIds = new Set(pantry.map(identity));
   const matchedIngredients: string[] = [];
   const missingIngredients: string[] = [];
@@ -97,14 +91,14 @@ export function normalizeSpoonacularRecipe(
     const key = identity(ingredient.name);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    if (pantryIds.has(key)) matchedIngredients.push(ingredient.name);
+    if (matchesPantryIngredient(ingredient.name, pantryIds)) matchedIngredients.push(ingredient.name);
     else if (!isNonCountedMissingIngredient(ingredient.name)) missingIngredients.push(ingredient.name);
   }
   const host = new URL(sourceUrl).hostname.replace(/^www\./, "");
   return {
     id: `spoonacular:${detail.id}`,
     title: detail.title.trim(),
-    imageUrl,
+    ...(imageUrl ? { imageUrl } : {}),
     provider: "Spoonacular",
     sourceName: detail.sourceName?.trim() || host,
     sourceUrl,
@@ -129,6 +123,8 @@ export async function searchSpoonacularRecipes(input: {
   });
   if (!Array.isArray(rawSearch)) throw new Error("Spoonacular search returned an invalid response");
   if (diagnostics) diagnostics.candidatesReceived += rawSearch.length;
+  const anchorIds = new Set(input.anchors.map(identity));
+  const hasUnsearchedPantry = input.pantry.some((ingredient) => !anchorIds.has(identity(ingredient)));
   const summaries: SpoonacularSummary[] = [];
   for (const item of rawSearch as SpoonacularSummary[]) {
     if (!Number.isSafeInteger(item?.id) || item.id! <= 0) {
@@ -139,7 +135,7 @@ export async function searchSpoonacularRecipes(input: {
       recordCandidateRemoval(diagnostics, "excluded");
       continue;
     }
-    if (item.usedIngredientCount !== undefined && item.usedIngredientCount <= 0) {
+    if (item.usedIngredientCount !== undefined && item.usedIngredientCount <= 0 && !hasUnsearchedPantry) {
       recordCandidateRemoval(diagnostics, "noPantryMatch");
       continue;
     }
