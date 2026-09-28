@@ -6,6 +6,7 @@ import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
 import { edamamConfigured, edamamSearchQueries, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
+import { matchesPantryIngredient, recipeIngredientIdentity } from "./recipeIngredientMatch";
 import {
   MAX_COUNTED_MISSING_INGREDIENTS,
   MAX_PROVIDER_PANTRY_INGREDIENTS,
@@ -63,6 +64,17 @@ function providerKey() {
 
 function ingredientIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/s$/, "");
+}
+
+export function hasEnoughAdditionalIngredients(recipe: ExternalRecipe, anchors: readonly string[]) {
+  const uniqueIngredients = [...new Map(recipe.ingredients.map((item) => [recipeIngredientIdentity(item.name), item.name])).values()];
+  const matchingAnchor = anchors.find((anchor) => {
+    const anchorIds = new Set([recipeIngredientIdentity(anchor)]);
+    return uniqueIngredients.some((name) => matchesPantryIngredient(name, anchorIds));
+  });
+  if (!matchingAnchor) return uniqueIngredients.length > 2;
+  const anchorIds = new Set([recipeIngredientIdentity(matchingAnchor)]);
+  return uniqueIngredients.filter((name) => !matchesPantryIngredient(name, anchorIds)).length > 2;
 }
 
 const commonSeasonings = new Set(["salt", "pepper", "water", "olive oil", "vegetable oil", "sugar"]);
@@ -331,6 +343,10 @@ router.post("/recipes/external", async (req, res) => {
         const found = await source.search(diagnostics);
         const afterRouteFilters: ExternalRecipe[] = [];
         for (const recipe of found) {
+          if (parsed.data.audience === "general" && !hasEnoughAdditionalIngredients(recipe, anchors)) {
+            recordCandidateRemoval(diagnostics, "tooFewAdditionalIngredients");
+            continue;
+          }
           if (parsed.data.course && !suitableMealCourse(recipe, parsed.data.course, parsed.data.audience, parsed.data.mainRecipe, anchors)) {
             recordCandidateRemoval(diagnostics, "courseMismatch");
             continue;

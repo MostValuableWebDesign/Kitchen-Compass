@@ -45,6 +45,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
         idMeal: id, strMeal: id === "201" ? "Tomato pasta" : "Chicken pasta",
         strInstructions: "Cook the pasta.", strIngredient1: "Pasta", strMeasure1: "1 cup",
         strIngredient2: id === "201" ? "Tomato" : "Chicken", strMeasure2: "1 cup",
+        strIngredient3: "Salt", strIngredient4: "Pepper",
       }] }), { status: 200 });
     }
     if (target.hostname === "api.spoonacular.com") {
@@ -96,6 +97,8 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
         extendedIngredients: [
           { name: "Pasta", original: "1 cup pasta" },
           { name: id === 101 ? "Tomato" : "Peanut butter", original: id === 101 ? "1 tomato" : "1 tbsp peanut butter" },
+          { name: "Salt", original: "Salt" },
+          { name: "Pepper", original: "Pepper" },
         ],
       }))), { status: 200 });
     }
@@ -334,6 +337,7 @@ test("Spoonacular diagnostics count provider and recipe qualification rejections
         duplicate: 0,
         noPantryMatch: 2,
         tooManyMissing: 1,
+        tooFewAdditionalIngredients: 0,
         excluded: 2,
         notKidFriendly: 0,
         courseMismatch: 0,

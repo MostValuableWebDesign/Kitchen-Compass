@@ -238,6 +238,7 @@ test("Edamam diagnostics count privacy-safe candidate rejection stages", async (
         duplicate: 0,
         noPantryMatch: 1,
         tooManyMissing: 1,
+        tooFewAdditionalIngredients: 0,
         excluded: 1,
         notKidFriendly: 0,
         courseMismatch: 0,
@@ -277,7 +278,7 @@ test("published search queries every source, reports each eligible count, and al
       const target = new URL(String(input));
       calledProviders.push(target.hostname);
       if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: edamamHasResults ? [
-        { recipe: { uri: "edamam-1", label: "Shared pasta", image: "https://example.com/shared.jpg", url: "https://example.com/shared", ingredients: [{ food: "Pasta", text: "1 cup pasta" }] } },
+        { recipe: { uri: "edamam-1", label: "Shared pasta", image: "https://example.com/shared.jpg", url: "https://example.com/shared", ingredients: [{ food: "Pasta", text: "1 cup pasta" }, { food: "Salt" }, { food: "Pepper" }, { food: "Water" }] } },
         { recipe: { uri: "edamam-2", label: "Edamam pasta", image: "https://example.com/edamam.jpg", url: "https://example.com/edamam", ingredients: [{ food: "Pasta", text: "1 cup pasta" }, ...sevenMissing.map((food) => ({ food, text: `1 cup ${food}` }))] } },
         { recipe: { uri: "edamam-3", label: "Rejected pasta", image: "https://example.com/rejected.jpg", url: "https://example.com/rejected", ingredients: [{ food: "Pasta", text: "1 cup pasta" }, ...eightMissing.map((food) => ({ food, text: `1 cup ${food}` }))] } },
       ] : [] }), { status: 200 });
@@ -293,13 +294,14 @@ test("published search queries every source, reports each eligible count, and al
           analyzedInstructions: [{ steps: [{ step: "Cook pasta." }] }],
           extendedIngredients: [
             { name: "Pasta", original: "1 cup pasta" },
+            ...(id === 101 ? ["Salt", "Pepper", "Water"].map((name) => ({ name, original: name })) : []),
             ...(id === 102 ? sevenMissing : id === 103 ? eightMissing : []).map((name) => ({ name, original: `1 cup ${name}` })),
           ],
         }))), { status: 200 });
       }
       if (target.hostname === "www.themealdb.com") {
         if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: [{ idMeal: "201", strMeal: "TheMealDB pasta" }] }), { status: 200 });
-        return new Response(JSON.stringify({ meals: [{ idMeal: "201", strMeal: "TheMealDB pasta", strInstructions: "Cook pasta.", strIngredient1: "Pasta", strMeasure1: "1 cup" }] }), { status: 200 });
+        return new Response(JSON.stringify({ meals: [{ idMeal: "201", strMeal: "TheMealDB pasta", strInstructions: "Cook pasta.", strIngredient1: "Pasta", strMeasure1: "1 cup", strIngredient2: "Salt", strIngredient3: "Pepper", strIngredient4: "Water" }] }), { status: 200 });
       }
       throw new Error(`Unexpected provider ${target.hostname}`);
     };

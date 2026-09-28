@@ -3,7 +3,7 @@ import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import app from "../src/app";
 import { kidFriendlyScore } from "../src/routes/kidFriendly";
-import { combineProviderRecipeResults, externalRecipeRequestSchema, type ExternalRecipe } from "../src/routes/externalRecipes";
+import { combineProviderRecipeResults, externalRecipeRequestSchema, hasEnoughAdditionalIngredients, type ExternalRecipe } from "../src/routes/externalRecipes";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "external-recipes-test-session";
@@ -26,6 +26,18 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: anchors, allergies: [] }).success, true);
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients: [...ingredients, "ingredient-65"], searchAnchors: anchors, allergies: [] }).success, false);
   assert.equal(externalRecipeRequestSchema.safeParse({ ingredients, searchAnchors: [...anchors, "ingredient-31"], allergies: [] }).success, false);
+});
+
+test("general recipes require three distinct ingredients besides one matching anchor", () => {
+  const recipe = (names: string[]): ExternalRecipe => ({
+    id: "one", title: "Chicken dinner", provider: "Edamam", sourceUrl: "https://example.com/one",
+    ingredients: names.map((name) => ({ name, measure: "1" })), instructions: "",
+    matchedIngredients: ["Chicken"], missingIngredients: [], safetyVerified: false,
+  });
+  assert.equal(hasEnoughAdditionalIngredients(recipe(["Chicken breast", "Rice", "Salt"]), ["Chicken"]), false);
+  assert.equal(hasEnoughAdditionalIngredients(recipe(["Chicken breast", "Rice", "Salt", "Tomato"]), ["Chicken"]), true);
+  assert.equal(hasEnoughAdditionalIngredients(recipe(["Chicken breast", "Rice", "Rice", "Salt"]), ["Chicken"]), false);
+  assert.equal(hasEnoughAdditionalIngredients(recipe(["Chicken", "Rice", "Salt", "Tomato"]), ["Beef", "Chicken", "Rice"]), true);
 });
 
 test("combined provider recipes choose the best ingredient fits before the 50-recipe cap", () => {
@@ -127,6 +139,7 @@ test("published recipes show source attribution and never assert allergy safety"
         idMeal: peanut ? "2" : "1", strMeal: peanut ? "Peanut egg bowl" : "Egg and tomato bowl",
         strInstructions: "Cook ingredients until done.", strIngredient1: "Egg", strMeasure1: "2",
         strIngredient2: peanut ? "Peanut butter" : "Tomato", strMeasure2: "1 tbsp",
+        strIngredient3: "Salt", strIngredient4: "Pepper",
         strMealThumb: "https://www.themealdb.com/images/test.jpg", strSource: "https://example.com/recipe",
       }] }), { status: 200 });
     }
@@ -193,6 +206,9 @@ test("kid published search keeps familiar mild pantry matches", async () => {
     return originalFetch(input, init);
   };
   try {
+    const general = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [], audience: "general" }) });
+    assert.equal(general.status, 200);
+    assert.deepEqual((await general.json() as { recipes: unknown[] }).recipes, []);
     const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], allergies: [], audience: "kids" }) });
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json() as { recipes: Array<{ title: string }> }).recipes.map((recipe) => recipe.title), ["Tomato pasta"]);
@@ -200,6 +216,37 @@ test("kid published search keeps familiar mild pantry matches", async () => {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
     else process.env.THEMEALDB_API_KEY = oldKey;
+  }
+});
+
+test("general complete-meal sides use the minimum while kid sides do not", async () => {
+  const oldKey = process.env.THEMEALDB_API_KEY;
+  process.env.THEMEALDB_API_KEY = "test-key";
+  globalThis.fetch = async (input) => {
+    const target = new URL(String(input));
+    if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: [
+      { idMeal: "short", strMeal: "Simple rice side" },
+      { idMeal: "long", strMeal: "Corn rice side" },
+    ] }), { status: 200 });
+    const short = target.searchParams.get("i") === "short";
+    return new Response(JSON.stringify({ meals: [{
+      idMeal: short ? "short" : "long", strMeal: short ? "Simple rice side" : "Corn rice side",
+      strInstructions: "Cook thoroughly.", strIngredient1: "Rice", strIngredient2: "Tomato",
+      strIngredient3: "Salt", ...(short ? {} : { strIngredient4: "Corn" }),
+    }] }), { status: 200 });
+  };
+  try {
+    const base = { ingredients: ["Rice", "Tomato"], searchAnchors: ["Rice"], allergies: [], course: "side", mainRecipe: { title: "Roast chicken", ingredientNames: ["Chicken"] } };
+    const headers = { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` };
+    const general = await originalFetch(url, { method: "POST", headers, body: JSON.stringify({ ...base, audience: "general" }) });
+    assert.equal(general.status, 200);
+    assert.deepEqual((await general.json() as { recipes: Array<{ id: string }> }).recipes.map((recipe) => recipe.id), ["long"]);
+    const kids = await originalFetch(url, { method: "POST", headers, body: JSON.stringify({ ...base, audience: "kids" }) });
+    assert.equal(kids.status, 200);
+    assert.deepEqual((await kids.json() as { recipes: Array<{ id: string }> }).recipes.map((recipe) => recipe.id), ["short", "long"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY; else process.env.THEMEALDB_API_KEY = oldKey;
   }
 });
 
@@ -293,10 +340,10 @@ test("provider counts precede the combined 50-recipe cap for general and kids", 
     const target = new URL(String(input));
     if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: Array.from({ length: 50 }, (_, index) => ({ recipe: {
       uri: `recipe-${index}`, label: `Pasta ${index}`, image: "https://example.com/image.jpg", url: `https://example.com/${index}`,
-      ingredients: [{ food: "Pasta" }],
+      ingredients: [{ food: "Pasta" }, { food: "Salt" }, { food: "Pepper" }, { food: "Water" }],
     } })) }), { status: 200 });
     if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: [{ idMeal: "meal-1", strMeal: "MealDB pasta" }] }), { status: 200 });
-    return new Response(JSON.stringify({ meals: [{ idMeal: "meal-1", strMeal: "MealDB pasta", strInstructions: "Cook.", strIngredient1: "Pasta" }] }), { status: 200 });
+    return new Response(JSON.stringify({ meals: [{ idMeal: "meal-1", strMeal: "MealDB pasta", strInstructions: "Cook.", strIngredient1: "Pasta", strIngredient2: "Salt", strIngredient3: "Pepper", strIngredient4: "Water" }] }), { status: 200 });
   };
   try {
     const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [] }) });
