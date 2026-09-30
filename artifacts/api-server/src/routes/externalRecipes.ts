@@ -7,7 +7,7 @@ import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRe
 import { recipeApiConfigured, searchRecipeApiRecipes } from "./recipeApiRecipes";
 import { recipeApiComConfigured, searchRecipeApiComRecipes } from "./recipeApiComRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
-import { matchesPantryIngredient, recipeIngredientIdentity } from "./recipeIngredientMatch";
+import { assessPublishedRecipeIngredients, matchesPantryIngredient, recipeIngredientIdentity } from "./recipeIngredientMatch";
 import {
   MAX_COUNTED_MISSING_INGREDIENTS,
   MAX_PROVIDER_PANTRY_INGREDIENTS,
@@ -51,6 +51,7 @@ export type ExternalRecipe = {
   instructions: string;
   matchedIngredients: string[];
   missingIngredients: string[];
+  possibleSubstitutions?: Array<{ recipeIngredient: string; pantryIngredient: string }>;
   safetyVerified: false;
 };
 type OnlineSource = "Spoonacular" | "RecipeAPI.io" | "Recipe-API.com" | "TheMealDB";
@@ -105,6 +106,7 @@ export function combineProviderRecipeResults(
   candidates.sort((left, right) =>
     left.recipe.missingIngredients.length - right.recipe.missingIngredients.length
     || right.recipe.matchedIngredients.length - left.recipe.matchedIngredients.length
+    || (right.recipe.possibleSubstitutions?.length ?? 0) - (left.recipe.possibleSubstitutions?.length ?? 0)
     || anchorFit(right.recipe) - anchorFit(left.recipe));
   const seenIds = new Set<string>();
   const seenSourceUrls = new Set<string>();
@@ -212,22 +214,7 @@ export function normalizeExternalMeal(
     onFailure?.("allergy");
     return null;
   }
-  const pantryIds = new Set(pantry.map(ingredientIdentity));
-  const matchedIngredients: string[] = [];
-  const missingIngredients: string[] = [];
-  const seenMatched = new Set<string>();
-  const seenMissing = new Set<string>();
-  ingredients.forEach((item) => {
-    const identity = ingredientIdentity(item.name);
-    const matches = pantryIds.has(identity);
-    if (!matches && isNonCountedMissingIngredient(item.name)) return;
-    const list = matches ? matchedIngredients : missingIngredients;
-    const seen = matches ? seenMatched : seenMissing;
-    if (!seen.has(identity)) {
-      seen.add(identity);
-      list.push(item.name);
-    }
-  });
+  const { matchedIngredients, missingIngredients, possibleSubstitutions } = assessPublishedRecipeIngredients(ingredients, pantry, isNonCountedMissingIngredient);
   return {
     id: meal.idMeal,
     title: meal.strMeal,
@@ -238,6 +225,7 @@ export function normalizeExternalMeal(
     instructions: meal.strInstructions.trim(),
     matchedIngredients,
     missingIngredients,
+    possibleSubstitutions,
     safetyVerified: false,
   };
 }
@@ -310,7 +298,9 @@ router.post("/recipes/external", async (req, res) => {
         }
         qualified.push(recipe);
       }
-      qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length || b.matchedIngredients.length - a.matchedIngredients.length);
+      qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length
+        || b.matchedIngredients.length - a.matchedIngredients.length
+        || (b.possibleSubstitutions?.length ?? 0) - (a.possibleSubstitutions?.length ?? 0));
       const recipes = qualified.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
       recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - recipes.length);
       diagnostics.eligible = recipes.length;

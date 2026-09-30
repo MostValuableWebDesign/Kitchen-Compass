@@ -199,6 +199,12 @@ test('published online recipes sort by fewer missing ingredients, then more pant
   );
 });
 
+test('a suggested substitution breaks an otherwise equal ingredient-fit tie', () => {
+  const missing = { title: 'Missing penne', matchedIngredients: ['Tomato'], missingIngredients: ['Penne pasta'] };
+  const substitute = { ...missing, title: 'Spaghetti available', possibleSubstitutions: [{ recipeIngredient: 'Penne pasta', pantryIngredient: 'Spaghetti' }] };
+  assert.deepEqual(sortPublishedRecipesByIngredientFit([missing, substitute]).map((recipe) => recipe.title), ['Spaghetti available', 'Missing penne']);
+});
+
 test('online food categories find meat types and filter ranked recipes without a new search', () => {
   const recipes = [
     { title: 'Beef tacos', ingredients: [{ name: 'Ground beef' }, { name: 'Tortillas' }], matchedIngredients: ['Beef'], missingIngredients: [] },

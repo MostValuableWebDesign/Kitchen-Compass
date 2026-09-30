@@ -11,6 +11,7 @@ export type ExternalRecipe = {
   instructions: string;
   matchedIngredients: string[];
   missingIngredients: string[];
+  possibleSubstitutions?: Array<{ recipeIngredient: string; pantryIngredient: string }>;
   safetyVerified: false;
 };
 

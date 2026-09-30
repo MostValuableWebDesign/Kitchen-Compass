@@ -152,11 +152,12 @@ export function buildPublishedRecipeSearch(
 }
 
 export function sortPublishedRecipesByIngredientFit<
-  T extends { matchedIngredients: readonly string[]; missingIngredients: readonly string[] },
+  T extends { matchedIngredients: readonly string[]; missingIngredients: readonly string[]; possibleSubstitutions?: readonly unknown[] },
 >(recipes: readonly T[]): T[] {
   return [...recipes].sort((left, right) =>
     left.missingIngredients.length - right.missingIngredients.length
-    || right.matchedIngredients.length - left.matchedIngredients.length);
+    || right.matchedIngredients.length - left.matchedIngredients.length
+    || (right.possibleSubstitutions?.length ?? 0) - (left.possibleSubstitutions?.length ?? 0));
 }
 
 export const publishedRecipeFoodCategories = [

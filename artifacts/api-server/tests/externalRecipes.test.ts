@@ -81,6 +81,18 @@ test("one missing ingredient outranks five even with fewer pantry matches", () =
   assert.equal(combined.some((item) => item.id === "five-29"), false);
 });
 
+test("combined results prefer a possible substitute after exact match and missing counts tie", () => {
+  const base: ExternalRecipe = {
+    id: "missing", title: "Missing penne", provider: "Spoonacular", sourceUrl: "https://example.com/missing",
+    ingredients: [{ name: "Penne pasta", measure: "1 cup" }], instructions: "Cook.",
+    matchedIngredients: ["Tomato"], missingIngredients: ["Penne pasta"], safetyVerified: false,
+  };
+  const substitute: ExternalRecipe = { ...base, id: "substitute", title: "Spaghetti available",
+    sourceUrl: "https://example.com/substitute",
+    possibleSubstitutions: [{ recipeIngredient: "Penne pasta", pantryIngredient: "Spaghetti" }] };
+  assert.deepEqual(combineProviderRecipeResults([[base, substitute]], 2).map((recipe) => recipe.id), ["substitute", "missing"]);
+});
+
 test("12 Spoonacular and 21 MealDB recipes return 33 when links differ despite shared titles", () => {
   const recipe = (provider: "Spoonacular" | "TheMealDB", index: number): ExternalRecipe => ({
     id: `${provider}-${index}`, title: `Chicken pasta ${index % 3}`, provider,

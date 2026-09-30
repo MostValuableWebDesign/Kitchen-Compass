@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/recipe-calculations";
 import type { ExternalRecipe } from "./externalRecipes";
-import { matchesPantryIngredient, recipeIngredientIdentity as identity } from "./recipeIngredientMatch";
+import { assessPublishedRecipeIngredients } from "./recipeIngredientMatch";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import type { RecipeNormalizationFailure } from "./recipeSearchDiagnostics";
 
@@ -29,22 +29,11 @@ export function normalizeStructuredOnlineRecipe(raw: unknown, pantry: string[], 
   if (requestedAllergenConflicts(assessRecipeAllergens(safetyNames, []), allergies)) {
     onFailure?.("allergy"); return null;
   }
-  const pantryIds = new Set(pantry.map(identity));
-  const matchedIngredients: string[] = [];
-  const missingIngredients: string[] = [];
-  const seen = new Set<string>();
-  for (const { name } of ingredients) {
-    const key = identity(name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (matchesPantryIngredient(name, pantryIds)) matchedIngredients.push(name);
-    else if (!isNonCountedMissingIngredient(name)) missingIngredients.push(name);
-  }
+  const { matchedIngredients, missingIngredients, possibleSubstitutions } = assessPublishedRecipeIngredients(ingredients, pantry, isNonCountedMissingIngredient);
   const title = value.title.trim();
   const instructions = (value.instructions as string[]).map((step) => step.trim()).join("\n");
   const id = options.id ?? `${options.idPrefix}:${createHash("sha256").update(JSON.stringify([title.toLowerCase(), ingredients, instructions])).digest("hex")}`;
   // This provider has no recipe permalink. The app displays its instructions in the current session.
   return { id, title, provider: options.provider, sourceName: options.provider, sourceUrl: "", ingredients, instructions,
-    matchedIngredients, missingIngredients, safetyVerified: false };
+    matchedIngredients, missingIngredients, possibleSubstitutions, safetyVerified: false };
 }
-

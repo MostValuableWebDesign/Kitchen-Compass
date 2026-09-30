@@ -2,7 +2,7 @@ import { assessRecipeAllergens, requestedAllergenConflicts } from "@workspace/re
 import { kidFriendlyScore } from "./kidFriendly";
 import type { ExternalRecipe } from "./externalRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
-import { matchesPantryIngredient, recipeIngredientIdentity as identity } from "./recipeIngredientMatch";
+import { assessPublishedRecipeIngredients, recipeIngredientIdentity as identity } from "./recipeIngredientMatch";
 import { MAX_COUNTED_MISSING_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS, MAX_TOTAL_PUBLISHED_RECIPES } from "./providerSearchLimits";
 import {
   recordCandidateRemoval,
@@ -83,17 +83,7 @@ export function normalizeSpoonacularRecipe(
   const steps = (detail.analyzedInstructions ?? []).flatMap((part) => part.steps ?? [])
     .flatMap((item) => item.step?.trim() ? [item.step.trim()] : []);
   const instructions = steps.length ? steps.join("\n") : (detail.instructions ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  const pantryIds = new Set(pantry.map(identity));
-  const matchedIngredients: string[] = [];
-  const missingIngredients: string[] = [];
-  const seen = new Set<string>();
-  for (const ingredient of ingredients) {
-    const key = identity(ingredient.name);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    if (matchesPantryIngredient(ingredient.name, pantryIds)) matchedIngredients.push(ingredient.name);
-    else if (!isNonCountedMissingIngredient(ingredient.name)) missingIngredients.push(ingredient.name);
-  }
+  const { matchedIngredients, missingIngredients, possibleSubstitutions } = assessPublishedRecipeIngredients(ingredients, pantry, isNonCountedMissingIngredient);
   const host = new URL(sourceUrl).hostname.replace(/^www\./, "");
   return {
     id: `spoonacular:${detail.id}`,
@@ -106,6 +96,7 @@ export function normalizeSpoonacularRecipe(
     instructions,
     matchedIngredients,
     missingIngredients,
+    possibleSubstitutions,
     safetyVerified: false,
   };
 }
@@ -182,7 +173,9 @@ export async function searchSpoonacularRecipes(input: {
     qualified.push(recipe);
   }
 
-  qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length || b.matchedIngredients.length - a.matchedIngredients.length);
+  qualified.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length
+    || b.matchedIngredients.length - a.matchedIngredients.length
+    || (b.possibleSubstitutions?.length ?? 0) - (a.possibleSubstitutions?.length ?? 0));
   const results = qualified.slice(0, MAX_TOTAL_PUBLISHED_RECIPES);
   recordCandidateRemoval(diagnostics, "resultLimit", qualified.length - results.length);
   if (diagnostics) diagnostics.eligible = results.length;

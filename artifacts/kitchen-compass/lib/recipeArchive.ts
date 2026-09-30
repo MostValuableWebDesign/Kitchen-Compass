@@ -66,7 +66,9 @@ export function parseExternalRecipe(value: unknown): ExternalRecipe | undefined 
     || value.safetyVerified !== false || !Array.isArray(value.ingredients)
     || !value.ingredients.every((item) => isRecord(item) && typeof item.name === 'string' && typeof item.measure === 'string')
     || !Array.isArray(value.matchedIngredients) || !value.matchedIngredients.every((item) => typeof item === 'string')
-    || !Array.isArray(value.missingIngredients) || !value.missingIngredients.every((item) => typeof item === 'string')) return undefined;
+    || !Array.isArray(value.missingIngredients) || !value.missingIngredients.every((item) => typeof item === 'string')
+    || (value.possibleSubstitutions !== undefined && (!Array.isArray(value.possibleSubstitutions)
+      || !value.possibleSubstitutions.every((item) => isRecord(item) && typeof item.recipeIngredient === 'string' && typeof item.pantryIngredient === 'string')))) return undefined;
   return {
     id: value.id,
     title: value.title,
@@ -77,6 +79,7 @@ export function parseExternalRecipe(value: unknown): ExternalRecipe | undefined 
     instructions: value.instructions,
     matchedIngredients: value.matchedIngredients as string[],
     missingIngredients: value.missingIngredients as string[],
+    ...(value.possibleSubstitutions ? { possibleSubstitutions: value.possibleSubstitutions as NonNullable<ExternalRecipe['possibleSubstitutions']> } : {}),
     safetyVerified: false,
   };
 }
