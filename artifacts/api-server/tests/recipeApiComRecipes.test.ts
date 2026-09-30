@@ -25,47 +25,115 @@ const raw = (index = 1, name = "Chicken pasta", names = ["Chicken", "Pasta", "To
   id: uuid(index), name, ingredients: [{ group_name: "Main", items: names.map((name) => ({ name, quantity: name === "Salt" ? null : 1, unit: name === "Salt" ? null : "cup", preparation: null, notes: name === "Salt" ? "to taste" : null })) }],
   instructions: [{ step_number: 2, text: "Cook safely." }, { step_number: 1, text: "Prepare ingredients." }], dietary: { flags: [], not_suitable_for: [] as string[] },
 });
+const ingredientNames = ["chicken", "pasta", "tomato", "potato"];
+function ingredientResponse(location: URL) {
+  if (location.pathname !== "/api/v1/ingredients") return undefined;
+  const name = location.searchParams.get("q")!;
+  return new Response(JSON.stringify({ data: [{ id: uuid(900 + ingredientNames.indexOf(name)), name }] }));
+}
 const input = { pantry: ["Chicken", "Pasta", "Tomato"], anchors: ["Chicken", "Pasta"], allergies: [], excludedIds: new Set<string>(), excludedTitles: new Set<string>(), audience: "general" as const };
 
-test("recipe-api.com uses a free text discovery call, server authentication, and bounded details", async () => {
+test("recipe-api.com resolves multiple ingredient IDs for one discovery call, server authentication, and bounded details", async () => {
   const calls: URL[] = [];
   let expectedDetails = 3;
   globalThis.fetch = async (target, init) => {
     const location = new URL(String(target)); calls.push(location);
     assert.equal((init?.headers as Record<string, string>)["X-API-Key"], "rapi_test-secret");
     assert.equal(location.toString().includes("rapi_test-secret"), false);
+    const ingredient = ingredientResponse(location); if (ingredient) return ingredient;
     if (location.pathname === "/api/v1/recipes") {
-      assert.equal(location.searchParams.get("q"), "chicken");
+      assert.equal(location.searchParams.get("q"), null);
+      assert.equal(location.searchParams.get("ingredients"), `${uuid(900)},${uuid(901)}`);
       assert.equal(location.searchParams.get("per_page"), String(expectedDetails));
-      assert.equal(location.searchParams.has("ingredients"), false);
+      assert.equal(location.searchParams.has("ingredients"), true);
       return new Response(JSON.stringify({ data: Array.from({ length: 10 }, (_, i) => ({ id: uuid(i + 1), name: "Chicken pasta" })), meta: { total: 10, page: 1 } }));
     }
     const index = Number(location.pathname.slice(-12));
     return new Response(JSON.stringify({ data: raw(index) }));
   };
   const results = await searchRecipeApiComRecipes(input);
-  assert.equal(calls.length, 4); assert.equal(results.length, 3);
+  assert.equal(calls.length, 6); assert.equal(results.length, 3);
   assert.equal(results[0]?.provider, "Recipe-API.com"); assert.equal(results[0]?.id, `recipe-api-com:${uuid(1)}`);
   assert.equal(results[0]?.instructions, "Prepare ingredients.\nCook safely.");
   assert.equal(results[0]?.ingredients.at(-1)?.measure, "Salt to taste");
   assert.equal(results[0]?.sourceUrl, "");
   calls.length = 0; expectedDetails = 2;
   assert.equal((await searchRecipeApiComRecipes({ ...input, course: "main" })).length, 2);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
 });
 
 test("archived and duplicate summaries avoid metered detail calls; quota stops further requests and retains qualified recipes", async () => {
   const calls: URL[] = [];
   globalThis.fetch = async (target) => {
     const location = new URL(String(target)); calls.push(location);
+    const ingredient = ingredientResponse(location); if (ingredient) return ingredient;
     if (location.pathname === "/api/v1/recipes") return new Response(JSON.stringify({ data: [
       { id: uuid(1), name: "Chicken pasta" }, { id: uuid(1), name: "Chicken pasta" }, { id: uuid(2), name: "Archived chicken" }, { id: "bad-id", name: "Chicken" }, { id: uuid(3), name: "Chicken rice" }, { id: uuid(4), name: "Chicken salad" },
     ] }));
     return location.pathname.endsWith(uuid(1)) ? new Response(JSON.stringify({ data: raw(1) })) : new Response("quota", { status: 429 });
   };
   const results = await searchRecipeApiComRecipes({ ...input, excludedIds: new Set([`recipe-api-com:${uuid(2)}`]) });
-  assert.equal(results.length, 1); assert.equal(calls.length, 3);
+  assert.equal(results.length, 1); assert.equal(calls.length, 5);
   assert.equal(calls.some((location) => location.pathname.endsWith(uuid(2)) || location.pathname.endsWith(uuid(4))), false);
+});
+
+test("thirty anchors share one recipe request; duplicate IDs and seasonings do not enlarge the filter", async () => {
+  const anchors = Array.from({ length: 31 }, (_, index) => `Ingredient ${index}`);
+  let lookups = 0; let searches = 0;
+  globalThis.fetch = async (target) => {
+    const location = new URL(String(target));
+    if (location.pathname === "/api/v1/ingredients") {
+      const name = location.searchParams.get("q")!;
+      lookups++;
+      assert.notEqual(name, "ingredient 30");
+      return new Response(JSON.stringify({ data: [{ id: uuid(100 + Number(name.split(" ")[1])), name }] }));
+    }
+    assert.equal(location.pathname, "/api/v1/recipes"); searches++;
+    assert.equal(location.searchParams.get("ingredients")?.split(",").length, 30);
+    assert.equal(location.searchParams.has("q"), false);
+    return new Response(JSON.stringify({ data: [] }));
+  };
+  assert.deepEqual(await searchRecipeApiComRecipes({ ...input, anchors }), []);
+  assert.equal(lookups, 30); assert.equal(searches, 1);
+  lookups = 0; searches = 0;
+  globalThis.fetch = async (target) => {
+    const location = new URL(String(target));
+    if (location.pathname === "/api/v1/ingredients") {
+      lookups++;
+      return new Response(JSON.stringify({ data: [{ id: uuid(100).toUpperCase(), name: location.searchParams.get("q") }] }));
+    }
+    searches++;
+    assert.equal(location.searchParams.get("ingredients"), uuid(100));
+    return new Response(JSON.stringify({ data: [] }));
+  };
+  await searchRecipeApiComRecipes({ ...input, anchors: ["Chicken", "Chicken breast", "Pasta", "Italian seasoning", "Sea salt"] });
+  assert.equal(lookups, 2); assert.equal(searches, 1);
+});
+
+test("ingredient resolution prefers an exact hit and never drops unresolved requirements or retries failures", async () => {
+  let calls = 0;
+  globalThis.fetch = async (target) => {
+    const location = new URL(String(target)); calls++;
+    if (location.pathname === "/api/v1/ingredients") {
+      return new Response(JSON.stringify({ data: location.searchParams.get("q") === "chicken"
+        ? [{ id: uuid(99), name: "Chicken broth" }, { id: uuid(98), name: "Chicken breast" }, { id: uuid(97), name: "Chicken" }]
+        : [{ id: "bad-id", name: "Pasta" }, { id: uuid(96), name: "Rice" }] }));
+    }
+    assert.fail("An unresolved required ingredient must prevent recipe/detail requests");
+  };
+  assert.deepEqual(await searchRecipeApiComRecipes(input), []);
+  assert.equal(calls, 2);
+  globalThis.fetch = async (target) => {
+    const location = new URL(String(target));
+    if (location.pathname === "/api/v1/ingredients") return new Response(JSON.stringify({ data: [{ id: uuid(99), name: "Chicken broth" }, { id: uuid(98), name: "Chicken breast" }, { id: uuid(97), name: "Chicken" }] }));
+    assert.equal(location.searchParams.get("ingredients"), uuid(97));
+    return new Response(JSON.stringify({ data: [] }));
+  };
+  await searchRecipeApiComRecipes({ ...input, anchors: ["Chicken"] });
+  calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response("quota", { status: 429 }); };
+  await assert.rejects(searchRecipeApiComRecipes(input), /responded 429/);
+  assert.equal(calls, 1);
 });
 
 test("grouped recipes validate IDs and steps, retain nullable quantities, and check allergies in notes", () => {
@@ -85,6 +153,7 @@ test("detail eligibility checks pantry matches, seven missing ingredients, spice
   const details = [raw(1, "Pasta salad", names), raw(2, "Pasta salad", [...names, "Peas"]), raw(3, "Peanut pasta", ["Pasta", "Peanut butter"]), raw(4, "Spicy pasta", ["Pasta", "Cayenne"]), raw(5, "Rice salad", ["Rice"])];
   globalThis.fetch = async (target) => {
     const location = new URL(String(target));
+    const ingredient = ingredientResponse(location); if (ingredient) return ingredient;
     if (location.pathname === "/api/v1/recipes") return new Response(JSON.stringify({ data: details.map(({ id, name }) => ({ id, name })) }));
     return new Response(JSON.stringify({ data: details.find((recipe) => location.pathname.endsWith(recipe.id)) }));
   };
@@ -105,6 +174,7 @@ test("Recipe-API.com populates general, kids, and complete meals using the exist
   globalThis.fetch = async (target) => {
     const location = new URL(String(target));
     if (location.hostname !== "recipe-api.com") return new Response(JSON.stringify({ meals: [] }));
+    const ingredient = ingredientResponse(location); if (ingredient) return ingredient;
     return new Response(JSON.stringify({ data: location.pathname === "/api/v1/recipes" ? [{ id: candidate.id, name: candidate.name }] : candidate }));
   };
   for (const body of [{ audience: "general" }, { audience: "kids" }, { audience: "general", course: "main" }, { audience: "kids", course: "main" }]) {

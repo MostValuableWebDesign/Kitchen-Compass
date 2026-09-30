@@ -2,7 +2,8 @@ import { assessRecipeAllergens, requestedAllergenConflicts, recipeSearchFoodTerm
 import type { ExternalRecipe } from "./externalRecipes";
 import { kidFriendlyScore } from "./kidFriendly";
 import { normalizeStructuredOnlineRecipe } from "./structuredOnlineRecipe";
-import { MAX_COUNTED_MISSING_INGREDIENTS } from "./providerSearchLimits";
+import { MAX_COUNTED_MISSING_INGREDIENTS, MAX_PROVIDER_SEARCH_ANCHORS } from "./providerSearchLimits";
+import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import { recordCandidateRemoval, type RecipeNormalizationFailure, type RecipeSearchDiagnostics } from "./recipeSearchDiagnostics";
 
 export const recipeApiComUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -52,8 +53,10 @@ export async function searchRecipeApiComRecipes(input: {
 }, diagnostics?: RecipeSearchDiagnostics): Promise<ExternalRecipe[]> {
   const key = process.env.RECIPE_API_COM_API_KEY?.trim();
   if (!key) throw new Error("Recipe-API.com is not configured");
-  const query = input.anchors.map(recipeSearchFoodTerm).find(Boolean);
-  if (!query) return [];
+  const terms = [...new Set(input.anchors.slice(0, MAX_PROVIDER_SEARCH_ANCHORS)
+    .filter((name) => name.trim() && !isNonCountedMissingIngredient(name))
+    .map((name) => recipeSearchFoodTerm(name) ?? name.trim().toLowerCase()))];
+  if (!terms.length) return [];
   const configured = Number(process.env.RECIPE_API_COM_MAX_DETAILS ?? 3);
   const maxDetails = Math.min(input.course ? 2 : 5, Number.isInteger(configured) && configured > 0 ? configured : 3);
   const signal = AbortSignal.timeout(20_000);
@@ -64,7 +67,20 @@ export async function searchRecipeApiComRecipes(input: {
     if (!record(payload)) throw new Error("Recipe-API.com returned an invalid response");
     return payload;
   };
-  const params = new URLSearchParams({ q: query, per_page: String(maxDetails), page: "1" });
+  const ingredientIds = new Set<string>();
+  for (const term of terms) {
+    // The recipe filter accepts UUIDs, not ingredient names. Discovery is unmetered.
+    const lookup = await json(`ingredients?${new URLSearchParams({ q: term, per_page: "100", page: "1" })}`);
+    if (!Array.isArray(lookup.data)) throw new Error("Recipe-API.com ingredient search returned an invalid response");
+    const candidates = lookup.data.filter((item): item is { id: string; name: string } => record(item)
+      && typeof item.id === "string" && recipeApiComUuid.test(item.id) && typeof item.name === "string" && Boolean(item.name.trim()));
+    const ingredient = candidates.find((item) => titleKey(item.name) === titleKey(term))
+      ?? candidates.find((item) => recipeSearchFoodTerm(item.name) === term);
+    // Never quietly drop a required ingredient or replace it with an unrelated hit.
+    if (!ingredient) return [];
+    ingredientIds.add(ingredient.id.toLowerCase());
+  }
+  const params = new URLSearchParams({ ingredients: [...ingredientIds].join(","), per_page: String(maxDetails), page: "1" });
   const listing = await json(`recipes?${params}`);
   if (!Array.isArray(listing.data)) throw new Error("Recipe-API.com search returned an invalid response");
   if (diagnostics) diagnostics.candidatesReceived += listing.data.length;
