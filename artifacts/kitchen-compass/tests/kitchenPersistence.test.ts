@@ -145,3 +145,18 @@ test('archives from unsupported providers are dropped during reload', () => {
   const restored = parsePersistedKitchenState(JSON.stringify(state), defaultPreferences);
   assert.deepEqual(restored.archivedRecipes, []);
 });
+
+test('API Ninjas archives retain only a stable opaque exclusion ID', () => {
+  const recipe = {
+    id: `api-ninjas:${'b'.repeat(64)}`, title: 'Chicken pasta', provider: 'API Ninjas' as const,
+    sourceUrl: '', ingredients: [{ name: 'Chicken', measure: '1 cup chicken' }], instructions: 'Cook chicken safely.',
+    matchedIngredients: ['Chicken'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], recipe);
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState({ ...emptyPersistedKitchenState(), archivedRecipes: archived }), defaultPreferences);
+  assert.equal(restored.archivedRecipes[0]?.externalId, recipe.id);
+  assert.equal(isArchivedPublished(recipe, restored.archivedRecipes), true);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.title), false);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.instructions), false);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes('1 cup'), false);
+});

@@ -194,7 +194,7 @@ export function filterPublishedRecipesByCategory<T extends CategorizedPublishedR
   return category === 'All' ? [...recipes] : recipes.filter((recipe) => categoriesForPublishedRecipe(recipe).includes(category));
 }
 
-export const publishedRecipeSources = ['Spoonacular', 'TheMealDB', 'FatSecret'] as const;
+export const publishedRecipeSources = ['Spoonacular', 'API Ninjas', 'TheMealDB', 'FatSecret'] as const;
 export type PublishedRecipeSource = typeof publishedRecipeSources[number];
 
 export function filterPublishedRecipesBySource<T extends { provider: PublishedRecipeSource }>(

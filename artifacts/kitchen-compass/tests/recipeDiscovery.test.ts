@@ -214,14 +214,15 @@ test('online food categories find meat types and filter ranked recipes without a
 
 test('online source filter combines with food categories and preserves recipe order', () => {
   const recipes = [
-    { title: 'Chicken rice', provider: 'TheMealDB' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: [] },
+    { title: 'Chicken rice', provider: 'API Ninjas' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: [] },
     { title: 'Chicken pasta', provider: 'Spoonacular' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: ['Pasta'] },
     { title: 'Chicken tacos', provider: 'TheMealDB' as const, ingredients: [{ name: 'Chicken' }], matchedIngredients: ['Chicken'], missingIngredients: ['Tortilla', 'Onion'] },
     { title: 'Beef stew', provider: 'TheMealDB' as const, ingredients: [{ name: 'Beef' }], matchedIngredients: ['Beef'], missingIngredients: [] },
   ];
   const ranked = sortPublishedRecipesByIngredientFit(recipes);
   const chicken = filterPublishedRecipesByCategory(ranked, 'Chicken');
-  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'TheMealDB').map((recipe) => recipe.title), ['Chicken rice', 'Chicken tacos']);
+  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'TheMealDB').map((recipe) => recipe.title), ['Chicken tacos']);
+  assert.deepEqual(filterPublishedRecipesBySource(chicken, 'API Ninjas').map((recipe) => recipe.title), ['Chicken rice']);
   assert.deepEqual(filterPublishedRecipesBySource(chicken, 'Spoonacular').map((recipe) => recipe.title), ['Chicken pasta']);
   assert.deepEqual(filterPublishedRecipesBySource(chicken, 'All'), chicken);
 });

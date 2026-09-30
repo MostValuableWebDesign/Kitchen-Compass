@@ -13,6 +13,8 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port.");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
+const oldNinjasKey = process.env.API_NINJAS_API_KEY;
+delete process.env.API_NINJAS_API_KEY;
 const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
 delete process.env.SPOONACULAR_API_KEY;
 
@@ -96,6 +98,7 @@ test("12 Spoonacular and 21 MealDB recipes return 33 when links differ despite s
 beforeEach(() => resetScanRateLimiter());
 after(() => {
   server.close();
+  if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
   if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
 });
 
@@ -146,6 +149,7 @@ test("published recipes show source attribution and never assert allergy safety"
     assert.deepEqual(payload.recipes.map((item) => item.title), ["Egg and tomato bowl"]);
     assert.deepEqual(payload.sourceResults, [
       { provider: "Spoonacular", status: "not_configured", count: 0 },
+      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 1 },
     ]);
     assert.equal(payload.recipes[0]?.provider, "TheMealDB");
@@ -341,7 +345,7 @@ test("provider counts precede the combined 50-recipe cap for general and kids", 
       assert.equal(payload.recipes.length, 50);
       assert.equal(payload.recipes[0]?.provider, "Spoonacular");
       assert.equal(payload.recipes[1]?.provider, "TheMealDB");
-      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["TheMealDB", 50]]);
+      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["API Ninjas", 0], ["TheMealDB", 50]]);
       assert.deepEqual(payload.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
     }
   } finally {

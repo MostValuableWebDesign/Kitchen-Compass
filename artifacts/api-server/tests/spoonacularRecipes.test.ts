@@ -14,8 +14,11 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
+const oldNinjasKey = process.env.API_NINJAS_API_KEY;
+delete process.env.API_NINJAS_API_KEY;
 after(() => {
   server.close();
+  if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
 });
 
 test("Spoonacular uses a server key, full recipe details, source credit, and archived exclusions", async () => {
@@ -114,6 +117,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(payload.providersUnavailable, []);
     assert.deepEqual(payload.sourceResults, [
       { provider: "Spoonacular", status: "found", count: 1 },
+      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);
     assert.equal(calls.length, 2);
@@ -145,6 +149,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.match(kidsPayload.safetyNotice, /Check the original recipe and every package label/);
     assert.deepEqual(kidsPayload.sourceResults, [
       { provider: "Spoonacular", status: "found", count: 1 },
+      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "no_results", count: 0 },
     ]);
 
@@ -156,6 +161,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(fallback.recipes.map((item) => item.id), ["201", "202"]);
     assert.deepEqual(fallback.sourceResults, [
       { provider: "Spoonacular", status: "unavailable", count: 0 },
+      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);
   } finally {
