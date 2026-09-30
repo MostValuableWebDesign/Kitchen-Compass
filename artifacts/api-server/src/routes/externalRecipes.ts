@@ -4,7 +4,6 @@ import { assessRecipeAllergens, primaryProteinSearchTerm, recipeSearchFoodTerm, 
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
-import { edamamConfigured, edamamSearchQueries, searchEdamamRecipes } from "./edamamRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
 import { matchesPantryIngredient, recipeIngredientIdentity } from "./recipeIngredientMatch";
 import {
@@ -43,7 +42,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB" | "FatSecret" | "Spoonacular" | "Edamam";
+  provider: "TheMealDB" | "FatSecret" | "Spoonacular";
   sourceName?: string;
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
@@ -52,9 +51,9 @@ export type ExternalRecipe = {
   missingIngredients: string[];
   safetyVerified: false;
 };
-type OnlineSource = "Edamam" | "Spoonacular" | "TheMealDB";
+type OnlineSource = "Spoonacular" | "TheMealDB";
 type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number };
-const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular and Edamam recipes are available online only.";
+const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular recipes are available online only.";
 
 function providerKey() {
   const key = process.env.THEMEALDB_API_KEY?.trim();
@@ -252,13 +251,12 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key && !spoonacularConfigured() && !edamamConfigured()) {
+  if (!key && !spoonacularConfigured()) {
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null,
-      sourceResults: ["Edamam", "Spoonacular", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
+      sourceResults: ["Spoonacular", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
       resultCounts: { eligible: 0, duplicates: 0, capped: 0, returned: 0, limit: MAX_TOTAL_PUBLISHED_RECIPES },
       sourceResults: [
-        { provider: "Edamam", status: "not_configured", count: 0 },
         { provider: "Spoonacular", status: "not_configured", count: 0 },
         { provider: "TheMealDB", status: "not_configured", count: 0 },
       ] satisfies OnlineSourceResult[] });
@@ -316,8 +314,7 @@ router.post("/recipes/external", async (req, res) => {
     };
     const dislikes = new Set(parsed.data.dislikes.map(ingredientIdentity));
     const limit = MAX_TOTAL_PUBLISHED_RECIPES;
-    const sources: Array<{ provider: OnlineSource; configured: boolean; searchable?: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
-      { provider: "Edamam", configured: edamamConfigured(), searchable: edamamSearchQueries(anchors).length > 0, search: (diagnostics) => searchEdamamRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
+    const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },
     ];
@@ -326,14 +323,6 @@ router.post("/recipes/external", async (req, res) => {
         return {
           provider: source.provider,
           sourceResult: { provider: source.provider, status: "not_configured", count: 0 } satisfies OnlineSourceResult,
-          recipes: [] as ExternalRecipe[],
-          diagnostics: undefined,
-        };
-      }
-      if (source.searchable === false) {
-        return {
-          provider: source.provider,
-          sourceResult: { provider: source.provider, status: "not_searched", count: 0 } satisfies OnlineSourceResult,
           recipes: [] as ExternalRecipe[],
           diagnostics: undefined,
         };

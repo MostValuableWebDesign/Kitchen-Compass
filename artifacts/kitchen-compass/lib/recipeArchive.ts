@@ -8,7 +8,7 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
-  externalProvider?: 'FatSecret' | 'Spoonacular' | 'Edamam';
+  externalProvider?: 'FatSecret' | 'Spoonacular';
   externalId?: string;
 };
 
@@ -32,11 +32,10 @@ export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, a
 }
 
 export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: ExternalRecipe, archivedAt = new Date().toISOString()) {
-  if (recipe.provider === 'FatSecret' || recipe.provider === 'Spoonacular' || recipe.provider === 'Edamam') {
+  if (recipe.provider === 'FatSecret' || recipe.provider === 'Spoonacular') {
     const key = recipe.id;
     if (archived.some((entry) => entry.key === key)) return archived;
-    // Edamam data cannot be stored under the default API terms; retain only the opaque ID.
-    const title = recipe.provider === 'Spoonacular' ? recipe.title : recipe.provider === 'Edamam' ? 'Archived Edamam recipe' : `${recipe.provider} recipe #${recipe.id.split(':')[1]}`;
+    const title = recipe.provider === 'Spoonacular' ? recipe.title : `${recipe.provider} recipe #${recipe.id.split(':')[1]}`;
     return [...archived, { key, title, externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
   }
   const key = archiveKey(recipe.title);
@@ -80,15 +79,15 @@ export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
   return value.flatMap((item): ArchivedRecipe[] => {
     if (!isRecord(item) || typeof item.title !== 'string' || !item.title.trim()) return [];
     const key = archiveKey(item.title);
-    const onlineProvider = item.externalProvider === 'FatSecret' ? 'FatSecret' : item.externalProvider === 'Spoonacular' ? 'Spoonacular' : item.externalProvider === 'Edamam' ? 'Edamam' : undefined;
+    const onlineProvider = item.externalProvider === 'FatSecret' ? 'FatSecret' : item.externalProvider === 'Spoonacular' ? 'Spoonacular' : undefined;
     if (onlineProvider && typeof item.externalId === 'string'
-      && new RegExp(`^${onlineProvider.toLowerCase()}:${onlineProvider === 'Edamam' ? '[a-f0-9]{64}' : '\\d+'}$`).test(item.externalId)) {
+      && new RegExp(`^${onlineProvider.toLowerCase()}:\\d+$`).test(item.externalId)) {
       if (seen.has(item.externalId)) return [];
       seen.add(item.externalId);
-      return [{ key: item.externalId, title: onlineProvider === 'Spoonacular' ? item.title.trim() : onlineProvider === 'Edamam' ? 'Archived Edamam recipe' : `${onlineProvider} recipe #${item.externalId.split(':')[1]}`, externalProvider: onlineProvider, externalId: item.externalId,
+      return [{ key: item.externalId, title: onlineProvider === 'Spoonacular' ? item.title.trim() : `${onlineProvider} recipe #${item.externalId.split(':')[1]}`, externalProvider: onlineProvider, externalId: item.externalId,
         archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
     }
-    if (!key || seen.has(key)) return [];
+    if (item.externalProvider || !key || seen.has(key)) return [];
     seen.add(key);
     const externalRecipe = parseExternalRecipe(item.externalRecipe);
     return [{

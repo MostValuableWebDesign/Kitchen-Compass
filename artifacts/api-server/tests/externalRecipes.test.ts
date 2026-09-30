@@ -13,11 +13,7 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port.");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
-const oldEdamamId = process.env.EDAMAM_APP_ID;
-const oldEdamamKey = process.env.EDAMAM_APP_KEY;
 const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
-delete process.env.EDAMAM_APP_ID;
-delete process.env.EDAMAM_APP_KEY;
 delete process.env.SPOONACULAR_API_KEY;
 
 test("published recipe request accepts 64 matching ingredients but keeps search anchors capped at 30", () => {
@@ -30,7 +26,7 @@ test("published recipe request accepts 64 matching ingredients but keeps search 
 
 test("general recipes require three distinct ingredients besides one matching anchor", () => {
   const recipe = (names: string[]): ExternalRecipe => ({
-    id: "one", title: "Chicken dinner", provider: "Edamam", sourceUrl: "https://example.com/one",
+    id: "one", title: "Chicken dinner", provider: "Spoonacular", sourceUrl: "https://example.com/one",
     ingredients: names.map((name) => ({ name, measure: "1" })), instructions: "",
     matchedIngredients: ["Chicken"], missingIngredients: [], safetyVerified: false,
   });
@@ -41,7 +37,7 @@ test("general recipes require three distinct ingredients besides one matching an
 });
 
 test("combined provider recipes choose the best ingredient fits before the 50-recipe cap", () => {
-  const makeRecipe = (provider: "Edamam" | "Spoonacular" | "TheMealDB", index: number, matchedCount: number) => ({
+  const makeRecipe = (provider: "Spoonacular" | "TheMealDB", index: number, matchedCount: number) => ({
     id: `${provider}-${index}`,
     title: `${provider} recipe ${index}`,
     provider,
@@ -52,22 +48,22 @@ test("combined provider recipes choose the best ingredient fits before the 50-re
     missingIngredients: [],
     safetyVerified: false as const,
   });
-  const matchedCounts = { Edamam: 3, Spoonacular: 4, TheMealDB: 1 } as const;
-  const groups = (["Edamam", "Spoonacular", "TheMealDB"] as const)
+  const matchedCounts = { Spoonacular: 4, TheMealDB: 1 } as const;
+  const groups = (["Spoonacular", "TheMealDB"] as const)
     .map((provider) => Array.from({ length: 55 }, (_, index) => makeRecipe(provider, index, matchedCounts[provider])));
   const recipes = combineProviderRecipeResults(groups, 55);
   assert.equal(recipes.length, 50);
   assert.deepEqual(recipes.map((recipe) => recipe.matchedIngredients.length), Array.from({ length: 50 }, () => 4));
   assert.deepEqual(
-    Object.fromEntries((["Edamam", "Spoonacular", "TheMealDB"] as const)
+    Object.fromEntries((["Spoonacular", "TheMealDB"] as const)
       .map((provider) => [provider, recipes.filter((recipe) => recipe.provider === provider).length])),
-    { Edamam: 0, Spoonacular: 50, TheMealDB: 0 },
+    { Spoonacular: 50, TheMealDB: 0 },
   );
 });
 
 test("one missing ingredient outranks five even with fewer pantry matches", () => {
   const recipe = (id: string, matched: number, missing: number): ExternalRecipe => ({
-    id, title: id, provider: "Edamam", sourceUrl: `https://example.com/${id}`, instructions: "",
+    id, title: id, provider: "Spoonacular", sourceUrl: `https://example.com/${id}`, instructions: "",
     ingredients: [{ name: "Chicken", measure: "1" }],
     matchedIngredients: Array.from({ length: matched }, (_, index) => `Have ${index}`),
     missingIngredients: Array.from({ length: missing }, (_, index) => `Need ${index}`), safetyVerified: false,
@@ -81,27 +77,25 @@ test("one missing ingredient outranks five even with fewer pantry matches", () =
   assert.equal(combined.some((item) => item.id === "five-29"), false);
 });
 
-test("12 Edamam and 21 MealDB recipes return 33 when links differ despite shared titles", () => {
-  const recipe = (provider: "Edamam" | "TheMealDB", index: number): ExternalRecipe => ({
+test("12 Spoonacular and 21 MealDB recipes return 33 when links differ despite shared titles", () => {
+  const recipe = (provider: "Spoonacular" | "TheMealDB", index: number): ExternalRecipe => ({
     id: `${provider}-${index}`, title: `Chicken pasta ${index % 3}`, provider,
     sourceUrl: `https://example.com/${provider}/${index}`, instructions: "",
     ingredients: [{ name: "Chicken", measure: "1" }],
     matchedIngredients: ["Chicken"], missingIngredients: [], safetyVerified: false,
   });
-  const edamam = Array.from({ length: 12 }, (_, index) => recipe("Edamam", index));
+  const spoonacular = Array.from({ length: 12 }, (_, index) => recipe("Spoonacular", index));
   const mealDb = Array.from({ length: 21 }, (_, index) => recipe("TheMealDB", index));
   const removed: string[] = [];
-  const recipes = combineProviderRecipeResults([edamam, mealDb], 50, (_group, reason) => removed.push(reason));
+  const recipes = combineProviderRecipeResults([spoonacular, mealDb], 50, (_group, reason) => removed.push(reason));
   assert.equal(recipes.length, 33);
   assert.deepEqual(removed, []);
-  const sameLink = { ...recipe("TheMealDB", 21), sourceUrl: edamam[0]!.sourceUrl };
-  assert.equal(combineProviderRecipeResults([edamam, [...mealDb, sameLink]], 50).length, 33);
+  const sameLink = { ...recipe("TheMealDB", 21), sourceUrl: spoonacular[0]!.sourceUrl };
+  assert.equal(combineProviderRecipeResults([spoonacular, [...mealDb, sameLink]], 50).length, 33);
 });
 beforeEach(() => resetScanRateLimiter());
 after(() => {
   server.close();
-  if (oldEdamamId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldEdamamId;
-  if (oldEdamamKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldEdamamKey;
   if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
 });
 
@@ -151,7 +145,6 @@ test("published recipes show source attribution and never assert allergy safety"
     const payload = await response.json() as { recipes: Array<{ title: string; provider: string; sourceUrl: string; safetyVerified: boolean; matchedIngredients: string[]; missingIngredients: string[] }>; sourceResults: Array<{ provider: string; status: string; count: number }> };
     assert.deepEqual(payload.recipes.map((item) => item.title), ["Egg and tomato bowl"]);
     assert.deepEqual(payload.sourceResults, [
-      { provider: "Edamam", status: "not_configured", count: 0 },
       { provider: "Spoonacular", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 1 },
     ]);
@@ -329,42 +322,31 @@ test("published recipes ignore missing herbs and spices, accept seven missing in
 
 test("provider counts precede the combined 50-recipe cap for general and kids", async () => {
   const oldMealKey = process.env.THEMEALDB_API_KEY;
-  const oldId = process.env.EDAMAM_APP_ID;
-  const oldKey = process.env.EDAMAM_APP_KEY;
   const oldSpoonKey = process.env.SPOONACULAR_API_KEY;
   process.env.THEMEALDB_API_KEY = "test-key";
-  process.env.EDAMAM_APP_ID = "test-id";
-  process.env.EDAMAM_APP_KEY = "test-key";
-  delete process.env.SPOONACULAR_API_KEY;
+  process.env.SPOONACULAR_API_KEY = "test-key";
   globalThis.fetch = async (input) => {
     const target = new URL(String(input));
-    if (target.hostname === "api.edamam.com") return new Response(JSON.stringify({ hits: Array.from({ length: 50 }, (_, index) => ({ recipe: {
-      uri: `recipe-${index}`, label: `Pasta ${index}`, image: "https://example.com/image.jpg", url: `https://example.com/${index}`,
-      ingredients: [{ food: "Pasta" }, { food: "Salt" }, { food: "Pepper" }, { food: "Water" }],
-    } })) }), { status: 200 });
-    if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: [{ idMeal: "meal-1", strMeal: "MealDB pasta" }] }), { status: 200 });
-    return new Response(JSON.stringify({ meals: [{ idMeal: "meal-1", strMeal: "MealDB pasta", strInstructions: "Cook.", strIngredient1: "Pasta", strIngredient2: "Salt", strIngredient3: "Pepper", strIngredient4: "Water" }] }), { status: 200 });
+    if (target.pathname.endsWith("findByIngredients")) return new Response(JSON.stringify([{ id: 1, title: "Spoonacular pasta", usedIngredientCount: 1 }]), { status: 200 });
+    if (target.pathname.endsWith("informationBulk")) return new Response(JSON.stringify([{ id: 1, title: "Spoonacular pasta", sourceUrl: "https://example.com/spoon-pasta", extendedIngredients: ["Pasta", "Salt", "Pepper", "Water"].map((name) => ({ name })) }]), { status: 200 });
+    if (target.pathname.endsWith("filter.php")) return new Response(JSON.stringify({ meals: Array.from({ length: 50 }, (_, index) => ({ idMeal: String(index + 1), strMeal: `MealDB pasta ${index}` })) }), { status: 200 });
+    const id = target.searchParams.get("i");
+    return new Response(JSON.stringify({ meals: [{ idMeal: id, strMeal: `MealDB pasta ${id}`, strSource: `https://example.com/meal-${id}`, strInstructions: "Cook.", strIngredient1: "Pasta", strIngredient2: "Salt", strIngredient3: "Pepper", strIngredient4: "Water" }] }), { status: 200 });
   };
   try {
-    const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [] }) });
-    assert.equal(response.status, 200);
-    const payload = await response.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; count: number }>; resultCounts: { eligible: number; duplicates: number; capped: number; returned: number; limit: number } };
-    assert.equal(payload.recipes.length, 50);
-    assert.equal(payload.recipes[0]?.provider, "Edamam");
-    assert.equal(payload.recipes[1]?.provider, "TheMealDB");
-    assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 50], ["Spoonacular", 0], ["TheMealDB", 1]]);
-    assert.deepEqual(payload.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
-    const kidsResponse = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [], audience: "kids" }) });
-    assert.equal(kidsResponse.status, 200);
-    const kids = await kidsResponse.json() as { recipes: unknown[]; sourceResults: Array<{ provider: string; count: number }>; resultCounts: { eligible: number; duplicates: number; capped: number; returned: number; limit: number } };
-    assert.equal(kids.recipes.length, 50);
-    assert.deepEqual(kids.sourceResults.map((source) => [source.provider, source.count]), [["Edamam", 50], ["Spoonacular", 0], ["TheMealDB", 1]]);
-    assert.deepEqual(kids.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
+    for (const audience of ["general", "kids"]) {
+      const response = await originalFetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${await createScanAccessToken()}` }, body: JSON.stringify({ ingredients: ["Pasta"], searchAnchors: ["Pasta"], allergies: [], audience }) });
+      assert.equal(response.status, 200);
+      const payload = await response.json() as { recipes: Array<{ provider: string }>; sourceResults: Array<{ provider: string; count: number }>; resultCounts: { eligible: number; duplicates: number; capped: number; returned: number; limit: number } };
+      assert.equal(payload.recipes.length, 50);
+      assert.equal(payload.recipes[0]?.provider, "Spoonacular");
+      assert.equal(payload.recipes[1]?.provider, "TheMealDB");
+      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["TheMealDB", 50]]);
+      assert.deepEqual(payload.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
+    }
   } finally {
     globalThis.fetch = originalFetch;
     if (oldMealKey === undefined) delete process.env.THEMEALDB_API_KEY; else process.env.THEMEALDB_API_KEY = oldMealKey;
-    if (oldId === undefined) delete process.env.EDAMAM_APP_ID; else process.env.EDAMAM_APP_ID = oldId;
-    if (oldKey === undefined) delete process.env.EDAMAM_APP_KEY; else process.env.EDAMAM_APP_KEY = oldKey;
     if (oldSpoonKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonKey;
   }
 });
