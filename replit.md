@@ -25,6 +25,14 @@ Kitchen Compass is an iPhone companion for scanning, confirming, organizing, and
 2. Run the API and app typechecks plus the API and Kitchen Compass test scripts on Replit.
 3. Use **Find online** in General and **Find kids’ recipes** in Kid-friendly with confirmed ingredients. Spoonacular cards should appear before TheMealDB cards when ingredient fits tie, and show an image plus the original recipe source name and link. Spoonacular details remain online only; archiving stores just its ID and title. If the API response includes `Spoonacular` in `providersUnavailable`, inspect the server's `Published recipe provider unavailable` log for the upstream status.
 
+## Reusable AI recipe files
+
+- The API saves validated AI recipes to `.local/generated-recipes/<recipe-version-hash>/recipe.json`. Generated JPEGs are stored beside the recipe as `image-<content-hash>.jpg`. Cache files are runtime data, excluded from Git by the existing `.local/` ignore rule.
+- Set `GENERATED_RECIPE_CACHE_DIR` to a persistent storage directory on the API server to retain the library across deployment replacements. The default survives process restarts when the filesystem is retained; an ephemeral deployment filesystem does not preserve it across replacements. Files are not bundled into the iPhone app.
+- Discovery checks these files before calling AI. It can reuse a recipe for a pantry with additional items, checks required ingredients against confirmed available inventory, and reruns current recipe validation. Preferences, filters, General/Kid-friendly audience, course, selected focus ingredients, and main-dish context must match. Existing/archived exclusions still apply; changing the variation seed alone does not force an AI request.
+- Image requests read a saved generated JPEG before any provider call. Recipe version, title, description, and ingredient identity prevent an unrelated image from being reused. Source photos stay as external links and are not copied into this cache. Concurrent identical discovery/image requests are serialized within one API process to avoid duplicate generation.
+- Missing/corrupt cache files are treated as misses. Storage failures do not discard a successfully generated recipe or image. Matching cached recipes and images can be returned even without an OpenAI key; requests without a usable cached result still require the key.
+
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9

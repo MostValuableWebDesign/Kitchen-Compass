@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
@@ -15,7 +18,18 @@ if (!address || typeof address === "string") throw new Error("Recipe image test 
 const baseUrl = `http://127.0.0.1:${address.port}/api`;
 const originalFetch = globalThis.fetch;
 
-beforeEach(() => resetScanRateLimiter());
+const originalCacheDir = process.env.GENERATED_RECIPE_CACHE_DIR;
+let cacheDir: string;
+beforeEach(async () => {
+  if (cacheDir) await rm(cacheDir, { recursive: true, force: true });
+  cacheDir = await mkdtemp(join(tmpdir(), "kitchen-generated-cache-"));
+  process.env.GENERATED_RECIPE_CACHE_DIR = cacheDir;
+  resetScanRateLimiter();
+});
+after(async () => {
+  await rm(cacheDir, { recursive: true, force: true });
+  if (originalCacheDir === undefined) delete process.env.GENERATED_RECIPE_CACHE_DIR; else process.env.GENERATED_RECIPE_CACHE_DIR = originalCacheDir;
+});
 after(() => { globalThis.fetch = originalFetch; server.close(); });
 
 const recipe = {
@@ -79,4 +93,23 @@ test("a recipe without an exact source photo gets a generated image", async () =
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).images, [{ recipeVersion: recipe.recipeVersion, imageBase64: base64, source: "AI-generated" }]);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("generated image files avoid provider calls and verify recipe input identity", async () => {
+  const base64 = Buffer.from("cached-jpeg-data").toString("base64");
+  let calls = 0;
+  const providerFetch = async (target: Parameters<typeof fetch>[0]) => {
+    calls++;
+    return String(target).includes("api.openai.com") ? new Response(JSON.stringify({ data: [{ b64_json: base64 }] })) : new Response(JSON.stringify({ meals: [] }));
+  };
+  globalThis.fetch = providerFetch;
+  assert.equal((await request({ recipes: [recipe] })).status, 200);
+  assert.equal(calls, 2);
+  globalThis.fetch = async () => { throw new Error("Cached image must avoid every provider call"); };
+  const reused = await request({ recipes: [{ ...recipe, ingredients: [...recipe.ingredients].reverse() }] });
+  assert.equal(reused.status, 200);
+  assert.equal((await reused.json()).images[0].imageBase64, base64);
+  calls = 0; globalThis.fetch = providerFetch;
+  await request({ recipes: [{ ...recipe, title: "Different dish", ingredients: ["rice"] }] });
+  assert.equal(calls, 2);
 });

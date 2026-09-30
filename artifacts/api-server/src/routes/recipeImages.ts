@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { sendScanError } from "../middleware/scanSecurity";
+import { cachedGeneratedImage, saveGeneratedImage, withGeneratedRecipeLock, recipeCacheContext } from "../lib/generatedRecipeCache";
 
 const router: IRouter = Router();
 const requestSchema = z.object({
@@ -102,6 +103,8 @@ router.post("/recipes/images", async (req, res) => {
   try {
     // Source lookups are cheap and run first. Only unmatched recipes use image generation.
     const images: RecipeImage[] = await Promise.all(parsed.data.recipes.map(async (recipe) => {
+      const cached = await cachedGeneratedImage(recipe);
+      if (cached) return { recipeVersion: recipe.recipeVersion, imageBase64: cached, source: "AI-generated" as const };
       const imageUrl = await findSourceImage(recipe, controller.signal);
       return imageUrl
         ? { recipeVersion: recipe.recipeVersion, imageUrl, source: "TheMealDB" as const }
@@ -112,7 +115,15 @@ router.post("/recipes/images", async (req, res) => {
     for (let offset = 0; offset < missing.length && !controller.signal.aborted; offset += 2) {
       await Promise.all(missing.slice(offset, offset + 2).map(async (index) => {
         try {
-          const imageBase64 = await generateImage(parsed.data.recipes[index], controller.signal);
+          const recipe = parsed.data.recipes[index]!;
+          const imageBase64 = await withGeneratedRecipeLock(`image:${recipeCacheContext(recipe)}`, async () => {
+            const cached = await cachedGeneratedImage(recipe);
+            if (cached) return cached;
+            if (controller.signal.aborted) return undefined;
+            const generated = await generateImage(recipe, controller.signal);
+            if (generated && !await saveGeneratedImage(recipe, generated)) req.log.warn("Generated recipe image file could not be saved");
+            return generated;
+          });
           if (imageBase64) images[index] = { recipeVersion: images[index].recipeVersion, imageBase64, source: "AI-generated" };
         } catch (error) {
           if (!controller.signal.aborted) req.log.warn({ errorType: error instanceof Error ? error.name : typeof error }, "Recipe image generation failed");

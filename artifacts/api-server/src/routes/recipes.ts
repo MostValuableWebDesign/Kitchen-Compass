@@ -12,6 +12,8 @@ import {
 } from "@workspace/recipe-calculations";
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
+import { cachedRecipeCandidates, recipeCacheContext, saveGeneratedRecipe, withGeneratedRecipeLock } from "../lib/generatedRecipeCache";
+import { classifyIngredientAvailability } from "./recipeIngredientMatch";
 
 const router: IRouter = Router();
 
@@ -361,10 +363,6 @@ router.post("/recipes/discover", async (req, res) => {
     sendScanError(req, res, 400, "INVALID_REQUEST", "The recipe discovery request is invalid.");
     return;
   }
-  if (!process.env.OPENAI_API_KEY) {
-    sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery is unavailable. Previously saved recipes and the built-in examples remain available.");
-    return;
-  }
 
   const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience, course, focusIngredients, mainRecipe } = parsed.data;
   if (course && (!focusIngredients?.length || (course === "side" && !mainRecipe))) {
@@ -495,40 +493,69 @@ router.post("/recipes/discover", async (req, res) => {
         .map((recipe) => recipeSchema.parse(recipe));
     };
 
-    let aiRecipes = await requestCandidates(prompt);
-    let safeRecipes = filterSafeRecipes(aiRecipes);
-    if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || rejectionReasons.has("not-kid-friendly") || aiRecipes.length === 0)) {
-      rejectionReasons.clear();
-      aiRecipes = await requestCandidates(buildPrompt(inventory, allergenAssessableInventory, [
-        "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
-        "The Confirmed available inventory list contains only available ingredients the server can assess deterministically. All submitted ingredients remain eligible for recipe ideas, but do not claim used, uncertain, or allergen-unassessable ingredients are available.",
-        "Use all submitted ingredients as recipe candidates, while treating only the corrected Confirmed available inventory list as currently available. Additional ingredients may only be these basic items: water, salt, black pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, basil, parsley, cilantro, rosemary, thyme, oregano.",
-        "Do not add sauces, broths, spice blends, packaged foods, garnishes, or other missing ingredients.",
-        "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
-        "At least one returned recipe must be safe under the server's deterministic allergen check.",
-        ...(audience === "kids" ? ["At least one recipe title must clearly describe a familiar mild format such as pasta, quesadilla, pancake, scrambled eggs, chicken bites, meatballs, rice bowl, or sandwich. Avoid spicy ingredients."] : []),
-      ]));
-      safeRecipes = filterSafeRecipes(aiRecipes);
-    }
-    if (!safeRecipes.length) {
-      if (aiRecipes.length && rejectionReasons.size
-        && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version" || reason === "archived-title")) {
-        res.json(responseSchema.parse({
-          recipes: [],
-          source: "server-ai",
-          warning: "No new recipes were found. Existing and archived recipes were skipped.",
-        }));
+    const cacheContext = recipeCacheContext({ contract: "recipe-contract-v1", preferences, filters, audience, course, focusIngredients, mainRecipe });
+    await withGeneratedRecipeLock(`discovery:${cacheContext}`, async () => {
+      const basics = new Set(["water", "salt", "pepper", "black pepper", "olive oil", "vegetable oil", "canola oil", "vinegar", "garlic", "onion", "basil", "parsley", "cilantro", "rosemary", "thyme", "oregano"]);
+      const stored = (await cachedRecipeCandidates(cacheContext)).flatMap((candidate) => {
+        const valid = aiRecipeSchema.safeParse(candidate);
+        if (!valid.success) return [];
+        const recipe = valid.data;
+        const available = (name: string) => confirmedAvailableInventory.some((item) => classifyIngredientAvailability(name, item.name) === "match");
+        if (!recipe.ingredients.some((item) => available(item.name)) || recipe.ingredients.some((item) => item.required && !available(item.name) && !basics.has(normalize(item.name)))) return [];
+        return [recipe];
+      });
+      const reused = filterSafeRecipes(stored).slice(0, course ? 1 : MAX_RECIPE_DISCOVERY_RESULTS);
+      if (reused.length) {
+        req.log.info({ count: reused.length }, "Recipe discovery reused file cache");
+        res.json(responseSchema.parse({ recipes: reused, source: "server-ai" }));
         return;
       }
-      req.log.warn({
-        candidateCount: aiRecipes.length,
-        rejectionReasons: Object.fromEntries(rejectionReasons),
-      }, "Recipe discovery returned no safe candidates");
-      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery did not return a safe recipe for these preferences. Previously saved recipes remain available.");
-      return;
-    }
-     const result = responseSchema.parse({ recipes: safeRecipes.slice(0, MAX_RECIPE_DISCOVERY_RESULTS), source: "server-ai" });
-    res.json(result);
+      rejectionReasons.clear();
+      if (!process.env.OPENAI_API_KEY) {
+        sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery is unavailable. Previously saved recipes and the built-in examples remain available.");
+        return;
+      }
+      if (controller.signal.aborted) throw new DOMException("Recipe request timed out", "AbortError");
+      let aiRecipes = await requestCandidates(prompt);
+      let safeRecipes = filterSafeRecipes(aiRecipes);
+      if (!safeRecipes.length && (rejectionReasons.has("an ingredient could not be assessed reliably") || rejectionReasons.has("not-kid-friendly") || aiRecipes.length === 0)) {
+        rejectionReasons.clear();
+        aiRecipes = await requestCandidates(buildPrompt(inventory, allergenAssessableInventory, [
+          "Correction: the previous candidates were rejected for safety or recipe-structure validation.",
+          "The Confirmed available inventory list contains only available ingredients the server can assess deterministically. All submitted ingredients remain eligible for recipe ideas, but do not claim used, uncertain, or allergen-unassessable ingredients are available.",
+          "Use all submitted ingredients as recipe candidates, while treating only the corrected Confirmed available inventory list as currently available. Additional ingredients may only be these basic items: water, salt, black pepper, olive oil, vegetable oil, canola oil, vinegar, garlic, onion, basil, parsley, cilantro, rosemary, thyme, oregano.",
+          "Do not add sauces, broths, spice blends, packaged foods, garnishes, or other missing ingredients.",
+          "Every step must include at least one ingredientAmounts entry with a positive numeric quantity and unit. Do not return any step with an empty ingredientAmounts array.",
+          "At least one returned recipe must be safe under the server's deterministic allergen check.",
+          ...(audience === "kids" ? ["At least one recipe title must clearly describe a familiar mild format such as pasta, quesadilla, pancake, scrambled eggs, chicken bites, meatballs, rice bowl, or sandwich. Avoid spicy ingredients."] : []),
+        ]));
+        safeRecipes = filterSafeRecipes(aiRecipes);
+      }
+      if (!safeRecipes.length) {
+        if (aiRecipes.length && rejectionReasons.size
+          && [...rejectionReasons.keys()].every((reason) => reason === "duplicate-title" || reason === "excluded-version" || reason === "archived-title")) {
+          res.json(responseSchema.parse({
+            recipes: [],
+            source: "server-ai",
+            warning: "No new recipes were found. Existing and archived recipes were skipped.",
+          }));
+          return;
+        }
+        req.log.warn({
+          candidateCount: aiRecipes.length,
+          rejectionReasons: Object.fromEntries(rejectionReasons),
+        }, "Recipe discovery returned no safe candidates");
+        sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Recipe discovery did not return a safe recipe for these preferences. Previously saved recipes remain available.");
+        return;
+      }
+      const result = responseSchema.parse({ recipes: safeRecipes.slice(0, MAX_RECIPE_DISCOVERY_RESULTS), source: "server-ai" });
+      const acceptedVersions = new Set(result.recipes.map((recipe) => recipe.recipeVersion));
+      await Promise.all(aiRecipes.filter((recipe) => acceptedVersions.has(stableVersion(recipe)))
+        .map(async (recipe) => {
+          if (!await saveGeneratedRecipe(stableVersion(recipe), cacheContext, recipe)) req.log.warn("Generated recipe file could not be saved");
+        }));
+      res.json(result);
+    });
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
     req.log.error({

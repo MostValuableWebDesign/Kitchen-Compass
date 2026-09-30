@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
@@ -15,7 +18,18 @@ if (!address || typeof address === "string") throw new Error("Recipe test server
 const baseUrl = `http://127.0.0.1:${address.port}/api`;
 const originalFetch = globalThis.fetch;
 
-beforeEach(() => resetScanRateLimiter());
+const originalCacheDir = process.env.GENERATED_RECIPE_CACHE_DIR;
+let cacheDir: string;
+beforeEach(async () => {
+  if (cacheDir) await rm(cacheDir, { recursive: true, force: true });
+  cacheDir = await mkdtemp(join(tmpdir(), "kitchen-generated-cache-"));
+  process.env.GENERATED_RECIPE_CACHE_DIR = cacheDir;
+  resetScanRateLimiter();
+});
+after(async () => {
+  await rm(cacheDir, { recursive: true, force: true });
+  if (originalCacheDir === undefined) delete process.env.GENERATED_RECIPE_CACHE_DIR; else process.env.GENERATED_RECIPE_CACHE_DIR = originalCacheDir;
+});
 after(() => server.close());
 
 async function issueAccess() {
@@ -460,4 +474,38 @@ test("recipe discovery removes a substitution that fails the same allergen check
   assert.equal(response.status, 200);
   const payload = await response.json() as { recipes: Array<{ substitutions: unknown[] }> };
   assert.deepEqual(payload.recipes[0]!.substitutions, []);
+});
+
+test("file cache reuses recipes across pantry additions and variation seeds without AI", async () => {
+  const first = await discoverModelRecipe(validModelRecipe());
+  assert.equal(first.status, 200);
+  const generated = await first.json();
+  const body = requestBody(); body.variationSeed = "different-seed";
+  body.inventory.push({ ...body.inventory[0]!, name: "rice" });
+  const send = (body: unknown) => originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${createScanAccessToken()}` }, body: JSON.stringify(body) });
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error("Unexpected AI request"); };
+  try {
+    const response = await send(body);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).recipes, generated.recipes);
+    assert.equal(calls, 0);
+    assert.equal((await send({ ...body, excludeRecipeVersions: [generated.recipes[0].recipeVersion] })).status, 503);
+    assert.equal(calls, 1);
+    calls = 0;
+    assert.equal((await send({ ...body, preferences: { ...body.preferences, allergies: ["egg"] } })).status, 503);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("cached recipes work without an AI key but require available ingredients", async () => {
+  assert.equal((await discoverModelRecipe(validModelRecipe())).status, 200);
+  const key = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const send = (body: unknown) => originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${createScanAccessToken()}` }, body: JSON.stringify(body) });
+    assert.equal((await send(requestBody())).status, 200);
+    const body = requestBody(); body.inventory[0]!.status = "used";
+    assert.equal((await send(body)).status, 503);
+  } finally { process.env.OPENAI_API_KEY = key; }
 });
