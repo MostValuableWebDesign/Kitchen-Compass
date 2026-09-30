@@ -9,6 +9,8 @@ import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnos
 const envNames = ["RECIPEAPI_API_KEY", "RECIPEAPI_PER_PAGE", "API_NINJAS_API_KEY", "SPOONACULAR_API_KEY", "THEMEALDB_API_KEY", "SESSION_SECRET"];
 const saved = new Map(envNames.map((name) => [name, process.env[name]]));
 const originalFetch = globalThis.fetch;
+const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
+delete process.env.RECIPE_API_COM_API_KEY;
 process.env.SESSION_SECRET = "recipe-api-test-session";
 const server = app.listen(0);
 await once(server, "listening");
@@ -19,7 +21,8 @@ beforeEach(() => {
   resetScanRateLimiter(); process.env.RECIPEAPI_API_KEY = "test-recipe-key";
   delete process.env.RECIPEAPI_PER_PAGE; delete process.env.API_NINJAS_API_KEY; delete process.env.SPOONACULAR_API_KEY;
 });
-after(() => { server.close(); globalThis.fetch = originalFetch; for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+after(() => { server.close();
+  if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey; globalThis.fetch = originalFetch; for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
 const raw = (id = 449, name = "Chicken pasta", names = ["Chicken breast", "Pasta", "Tomato", "Garlic powder"]) => ({
   id, name, ingredients: names.map((name) => ({ id: 1, name, category: "vegetable", quantity: 1, unit: "cup", optional: false })),
   instructions: ["Prepare ingredients.", "Cook safely."], meal_type: "main",

@@ -8,7 +8,7 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
-  externalProvider?: 'FatSecret' | 'Spoonacular' | 'API Ninjas' | 'RecipeAPI.io';
+  externalProvider?: 'FatSecret' | 'Spoonacular' | 'API Ninjas' | 'RecipeAPI.io' | 'Recipe-API.com';
   externalId?: string;
 };
 
@@ -32,6 +32,10 @@ export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, a
 }
 
 export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: ExternalRecipe, archivedAt = new Date().toISOString()) {
+  if (recipe.provider === 'Recipe-API.com') {
+    if (archived.some((entry) => entry.key === recipe.id)) return archived;
+    return [...archived, { key: recipe.id, title: 'Archived Recipe-API.com recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
+  }
   if (recipe.provider === 'RecipeAPI.io') {
     if (archived.some((entry) => entry.key === recipe.id)) return archived;
     return [...archived, { key: recipe.id, title: 'Archived RecipeAPI.io recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
@@ -86,6 +90,12 @@ export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
   const seen = new Set<string>();
   return value.flatMap((item): ArchivedRecipe[] => {
     if (!isRecord(item) || typeof item.title !== 'string' || !item.title.trim()) return [];
+    if (item.externalProvider === 'Recipe-API.com' && typeof item.externalId === 'string' && /^recipe-api-com:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(item.externalId)) {
+      if (seen.has(item.externalId)) return [];
+      seen.add(item.externalId);
+      return [{ key: item.externalId, title: 'Archived Recipe-API.com recipe', externalProvider: 'Recipe-API.com', externalId: item.externalId,
+        archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
+    }
     if (item.externalProvider === 'RecipeAPI.io' && typeof item.externalId === 'string' && /^recipeapi:\d+$/.test(item.externalId)) {
       if (seen.has(item.externalId)) return [];
       seen.add(item.externalId);

@@ -14,12 +14,15 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
+const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
+delete process.env.RECIPE_API_COM_API_KEY;
 const oldRecipeApiKey = process.env.RECIPEAPI_API_KEY;
 delete process.env.RECIPEAPI_API_KEY;
 const oldNinjasKey = process.env.API_NINJAS_API_KEY;
 delete process.env.API_NINJAS_API_KEY;
 after(() => {
   server.close();
+  if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey;
   if (oldRecipeApiKey === undefined) delete process.env.RECIPEAPI_API_KEY; else process.env.RECIPEAPI_API_KEY = oldRecipeApiKey;
   if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
 });
@@ -122,6 +125,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
       { provider: "Spoonacular", status: "found", count: 1 },
       { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
+      { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);
     assert.equal(calls.length, 2);
@@ -155,6 +159,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
       { provider: "Spoonacular", status: "found", count: 1 },
       { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
+      { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "no_results", count: 0 },
     ]);
 
@@ -168,6 +173,7 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
       { provider: "Spoonacular", status: "unavailable", count: 0 },
       { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
+      { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
     ]);
   } finally {

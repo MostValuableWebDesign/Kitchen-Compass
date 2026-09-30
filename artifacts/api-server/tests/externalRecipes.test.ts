@@ -13,6 +13,8 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Test server has no port.");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 const originalFetch = globalThis.fetch;
+const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
+delete process.env.RECIPE_API_COM_API_KEY;
 const oldRecipeApiKey = process.env.RECIPEAPI_API_KEY;
 delete process.env.RECIPEAPI_API_KEY;
 const oldNinjasKey = process.env.API_NINJAS_API_KEY;
@@ -100,6 +102,7 @@ test("12 Spoonacular and 21 MealDB recipes return 33 when links differ despite s
 beforeEach(() => resetScanRateLimiter());
 after(() => {
   server.close();
+  if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey;
   if (oldRecipeApiKey === undefined) delete process.env.RECIPEAPI_API_KEY; else process.env.RECIPEAPI_API_KEY = oldRecipeApiKey;
   if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
   if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
@@ -154,6 +157,7 @@ test("published recipes show source attribution and never assert allergy safety"
       { provider: "Spoonacular", status: "not_configured", count: 0 },
       { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
+      { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 1 },
     ]);
     assert.equal(payload.recipes[0]?.provider, "TheMealDB");
@@ -349,7 +353,7 @@ test("provider counts precede the combined 50-recipe cap for general and kids", 
       assert.equal(payload.recipes.length, 50);
       assert.equal(payload.recipes[0]?.provider, "Spoonacular");
       assert.equal(payload.recipes[1]?.provider, "TheMealDB");
-      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["API Ninjas", 0], ["RecipeAPI.io", 0], ["TheMealDB", 50]]);
+      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["API Ninjas", 0], ["RecipeAPI.io", 0], ["Recipe-API.com", 0], ["TheMealDB", 50]]);
       assert.deepEqual(payload.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
     }
   } finally {

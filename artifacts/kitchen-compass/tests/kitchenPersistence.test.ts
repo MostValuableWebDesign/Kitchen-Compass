@@ -175,3 +175,17 @@ test('RecipeAPI.io archives preserve exclusions without retaining recipe data', 
   assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.instructions), false);
   assert.equal(JSON.stringify(restored.archivedRecipes).includes('1 cup'), false);
 });
+
+test('Recipe-API.com archives preserve only UUID exclusions across reloads', () => {
+  const recipe = {
+    id: 'recipe-api-com:a066f472-ed0c-46ea-8e2c-a0053c3183a8', title: 'Chicken pasta', provider: 'Recipe-API.com' as const,
+    sourceUrl: '', ingredients: [{ name: 'Chicken', measure: '1 cup chicken' }], instructions: 'Cook chicken safely.',
+    matchedIngredients: ['Chicken'], missingIngredients: [], safetyVerified: false as const,
+  };
+  const archived = archivePublishedRecipe([], recipe);
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState({ ...emptyPersistedKitchenState(), archivedRecipes: archived }), defaultPreferences);
+  assert.equal(restored.archivedRecipes[0]?.externalId, recipe.id);
+  assert.equal(isArchivedPublished(recipe, restored.archivedRecipes), true);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.title), false);
+  assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.instructions), false);
+});

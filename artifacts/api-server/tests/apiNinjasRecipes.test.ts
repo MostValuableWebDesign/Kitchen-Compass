@@ -9,6 +9,8 @@ import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnos
 
 const saved = { key: process.env.API_NINJAS_API_KEY, mode: process.env.API_NINJAS_RECIPE_SEARCH_MODE, spoon: process.env.SPOONACULAR_API_KEY, meal: process.env.THEMEALDB_API_KEY, session: process.env.SESSION_SECRET };
 const originalFetch = globalThis.fetch;
+const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
+delete process.env.RECIPE_API_COM_API_KEY;
 const oldRecipeApiKey = process.env.RECIPEAPI_API_KEY;
 delete process.env.RECIPEAPI_API_KEY;
 process.env.SESSION_SECRET = "ninjas-recipe-test-session";
@@ -20,6 +22,7 @@ const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 beforeEach(() => { resetScanRateLimiter(); process.env.API_NINJAS_API_KEY = "test-secret"; delete process.env.API_NINJAS_RECIPE_SEARCH_MODE; delete process.env.SPOONACULAR_API_KEY; });
 after(() => {
   server.close();
+  if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey;
   if (oldRecipeApiKey === undefined) delete process.env.RECIPEAPI_API_KEY; else process.env.RECIPEAPI_API_KEY = oldRecipeApiKey;
   globalThis.fetch = originalFetch;
   for (const [name, value] of Object.entries({ API_NINJAS_API_KEY: saved.key, API_NINJAS_RECIPE_SEARCH_MODE: saved.mode, SPOONACULAR_API_KEY: saved.spoon, THEMEALDB_API_KEY: saved.meal, SESSION_SECRET: saved.session })) {

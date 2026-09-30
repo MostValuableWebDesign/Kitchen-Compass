@@ -17,7 +17,7 @@ export function OnlineRecipeDetails({ recipe }: { recipe: ExternalRecipe }) {
       <Text style={{ color: colors.foreground, fontFamily: 'Inter_600SemiBold' }}>Instructions</Text>
       {recipe.instructions.split('\n').filter(Boolean).map((step, index) => <Text key={index} style={{ color: colors.foreground }}>{index + 1}. {step}</Text>)}
       <Text style={{ color: colors.mutedForeground }}>Review ingredients, quantities, and cooking safety before cooking. Available for this search session.</Text>
-      <Pressable onPress={() => void Linking.openURL(recipe.provider === 'RecipeAPI.io' ? 'https://recipeapi.io' : 'https://api-ninjas.com/api/recipe')}><Text style={{ color: colors.primary }}>Provided by {recipe.provider} ↗</Text></Pressable>
+      <Pressable onPress={() => void Linking.openURL(recipe.provider === 'Recipe-API.com' ? 'https://recipe-api.com' : recipe.provider === 'RecipeAPI.io' ? 'https://recipeapi.io' : 'https://api-ninjas.com/api/recipe')}><Text style={{ color: colors.primary }}>Provided by {recipe.provider} ↗</Text></Pressable>
     </View> : null}
   </View>;
 }
