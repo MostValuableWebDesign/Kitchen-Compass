@@ -8,7 +8,7 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
-  externalProvider?: 'FatSecret' | 'Spoonacular' | 'API Ninjas';
+  externalProvider?: 'FatSecret' | 'Spoonacular' | 'API Ninjas' | 'RecipeAPI.io';
   externalId?: string;
 };
 
@@ -32,6 +32,10 @@ export function archiveLocalRecipe(archived: ArchivedRecipe[], recipe: Recipe, a
 }
 
 export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: ExternalRecipe, archivedAt = new Date().toISOString()) {
+  if (recipe.provider === 'RecipeAPI.io') {
+    if (archived.some((entry) => entry.key === recipe.id)) return archived;
+    return [...archived, { key: recipe.id, title: 'Archived RecipeAPI.io recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
+  }
   if (recipe.provider === 'API Ninjas') {
     if (archived.some((entry) => entry.key === recipe.id)) return archived;
     return [...archived, { key: recipe.id, title: 'Archived API Ninjas recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
@@ -82,6 +86,12 @@ export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
   const seen = new Set<string>();
   return value.flatMap((item): ArchivedRecipe[] => {
     if (!isRecord(item) || typeof item.title !== 'string' || !item.title.trim()) return [];
+    if (item.externalProvider === 'RecipeAPI.io' && typeof item.externalId === 'string' && /^recipeapi:\d+$/.test(item.externalId)) {
+      if (seen.has(item.externalId)) return [];
+      seen.add(item.externalId);
+      return [{ key: item.externalId, title: 'Archived RecipeAPI.io recipe', externalProvider: 'RecipeAPI.io', externalId: item.externalId,
+        archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
+    }
     if (item.externalProvider === 'API Ninjas' && typeof item.externalId === 'string' && /^api-ninjas:[a-f0-9]{64}$/.test(item.externalId)) {
       if (seen.has(item.externalId)) return [];
       seen.add(item.externalId);

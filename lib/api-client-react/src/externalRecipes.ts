@@ -4,7 +4,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB" | "FatSecret" | "Spoonacular" | "API Ninjas";
+  provider: "TheMealDB" | "FatSecret" | "Spoonacular" | "API Ninjas" | "RecipeAPI.io";
   sourceName?: string;
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
@@ -17,8 +17,8 @@ export type ExternalRecipe = {
 export type ExternalRecipesResponse = {
   recipes: ExternalRecipe[];
   provider: "Multiple sources";
-  providersUnavailable: Array<"Spoonacular" | "API Ninjas" | "TheMealDB">;
-  sourceResults: Array<{ provider: "Spoonacular" | "API Ninjas" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number }>;
+  providersUnavailable: Array<"Spoonacular" | "API Ninjas" | "RecipeAPI.io" | "TheMealDB">;
+  sourceResults: Array<{ provider: "Spoonacular" | "API Ninjas" | "RecipeAPI.io" | "TheMealDB"; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number }>;
   resultCounts?: { eligible: number; duplicates: number; capped: number; returned: number; limit: number };
   safetyNotice: string;
 };
