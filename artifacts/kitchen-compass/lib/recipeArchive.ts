@@ -8,7 +8,7 @@ export type ArchivedRecipe = {
   archivedAt: string;
   recipeVersion?: string;
   externalRecipe?: ExternalRecipe;
-  externalProvider?: 'FatSecret' | 'Spoonacular' | 'API Ninjas' | 'RecipeAPI.io' | 'Recipe-API.com';
+  externalProvider?: 'Spoonacular' | 'RecipeAPI.io' | 'Recipe-API.com';
   externalId?: string;
 };
 
@@ -40,14 +40,10 @@ export function archivePublishedRecipe(archived: ArchivedRecipe[], recipe: Exter
     if (archived.some((entry) => entry.key === recipe.id)) return archived;
     return [...archived, { key: recipe.id, title: 'Archived RecipeAPI.io recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
   }
-  if (recipe.provider === 'API Ninjas') {
-    if (archived.some((entry) => entry.key === recipe.id)) return archived;
-    return [...archived, { key: recipe.id, title: 'Archived API Ninjas recipe', externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
-  }
-  if (recipe.provider === 'FatSecret' || recipe.provider === 'Spoonacular') {
+  if (recipe.provider === 'Spoonacular') {
     const key = recipe.id;
     if (archived.some((entry) => entry.key === key)) return archived;
-    const title = recipe.provider === 'Spoonacular' ? recipe.title : `${recipe.provider} recipe #${recipe.id.split(':')[1]}`;
+    const title = recipe.title;
     return [...archived, { key, title, externalProvider: recipe.provider, externalId: recipe.id, archivedAt }];
   }
   const key = archiveKey(recipe.title);
@@ -102,19 +98,13 @@ export function parseArchivedRecipes(value: unknown): ArchivedRecipe[] {
       return [{ key: item.externalId, title: 'Archived RecipeAPI.io recipe', externalProvider: 'RecipeAPI.io', externalId: item.externalId,
         archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
     }
-    if (item.externalProvider === 'API Ninjas' && typeof item.externalId === 'string' && /^api-ninjas:[a-f0-9]{64}$/.test(item.externalId)) {
-      if (seen.has(item.externalId)) return [];
-      seen.add(item.externalId);
-      return [{ key: item.externalId, title: 'Archived API Ninjas recipe', externalProvider: 'API Ninjas', externalId: item.externalId,
-        archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
-    }
     const key = archiveKey(item.title);
-    const onlineProvider = item.externalProvider === 'FatSecret' ? 'FatSecret' : item.externalProvider === 'Spoonacular' ? 'Spoonacular' : undefined;
+    const onlineProvider = item.externalProvider === 'Spoonacular' ? 'Spoonacular' : undefined;
     if (onlineProvider && typeof item.externalId === 'string'
       && new RegExp(`^${onlineProvider.toLowerCase()}:\\d+$`).test(item.externalId)) {
       if (seen.has(item.externalId)) return [];
       seen.add(item.externalId);
-      return [{ key: item.externalId, title: onlineProvider === 'Spoonacular' ? item.title.trim() : `${onlineProvider} recipe #${item.externalId.split(':')[1]}`, externalProvider: onlineProvider, externalId: item.externalId,
+      return [{ key: item.externalId, title: item.title.trim(), externalProvider: onlineProvider, externalId: item.externalId,
         archivedAt: typeof item.archivedAt === 'string' ? item.archivedAt : '' }];
     }
     if (item.externalProvider || !key || seen.has(key)) return [];

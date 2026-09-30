@@ -17,8 +17,6 @@ const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
 delete process.env.RECIPE_API_COM_API_KEY;
 const oldRecipeApiKey = process.env.RECIPEAPI_API_KEY;
 delete process.env.RECIPEAPI_API_KEY;
-const oldNinjasKey = process.env.API_NINJAS_API_KEY;
-delete process.env.API_NINJAS_API_KEY;
 const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
 delete process.env.SPOONACULAR_API_KEY;
 
@@ -104,7 +102,6 @@ after(() => {
   server.close();
   if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey;
   if (oldRecipeApiKey === undefined) delete process.env.RECIPEAPI_API_KEY; else process.env.RECIPEAPI_API_KEY = oldRecipeApiKey;
-  if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
   if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
 });
 
@@ -126,12 +123,8 @@ test("published recipes require confirmed ingredients and an access token", asyn
 
 test("published recipes show source attribution and never assert allergy safety", async () => {
   const oldKey = process.env.THEMEALDB_API_KEY;
-  const oldFatSecretId = process.env.FATSECRET_CLIENT_ID;
-  const oldFatSecretSecret = process.env.FATSECRET_CLIENT_SECRET;
   const oldSpoonacularKey = process.env.SPOONACULAR_API_KEY;
   process.env.THEMEALDB_API_KEY = "test-key";
-  delete process.env.FATSECRET_CLIENT_ID;
-  delete process.env.FATSECRET_CLIENT_SECRET;
   delete process.env.SPOONACULAR_API_KEY;
   globalThis.fetch = async (input, init) => {
     const target = String(input);
@@ -155,7 +148,6 @@ test("published recipes show source attribution and never assert allergy safety"
     assert.deepEqual(payload.recipes.map((item) => item.title), ["Egg and tomato bowl"]);
     assert.deepEqual(payload.sourceResults, [
       { provider: "Spoonacular", status: "not_configured", count: 0 },
-      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
       { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 1 },
@@ -185,10 +177,6 @@ test("published recipes show source attribution and never assert allergy safety"
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.THEMEALDB_API_KEY;
     else process.env.THEMEALDB_API_KEY = oldKey;
-    if (oldFatSecretId === undefined) delete process.env.FATSECRET_CLIENT_ID;
-    else process.env.FATSECRET_CLIENT_ID = oldFatSecretId;
-    if (oldFatSecretSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET;
-    else process.env.FATSECRET_CLIENT_SECRET = oldFatSecretSecret;
     if (oldSpoonacularKey === undefined) delete process.env.SPOONACULAR_API_KEY;
     else process.env.SPOONACULAR_API_KEY = oldSpoonacularKey;
   }
@@ -353,7 +341,7 @@ test("provider counts precede the combined 50-recipe cap for general and kids", 
       assert.equal(payload.recipes.length, 50);
       assert.equal(payload.recipes[0]?.provider, "Spoonacular");
       assert.equal(payload.recipes[1]?.provider, "TheMealDB");
-      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["API Ninjas", 0], ["RecipeAPI.io", 0], ["Recipe-API.com", 0], ["TheMealDB", 50]]);
+      assert.deepEqual(payload.sourceResults.map((source) => [source.provider, source.count]), [["Spoonacular", 1], ["RecipeAPI.io", 0], ["Recipe-API.com", 0], ["TheMealDB", 50]]);
       assert.deepEqual(payload.resultCounts, { eligible: 51, duplicates: 0, capped: 1, returned: 50, limit: 50 });
     }
   } finally {

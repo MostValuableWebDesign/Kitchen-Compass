@@ -4,7 +4,6 @@ import { assessRecipeAllergens, primaryProteinSearchTerm, recipeSearchFoodTerm, 
 import { sendScanError } from "../middleware/scanSecurity";
 import { kidFriendlyScore } from "./kidFriendly";
 import { searchSpoonacularRecipes, spoonacularConfigured } from "./spoonacularRecipes";
-import { apiNinjasConfigured, searchApiNinjasRecipes } from "./apiNinjasRecipes";
 import { recipeApiConfigured, searchRecipeApiRecipes } from "./recipeApiRecipes";
 import { recipeApiComConfigured, searchRecipeApiComRecipes } from "./recipeApiComRecipes";
 import { isNonCountedMissingIngredient } from "./recipeSeasonings";
@@ -45,7 +44,7 @@ export type ExternalRecipe = {
   id: string;
   title: string;
   imageUrl?: string;
-  provider: "TheMealDB" | "FatSecret" | "Spoonacular" | "API Ninjas" | "RecipeAPI.io" | "Recipe-API.com";
+  provider: "TheMealDB" | "Spoonacular" | "RecipeAPI.io" | "Recipe-API.com";
   sourceName?: string;
   sourceUrl: string;
   ingredients: Array<{ name: string; measure: string }>;
@@ -54,9 +53,9 @@ export type ExternalRecipe = {
   missingIngredients: string[];
   safetyVerified: false;
 };
-type OnlineSource = "Spoonacular" | "API Ninjas" | "RecipeAPI.io" | "Recipe-API.com" | "TheMealDB";
+type OnlineSource = "Spoonacular" | "RecipeAPI.io" | "Recipe-API.com" | "TheMealDB";
 type OnlineSourceResult = { provider: OnlineSource; status: "found" | "no_results" | "unavailable" | "not_configured" | "not_searched"; count: number };
-const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular, API Ninjas, RecipeAPI.io, and Recipe-API.com recipes are available online only.";
+const safetyNotice = "Source recipes have not been independently verified for allergens, nutrition, or cooking safety. Check the original recipe and every package label. Spoonacular, RecipeAPI.io, and Recipe-API.com recipes are available online only.";
 
 function providerKey() {
   const key = process.env.THEMEALDB_API_KEY?.trim();
@@ -254,14 +253,13 @@ router.post("/recipes/external", async (req, res) => {
     return;
   }
   const key = providerKey();
-  if (!key && !spoonacularConfigured() && !apiNinjasConfigured() && !recipeApiConfigured() && !recipeApiComConfigured()) {
+  if (!key && !spoonacularConfigured() && !recipeApiConfigured() && !recipeApiComConfigured()) {
     req.log.info({ audience: parsed.data.audience, course: parsed.data.course ?? null,
-      sourceResults: ["Spoonacular", "API Ninjas", "RecipeAPI.io", "Recipe-API.com", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
+      sourceResults: ["Spoonacular", "RecipeAPI.io", "Recipe-API.com", "TheMealDB"].map((provider) => ({ provider, status: "not_configured", count: 0 })) }, "Published recipe source results");
     res.json({ recipes: [], provider: "Multiple sources", providersUnavailable: [], safetyNotice,
       resultCounts: { eligible: 0, duplicates: 0, capped: 0, returned: 0, limit: MAX_TOTAL_PUBLISHED_RECIPES },
       sourceResults: [
         { provider: "Spoonacular", status: "not_configured", count: 0 },
-        { provider: "API Ninjas", status: "not_configured", count: 0 },
         { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
         { provider: "Recipe-API.com", status: "not_configured", count: 0 },
         { provider: "TheMealDB", status: "not_configured", count: 0 },
@@ -322,7 +320,6 @@ router.post("/recipes/external", async (req, res) => {
     const limit = MAX_TOTAL_PUBLISHED_RECIPES;
     const sources: Array<{ provider: OnlineSource; configured: boolean; search: (diagnostics: RecipeSearchDiagnostics) => Promise<ExternalRecipe[]> }> = [
       { provider: "Spoonacular", configured: spoonacularConfigured(), search: (diagnostics) => searchSpoonacularRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, maxCandidates: parsed.data.course ? 4 : 8 }, diagnostics) },
-      { provider: "API Ninjas", configured: apiNinjasConfigured(), search: (diagnostics) => searchApiNinjasRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience }, diagnostics) },
       { provider: "RecipeAPI.io", configured: recipeApiConfigured(), search: (diagnostics) => searchRecipeApiRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, course: parsed.data.course }, diagnostics) },
       { provider: "Recipe-API.com", configured: recipeApiComConfigured(), search: (diagnostics) => searchRecipeApiComRecipes({ pantry, anchors, allergies: parsed.data.allergies, excludedIds, excludedTitles, audience: providerAudience, course: parsed.data.course }, diagnostics) },
       { provider: "TheMealDB", configured: Boolean(key), search: mealSearch },

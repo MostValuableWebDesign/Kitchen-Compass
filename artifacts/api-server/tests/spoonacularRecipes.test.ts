@@ -18,22 +18,15 @@ const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
 delete process.env.RECIPE_API_COM_API_KEY;
 const oldRecipeApiKey = process.env.RECIPEAPI_API_KEY;
 delete process.env.RECIPEAPI_API_KEY;
-const oldNinjasKey = process.env.API_NINJAS_API_KEY;
-delete process.env.API_NINJAS_API_KEY;
 after(() => {
   server.close();
   if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey;
   if (oldRecipeApiKey === undefined) delete process.env.RECIPEAPI_API_KEY; else process.env.RECIPEAPI_API_KEY = oldRecipeApiKey;
-  if (oldNinjasKey === undefined) delete process.env.API_NINJAS_API_KEY; else process.env.API_NINJAS_API_KEY = oldNinjasKey;
 });
 
 test("Spoonacular uses a server key, full recipe details, source credit, and archived exclusions", async () => {
   const oldKey = process.env.SPOONACULAR_API_KEY;
-  const oldFatSecretId = process.env.FATSECRET_CLIENT_ID;
-  const oldFatSecretSecret = process.env.FATSECRET_CLIENT_SECRET;
   process.env.SPOONACULAR_API_KEY = "test-key";
-  delete process.env.FATSECRET_CLIENT_ID;
-  delete process.env.FATSECRET_CLIENT_SECRET;
   const calls: URL[] = [];
   let failSpoonacular = false;
   globalThis.fetch = async (input, init) => {
@@ -123,7 +116,6 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(payload.providersUnavailable, []);
     assert.deepEqual(payload.sourceResults, [
       { provider: "Spoonacular", status: "found", count: 1 },
-      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
       { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
@@ -157,7 +149,6 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.match(kidsPayload.safetyNotice, /Check the original recipe and every package label/);
     assert.deepEqual(kidsPayload.sourceResults, [
       { provider: "Spoonacular", status: "found", count: 1 },
-      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
       { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "no_results", count: 0 },
@@ -171,7 +162,6 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
     assert.deepEqual(fallback.recipes.map((item) => item.id), ["201", "202"]);
     assert.deepEqual(fallback.sourceResults, [
       { provider: "Spoonacular", status: "unavailable", count: 0 },
-      { provider: "API Ninjas", status: "not_configured", count: 0 },
       { provider: "RecipeAPI.io", status: "not_configured", count: 0 },
       { provider: "Recipe-API.com", status: "not_configured", count: 0 },
       { provider: "TheMealDB", status: "found", count: 2 },
@@ -179,8 +169,6 @@ test("Spoonacular uses a server key, full recipe details, source credit, and arc
   } finally {
     globalThis.fetch = originalFetch;
     if (oldKey === undefined) delete process.env.SPOONACULAR_API_KEY; else process.env.SPOONACULAR_API_KEY = oldKey;
-    if (oldFatSecretId === undefined) delete process.env.FATSECRET_CLIENT_ID; else process.env.FATSECRET_CLIENT_ID = oldFatSecretId;
-    if (oldFatSecretSecret === undefined) delete process.env.FATSECRET_CLIENT_SECRET; else process.env.FATSECRET_CLIENT_SECRET = oldFatSecretSecret;
   }
 });
 

@@ -5,7 +5,7 @@ import app from "../src/app";
 import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 import { normalizeRecipeApiComRecipe, searchRecipeApiComRecipes } from "../src/routes/recipeApiComRecipes";
 import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnostics";
-const envNames = ["RECIPE_API_COM_API_KEY", "RECIPE_API_COM_MAX_DETAILS", "RECIPEAPI_API_KEY", "API_NINJAS_API_KEY", "SPOONACULAR_API_KEY", "THEMEALDB_API_KEY", "SESSION_SECRET"];
+const envNames = ["RECIPE_API_COM_API_KEY", "RECIPE_API_COM_MAX_DETAILS", "RECIPEAPI_API_KEY", "SPOONACULAR_API_KEY", "THEMEALDB_API_KEY", "SESSION_SECRET"];
 const saved = new Map(envNames.map((name) => [name, process.env[name]]));
 const originalFetch = globalThis.fetch;
 process.env.SESSION_SECRET = "recipe-api-com-test-session";
@@ -17,7 +17,7 @@ const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 beforeEach(() => {
   resetScanRateLimiter(); process.env.RECIPE_API_COM_API_KEY = "rapi_test-secret";
   delete process.env.RECIPE_API_COM_MAX_DETAILS;
-  for (const name of ["RECIPEAPI_API_KEY", "API_NINJAS_API_KEY", "SPOONACULAR_API_KEY"]) delete process.env[name];
+  for (const name of ["RECIPEAPI_API_KEY", "SPOONACULAR_API_KEY"]) delete process.env[name];
 });
 after(() => { server.close(); globalThis.fetch = originalFetch; for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
 const uuid = (index: number) => `a066f472-ed0c-46ea-8e2c-${String(index).padStart(12, "0")}`;
@@ -110,7 +110,7 @@ test("Recipe-API.com populates general, kids, and complete meals using the exist
   for (const body of [{ audience: "general" }, { audience: "kids" }, { audience: "general", course: "main" }, { audience: "kids", course: "main" }]) {
     const result = await request({ ingredients: input.pantry, searchAnchors: input.anchors, allergies: [], ...body });
     assert.equal(result.recipes[0]?.provider, "Recipe-API.com"); assert.match(result.recipes[0]?.instructions ?? "", /Cook safely/);
-    assert.deepEqual(result.sourceResults[3], { provider: "Recipe-API.com", status: "found", count: 1 });
+    assert.deepEqual(result.sourceResults[2], { provider: "Recipe-API.com", status: "found", count: 1 });
   }
   candidate = raw(2, "Mashed potatoes", ["Potato", "Milk", "Salt", "Pepper"]);
   for (const audience of ["general", "kids"]) assert.equal((await request({ ingredients: ["Potato"], searchAnchors: ["Potato"], allergies: [], audience, course: "side", mainRecipe: { title: "Roast chicken", ingredientNames: ["Chicken"] } })).recipes[0]?.provider, "Recipe-API.com");
@@ -131,10 +131,10 @@ test("missing key, malformed data, auth and quota failures preserve other provid
   for (const code of [429, 401, 200]) {
     status = code; const result = await request({ ingredients: input.pantry, allergies: [] });
     assert.equal(result.recipes[0]?.provider, "TheMealDB"); assert.deepEqual(result.providersUnavailable, ["Recipe-API.com"]);
-    assert.deepEqual(result.sourceResults[3], { provider: "Recipe-API.com", status: "unavailable", count: 0 });
+    assert.deepEqual(result.sourceResults[2], { provider: "Recipe-API.com", status: "unavailable", count: 0 });
     assert.equal(JSON.stringify(result).includes("rapi_test-secret"), false);
   }
   assert.equal(calls, 3); delete process.env.RECIPE_API_COM_API_KEY;
-  assert.deepEqual((await request({ ingredients: input.pantry, allergies: [] })).sourceResults[3], { provider: "Recipe-API.com", status: "not_configured", count: 0 });
+  assert.deepEqual((await request({ ingredients: input.pantry, allergies: [] })).sourceResults[2], { provider: "Recipe-API.com", status: "not_configured", count: 0 });
   assert.equal(calls, 3);
 });

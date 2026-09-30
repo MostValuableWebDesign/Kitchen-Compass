@@ -6,7 +6,7 @@ import { createScanAccessToken, resetScanRateLimiter } from "../src/middleware/s
 import { normalizeRecipeApiRecipe, recipeApiSearchParams, searchRecipeApiRecipes } from "../src/routes/recipeApiRecipes";
 import { createRecipeSearchDiagnostics } from "../src/routes/recipeSearchDiagnostics";
 
-const envNames = ["RECIPEAPI_API_KEY", "RECIPEAPI_PER_PAGE", "API_NINJAS_API_KEY", "SPOONACULAR_API_KEY", "THEMEALDB_API_KEY", "SESSION_SECRET"];
+const envNames = ["RECIPEAPI_API_KEY", "RECIPEAPI_PER_PAGE", "SPOONACULAR_API_KEY", "THEMEALDB_API_KEY", "SESSION_SECRET"];
 const saved = new Map(envNames.map((name) => [name, process.env[name]]));
 const originalFetch = globalThis.fetch;
 const oldRecipeApiComKey = process.env.RECIPE_API_COM_API_KEY;
@@ -19,7 +19,7 @@ if (!address || typeof address === "string") throw new Error("No test port");
 const url = `http://127.0.0.1:${address.port}/api/recipes/external`;
 beforeEach(() => {
   resetScanRateLimiter(); process.env.RECIPEAPI_API_KEY = "test-recipe-key";
-  delete process.env.RECIPEAPI_PER_PAGE; delete process.env.API_NINJAS_API_KEY; delete process.env.SPOONACULAR_API_KEY;
+  delete process.env.RECIPEAPI_PER_PAGE; delete process.env.SPOONACULAR_API_KEY;
 });
 after(() => { server.close();
   if (oldRecipeApiComKey === undefined) delete process.env.RECIPE_API_COM_API_KEY; else process.env.RECIPE_API_COM_API_KEY = oldRecipeApiComKey; globalThis.fetch = originalFetch; for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
@@ -93,7 +93,7 @@ test("Recipe API populates General, kids, and main/side responses with counts an
   for (const body of [{ audience: "general" }, { audience: "kids" }, { audience: "general", course: "main" }, { audience: "kids", course: "main" }]) {
     const result = await request({ ingredients: input.pantry, searchAnchors: input.anchors, allergies: [], ...body });
     assert.equal(result.recipes[0]?.provider, "RecipeAPI.io"); assert.match(result.recipes[0]?.instructions ?? "", /Cook safely/);
-    assert.deepEqual(result.sourceResults[2], { provider: "RecipeAPI.io", status: "found", count: 1 });
+    assert.deepEqual(result.sourceResults[1], { provider: "RecipeAPI.io", status: "found", count: 1 });
   }
   candidate = raw(2, "Mashed potatoes", ["Potato", "Milk", "Salt", "Pepper"]);
   for (const audience of ["general", "kids"]) assert.equal((await request({ ingredients: ["Potato"], searchAnchors: ["Potato"], allergies: [], audience, course: "side", mainRecipe: { title: "Roast chicken", ingredientNames: ["Chicken"] } })).recipes[0]?.provider, "RecipeAPI.io");
@@ -116,11 +116,11 @@ test("quota, auth, plan and malformed Recipe API failures do not block other sou
     status = code;
     const result = await request({ ingredients: input.pantry, allergies: [] });
     assert.equal(result.recipes[0]?.provider, "TheMealDB"); assert.deepEqual(result.providersUnavailable, ["RecipeAPI.io"]);
-    assert.deepEqual(result.sourceResults[2], { provider: "RecipeAPI.io", status: "unavailable", count: 0 });
+    assert.deepEqual(result.sourceResults[1], { provider: "RecipeAPI.io", status: "unavailable", count: 0 });
     assert.equal(JSON.stringify(result).includes("test-recipe-key"), false);
   }
   assert.equal(calls, 4);
   delete process.env.RECIPEAPI_API_KEY;
-  assert.deepEqual((await request({ ingredients: input.pantry, allergies: [] })).sourceResults[2], { provider: "RecipeAPI.io", status: "not_configured", count: 0 });
+  assert.deepEqual((await request({ ingredients: input.pantry, allergies: [] })).sourceResults[1], { provider: "RecipeAPI.io", status: "not_configured", count: 0 });
   assert.equal(calls, 4);
 });
