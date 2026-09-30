@@ -12,10 +12,8 @@ export function apiNinjasConfigured() {
 export function apiNinjasSearchParams(anchors: readonly string[]) {
   const foods = [...new Set(anchors.map(recipeSearchFoodTerm).filter((food): food is string => Boolean(food)))];
   if (!foods.length) return undefined;
-  const premium = process.env.API_NINJAS_RECIPE_SEARCH_MODE === "ingredients";
-  return new URLSearchParams(premium
-    ? { ingredients: foods.slice(0, 5).join(","), limit: "10" }
-    : { title: foods[0]!, limit: "5" });
+  // v3 ingredient search requires Premium and accepts at most five ingredients.
+  return new URLSearchParams({ ingredients: foods.slice(0, 5).join(","), limit: "10" });
 }
 
 export function normalizeApiNinjasRecipe(raw: unknown, pantry: string[], allergies: string[], onFailure?: (reason: RecipeNormalizationFailure) => void): ExternalRecipe | null {

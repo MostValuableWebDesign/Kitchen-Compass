@@ -34,7 +34,7 @@ const raw = (title = "Chicken pasta", names = ["Chicken breast; diced", "Pasta",
 });
 const input = { pantry: ["Chicken", "Pasta", "Tomatoes"], anchors: ["Chicken", "Pasta"], allergies: [], excludedIds: new Set<string>(), excludedTitles: new Set<string>(), audience: "general" as const };
 
-test("API Ninjas uses one authenticated v3 request with a basic-compatible title and limit", async () => {
+test("API Ninjas defaults to one authenticated v3 ingredient-search request", async () => {
   const calls: URL[] = [];
   globalThis.fetch = async (target, init) => {
     calls.push(new URL(String(target)));
@@ -44,9 +44,9 @@ test("API Ninjas uses one authenticated v3 request with a basic-compatible title
   const recipes = await searchApiNinjasRecipes(input);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.pathname, "/v3/recipe");
-  assert.equal(calls[0]?.searchParams.get("title"), "chicken");
-  assert.equal(calls[0]?.searchParams.get("limit"), "5");
-  assert.equal(calls[0]?.searchParams.has("ingredients"), false);
+  assert.equal(calls[0]?.searchParams.get("title"), null);
+  assert.equal(calls[0]?.searchParams.get("limit"), "10");
+  assert.equal(calls[0]?.searchParams.get("ingredients"), "chicken,pasta");
   assert.equal(String(calls[0]).includes("test-secret"), false);
   assert.equal(recipes[0]?.provider, "API Ninjas");
   assert.equal(recipes[0]?.sourceUrl, "");
@@ -55,12 +55,14 @@ test("API Ninjas uses one authenticated v3 request with a basic-compatible title
   assert.deepEqual(recipes[0]?.missingIngredients, []);
 });
 
-test("Premium query sends at most five distinct food anchors without additional requests", () => {
-  process.env.API_NINJAS_RECIPE_SEARCH_MODE = "ingredients";
+test("ingredient search caps thirty selected anchors at five even with the legacy title setting", () => {
+  process.env.API_NINJAS_RECIPE_SEARCH_MODE = "title";
   const params = apiNinjasSearchParams(["Chicken broth", "Chicken", "Chicken breast", "Rice", "Pasta", "Beef", "Shrimp", "Potatoes", "Tomatoes"]);
   assert.equal(params?.get("ingredients")?.split(",").length, 5);
   assert.equal(params?.get("title"), null);
   assert.equal(params?.get("limit"), "10");
+  const thirty = Array.from({ length: 30 }, (_, index) => ["Chicken", "Rice", "Pasta", "Beef", "Shrimp", "Potato"][index % 6]!);
+  assert.equal(apiNinjasSearchParams(thirty)?.get("ingredients"), "chicken,rice,pasta,beef,shrimp");
   assert.equal(apiNinjasSearchParams(["Chicken broth", "Mystery packet"]), undefined);
 });
 
