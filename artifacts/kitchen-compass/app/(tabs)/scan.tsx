@@ -34,13 +34,13 @@ type ManualIngredientDraft = {
 };
 
 async function prepareScanPhoto(asset: ScanPhotoAsset, index: number, receipt = false) {
-  const sizes = receipt ? [[1800, 0.8], [1400, 0.65], [1000, 0.5]] : [[1200, 0.6], [900, 0.45], [700, 0.35]];
+  const sizes = receipt ? [[1800, 0.85], [1600, 0.8], [1400, 0.75]] : [[1200, 0.6], [900, 0.45], [700, 0.35]];
   for (const [width, quality] of sizes) {
     const context = ImageManipulator.manipulate(asset.uri);
     if (asset.width > width) context.resize({ width, height: null });
     const rendered = await context.renderAsync();
     const photo = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: quality, base64: true });
-    if (photo.base64 && photo.base64.length * 0.75 <= 700_000) return photo;
+    if (photo.base64 && photo.base64.length * 0.75 <= (receipt ? 3_500_000 : 700_000)) return photo;
   }
   throw new Error(`Photo ${index + 1} is too large to upload. Remove it and try again.`);
 }
@@ -109,7 +109,7 @@ export default function ScanScreen() {
   const analysisStage = analysisProgressPercent < 25
     ? receiptPdfName ? 'Preparing your PDF…' : 'Preparing your photos…'
     : analysisProgressPercent < 85
-      ? 'Uploading and recognizing ingredients…'
+      ? scanType === 'receipt' ? 'Reading receipt text and image sections…' : 'Uploading and recognizing ingredients…'
       : 'Finishing your scan…';
 
   useEffect(() => () => {
@@ -142,6 +142,7 @@ export default function ScanScreen() {
     try {
       const normalized: Awaited<ReturnType<typeof prepareScanPhoto>>[] = [];
       for (const [index, asset] of assets.entries()) normalized.push(await prepareScanPhoto(asset, index, reviewType === 'receipt'));
+      if (reviewType === 'receipt' && normalized.reduce((sum, photo) => sum + (photo.base64?.length ?? 0) * 0.75, 0) > 8_000_000) throw new Error('Receipt photos are too large to upload together. Choose fewer photos and try again.');
       if (normalized.some((photo) => !photo.base64)) throw new Error('An image could not be encoded for recognition.');
       setPhotoUris(normalized.map((photo) => photo.uri));
       const photos = normalized.map((photo, index) => ({
@@ -667,7 +668,7 @@ export default function ScanScreen() {
             <Pressable testID="choose-photo" disabled={pdfPickerBusy || (pendingPhotos.length > 0 && scanType === 'receipt')} onPress={() => { setScanType('kitchen'); void pickPhoto(); }} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             <Pressable testID="upload-grocery-receipt" accessibilityRole="button" accessibilityState={{ expanded: receiptOptionsOpen }} disabled={scanBusy || barcodeBusy || pdfPickerBusy || pendingPhotos.length > 0} onPress={() => setReceiptOptionsOpen((open) => !open)} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="receipt-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Upload grocery receipt</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Read itemized foods, then review before adding</Text></View><Feather name={receiptOptionsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable>
             {receiptOptionsOpen ? <View style={[styles.spaceSetup, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Choose a PDF from Files, or use clear photos or screenshots of the receipt. PDFs can include multiple pages and must be 5 MB or smaller. Include the item names and quantities. Add up to 10 images for a long receipt; totals, payments, and non-food purchases are ignored.</Text>
+              <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Choose a PDF from Files, or use clear photos or screenshots of the receipt. PDFs can include up to 10 pages and must be 5 MB or smaller. Long receipts are read in overlapping sections. Include the item names and quantities. Add up to 10 images for a long receipt; totals, payments, and non-food purchases are ignored.</Text>
               <Pressable testID="receipt-choose-pdf" disabled={pdfPickerBusy} onPress={() => void pickReceiptPdf()} style={[styles.sessionButton, { backgroundColor: colors.primary, marginBottom: 10 }]}>{pdfPickerBusy ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Choose PDF from Files</Text>}</Pressable>
               <Pressable testID="receipt-choose-photos" disabled={pdfPickerBusy} onPress={() => { setScanType('receipt'); void pickPhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.primary }]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Choose receipt photos</Text></Pressable>
               <Pressable testID="receipt-take-photo" disabled={pdfPickerBusy} onPress={() => { setScanType('receipt'); void takePhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Photograph receipt</Text></Pressable>

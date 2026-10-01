@@ -2,7 +2,7 @@
 export function isPurchasedReceiptFood(item: { itemType: unknown; displayName: string; normalizedName: string; quantity: number | null }) {
   if (item.itemType !== "food" || item.quantity === 0) return false;
   const adjustment = /^(?:(?:sub|grand)\s*)?total(?:\s*[:\d$]|$)|^(?:tax|coupon|discount|payment|cash|change)(?:\s*[:\d$]|$)|\b(?:refund|return|void|gift card)\b/i;
-  const nonfood = /\b(?:toilet paper|paper towels?|detergent|soap|shampoo|cleaner|pet food|dog food|cat food)\b/i;
+  const nonfood = /\b(?:toilet paper|paper towels?|detergent|soap|shampoo|cleaner|pet food|dog food|cat food|mouthwash|toothpaste|toothbrush|diapers|trash bags?)\b/i;
   // A product such as Total cereal is food; totals are receipt labels, not brand words.
   const isExcluded = (name: string) => nonfood.test(name) || adjustment.test(name);
   return !isExcluded(item.displayName) && !isExcluded(item.normalizedName);
@@ -18,4 +18,20 @@ export function receiptQuantity(quantity: number | null, unit: string | null) {
     return { quantity: Number((quantity * factor).toFixed(6)), unit: smallerUnit };
   }
   return { quantity, unit: /^(?:each|ea|item|items|pack|packs|package|packages|bottle|bottles|bag|bags)$/.test(normalized) ? "ea" : normalized };
+}
+
+/** Keep the food's identity; strip retailer branding and package-size suffixes. */
+export function normalizeReceiptFoodName(value: string) {
+  let name = value.replace(/[®™]/g, '').trim()
+    .replace(/^(?:heritage farm|spice world|kroger|simple truth(?: organic)?|private selection|land o lakes)\s+/i, '')
+    .replace(/,?\s+\d+(?:\.\d+)?\s*(?:fl\s*)?(?:oz|lb|lbs|g|kg|ml|l|gal|ct|count|pack|pk|sticks?|slices?)\b.*$/i, '')
+    .replace(/\s+/g, ' ').trim();
+  if (!/\b(sauce|seasoning|powder|soup|broth|stock|fries|ravioli|nuggets)\b/i.test(name)) {
+    if (/\bchicken breasts?\b/i.test(name)) return 'Chicken breast';
+    if (/\bchicken thighs?\b/i.test(name)) return 'Chicken thigh';
+    if (/\bchicken wings?\b/i.test(name)) return 'Chicken wing';
+    if (/\b(?:minced|chopped|fresh) garlic\b|\bgarlic cloves?\b/i.test(name)) return 'Garlic';
+  }
+  name = name.replace(/\bjumbo\s+/gi, '').replace(/\bonions\b/gi, 'onion');
+  return name;
 }

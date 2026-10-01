@@ -3,6 +3,7 @@ import { once } from "node:events";
 import test, { after, beforeEach } from "node:test";
 import { randomUUID } from "node:crypto";
 import app from "../src/app";
+import { receiptPhoto, textReceiptPdf, scannedReceiptPdf } from "./receiptTestFixtures";
 import { consumeQuota, resetScanRateLimiter } from "../src/middleware/scanSecurity";
 
 process.env.SESSION_SECRET = "scan-test-session-secret";
@@ -308,11 +309,11 @@ test("receipt mode extracts purchased foods, ignores adjustments, and preserves 
     assert.equal(body.response_format.json_schema.name, "grocery_receipt");
     assert.match(body.messages[0].content[0].text, /Prices, unit prices, totals, and payment amounts are NOT quantities/);
     assert.match(body.messages[0].content[0].text, /untrusted data/);
-    const item = (name: string, itemType = "food", quantity: number | null = 2, unit: string | null = "ea") => ({ sourcePhotoId: "photo-1", normalizedName: name, displayName: name, storageLocation: "Pantry", quantity, unit, confidence: 0.9, uncertaintyReasons: [], itemType });
+    const item = (name: string, itemType = "food", quantity: number | null = 2, unit: string | null = "ea") => ({ sourcePhotoId: "photo-1-section-1", normalizedName: name, displayName: name, storageLocation: "Pantry", quantity, unit, confidence: 0.9, uncertaintyReasons: [], itemType });
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [item("Eggs"), item("Chicken", "food", 0.5, "lb"), item("Mystery produce", "food", null, null), item("Soap", "nonfood"), item("Tax", "adjustment"), item("Subtotal", "food"), item("Returned rice", "adjustment"), item("Void beans", "food", 0)], warnings: [] }) } }] }));
   };
   try {
-    const body = { ...validRequest(), scanType: "receipt" };
+    const body = { ...validRequest(), photos: [{ id: "photo-1", mimeType: "image/jpeg", base64: receiptPhoto().toString("base64") }], scanType: "receipt" };
     const response = await request(body, await issueAccess());
     assert.equal(response.status, 200);
     const result = await response.json();
@@ -333,27 +334,23 @@ test("receipt scan rejects unsupported modes and invalid receipt classifications
   assert.equal((await request({ ...validRequest(), scanType: "pdf" }, await issueAccess())).status, 400);
   const original = globalThis.fetch;
   globalThis.fetch = async (input, init) => String(input).includes("api.openai.com") ? new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ sourcePhotoId: "photo-1", normalizedName: "rice", displayName: "Rice", storageLocation: "Pantry", quantity: 1, unit: "ea", confidence: 0.9, uncertaintyReasons: [] }], warnings: [] }) } }] })) : original(input, init);
-  try { assert.equal((await request({ ...validRequest(), scanType: "receipt" }, await issueAccess())).status, 503); }
+  try { assert.equal((await request({ ...validRequest(), photos: [{ id: "photo-1", mimeType: "image/jpeg", base64: receiptPhoto().toString("base64") }], scanType: "receipt" }, await issueAccess())).status, 503); }
   finally { globalThis.fetch = original; }
 });
 
-test("PDF receipts use an inline file input and return reviewable purchases with stable import identity", async () => {
-  const pdf = Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF").toString("base64");
+test("PDF receipts extract native text before AI and return reviewable purchases with stable identity", async () => {
+  const pdf = textReceiptPdf().toString("base64");
   const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: pdf }, existingIngredients: [{ name: "eggs", location: "Refrigerator" }] };
   let calls = 0;
   globalThis.fetch = async (input, init) => {
     if (!String(input).includes("api.openai.com")) return originalFetch(input, init);
     calls++;
-    const upstream = JSON.parse(String(init?.body));
-    const content = upstream.messages[0].content;
-    assert.deepEqual(content.find((part: { type: string }) => part.type === "file"), {
-      type: "file", file: { filename: "grocery-receipt.pdf", file_data: `data:application/pdf;base64,${pdf}` },
-    });
-    assert.equal(content.some((part: { type: string }) => part.type === "image_url"), false);
-    assert.match(content[0].text, /including every page/);
-    assert.equal(content[1].text, "Source ID: receipt-pdf-1");
+    const content = JSON.parse(String(init?.body)).messages[0].content;
+    assert.equal(content.some((part: { type: string }) => part.type === "file" || part.type === "image_url"), false);
+    assert.match(content[1].text, /Source ID: receipt-pdf-1-page-1-text/);
+    assert.match(content[1].text, /\[Line 2\] Chicken breast/);
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-      suggestions: [{ itemType: "food", sourcePhotoId: "receipt-pdf-1", normalizedName: "eggs", displayName: "Eggs", storageLocation: "Refrigerator", quantity: 12, unit: "ea", confidence: 0.95, uncertaintyReasons: [] }], warnings: [],
+      suggestions: [{ itemType: "food", sourcePhotoId: "receipt-pdf-1-page-1-text", receiptLine: 6, linePosition: null, normalizedName: "eggs", displayName: "Eggs", storageLocation: "Refrigerator", quantity: 12, unit: "ea", confidence: 0.95, uncertaintyReasons: [] }], warnings: [],
     }) } }] }));
   };
   try {
@@ -364,6 +361,7 @@ test("PDF receipts use an inline file input and return reviewable purchases with
     assert.equal(result.suggestions[0].existingInventoryMatch, "egg");
     assert.equal(result.suggestions[0].quantity, 12);
     assert.equal(result.suggestions[0].quantityKnown, true);
+    assert.match(result.warnings.join(" "), /1 text page/);
     const second = await request(body, await issueAccess());
     assert.equal((await second.json()).scanId, result.scanId);
     assert.equal(calls, 2);
@@ -395,11 +393,48 @@ test("invalid, oversized, mixed and non-receipt PDF submissions are rejected bef
 });
 
 test("PDF recognition rejects fabricated source IDs and surfaces unreadable document failures", async () => {
-  const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: Buffer.from("%PDF-1.4\n%%EOF").toString("base64") } };
+  const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: textReceiptPdf().toString("base64") } };
   globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ itemType: "food", sourcePhotoId: "photo-1", normalizedName: "rice", displayName: "Rice", storageLocation: "Pantry", quantity: 1, unit: "ea", confidence: 0.9, uncertaintyReasons: [] }], warnings: [] }) } }] }));
   try {
     assert.equal((await request(body, await issueAccess())).status, 503);
     globalThis.fetch = async () => new Response("Unreadable/encrypted PDF", { status: 400 });
     assert.equal((await request(body, await issueAccess())).status, 503);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("scanned tall PDF sections are analyzed in bounded batches, merged without overlap stock inflation, and normalized", async () => {
+  const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: scannedReceiptPdf().toString('base64') } };
+  let calls = 0, active = 0, peak = 0;
+  const seen = new Set<number>();
+  globalThis.fetch = async (input, init) => {
+    if (!String(input).includes('api.openai.com')) return originalFetch(input, init);
+    calls++; active++; peak = Math.max(peak, active);
+    const content = JSON.parse(String(init?.body)).messages[0].content;
+    const images = content.filter((part: { type: string }) => part.type === 'image_url');
+    assert.ok(images.length > 0 && images.length <= 3);
+    const suggestions = content.flatMap((part: { type: string; text?: string }) => {
+      const match = /Source ID: (receipt-pdf-1-page-1-section-(\d+))/.exec(part.text ?? '');
+      if (!match) return [];
+      const section = Number(match[2]); seen.add(section);
+      if (section > 3) return [];
+      return [{ itemType: 'food', sourcePhotoId: match[1], receiptLine: null, linePosition: section === 1 ? 0.95 : section === 2 ? 0.05 : 0.5,
+        normalizedName: 'retailer chicken', displayName: 'Heritage Farm® Boneless Skinless Chicken Breasts, 1 lb', storageLocation: 'Refrigerator',
+        quantity: section === 3 ? 2 : 1, unit: 'ea', confidence: 0.95, uncertaintyReasons: [] }];
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5)); active--;
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions, warnings: [] }) } }] }));
+  };
+  try {
+    const response = await request(body, await issueAccess());
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.ok(seen.size > 3);
+    assert.equal(calls, Math.ceil(seen.size / 3));
+    assert.ok(peak <= 3);
+    assert.deepEqual([...seen].sort((a,b) => a-b), Array.from({length:seen.size}, (_, i) => i + 1));
+    assert.equal(result.suggestions.length, 1);
+    assert.equal(result.suggestions[0].displayName, 'Chicken breast');
+    assert.equal(result.suggestions[0].quantity, 3);
+    assert.equal(result.suggestions[0].sourcePhotoId, 'receipt-pdf-1');
   } finally { globalThis.fetch = originalFetch; }
 });

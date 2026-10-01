@@ -4,6 +4,7 @@ import { z } from "zod";
 import { decodedBase64Bytes, issueScanAccess, scanLimits, sendScanError } from "../middleware/scanSecurity";
 
 import { isPurchasedReceiptFood, receiptQuantity } from "./receiptScan";
+import { analyzeReceipt } from "./receiptAnalysis";
 
 const router: IRouter = Router();
 
@@ -62,7 +63,7 @@ const modelResponseSchema = z.object({
 });
 
 const receiptResponseSchema = modelResponseSchema.extend({
-  suggestions: z.array(modelResponseSchema.shape.suggestions.element.extend({ itemType: z.enum(["food", "nonfood", "adjustment"]) })).max(100),
+  suggestions: z.array(modelResponseSchema.shape.suggestions.element.extend({ itemType: z.enum(["food", "nonfood", "adjustment"]), receiptLine: z.number().int().positive().nullable().optional(), linePosition: z.number().min(0).max(1).nullable().optional() })).max(100),
 });
 const model = "gpt-5.4-mini";
 const responseSchema = {
@@ -106,6 +107,49 @@ const ingredientAliases: Record<string, string> = {
 function normalizeName(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
   return ingredientAliases[normalized] ?? normalized;
+}
+
+class ScanProviderError extends Error {
+  constructor(readonly status: number) { super(`Scan provider rejected the request (${status})`); this.name = 'ScanProviderError'; }
+}
+
+async function recognizeScan(content: unknown[], receipt: boolean, signal: AbortSignal) {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      signal: signal,
+      body: JSON.stringify({
+        model,
+        max_completion_tokens: 12000,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: receipt ? "grocery_receipt" : "ingredient_scan", strict: true, schema: receipt ? {
+            ...responseSchema,
+            properties: { ...responseSchema.properties, suggestions: { ...responseSchema.properties.suggestions, items: {
+              ...responseSchema.properties.suggestions.items,
+              properties: { ...responseSchema.properties.suggestions.items.properties, itemType: { type: "string", enum: ["food", "nonfood", "adjustment"] }, receiptLine: { anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }] }, linePosition: { anyOf: [{ type: "number", minimum: 0, maximum: 1 }, { type: "null" }] } },
+              required: [...responseSchema.properties.suggestions.items.required, "itemType", "receiptLine", "linePosition"],
+            } } },
+          } : responseSchema },
+        },
+        messages: [{ role: "user", content }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new ScanProviderError(response.status);
+    }
+
+    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const rawContent = payload.choices?.[0]?.message?.content;
+    if (!rawContent) {
+      throw new Error("Scan provider returned no content");
+    }
+
+    return JSON.parse(rawContent) as unknown;
 }
 
 router.post("/scan/access", issueScanAccess);
@@ -154,10 +198,10 @@ router.post("/scan/analyze", async (req, res) => {
           "Classify each suggestion as food, nonfood, or adjustment using itemType. Omit tax, totals, coupons, deposits, discounts, payment lines, voided/returned/refunded items, household goods, toiletries, and pet products.",
           "Expand clear store abbreviations into recognizable ingredient names, preserving meaningful food types. If ambiguous, keep a cautious readable name, lower confidence, and explain what needs review. Do not invent unlisted groceries.",
           "Use quantities or weights only when explicitly printed. Prices, unit prices, totals, and payment amounts are NOT quantities. Package size alone is not the number of packages purchased. Use ea for explicitly counted purchased packages; otherwise use null.",
-          "Combine repeat purchases of the same food only when the quantities and units are explicit and compatible. Overlapping receipt photos show the same purchase once: do not double count repeated lines across images.",
-          "Return one suggestion per unique purchased food across the receipt images, at most 100 total. Propose storage locations for user review; receipts do not establish freshness or expiration.",
+          "Return each distinct purchase line separately. Preserve explicit quantities; the server merges products and removes overlap duplicates.",
+          "Return no more than 100 purchased product lines per batch. Propose storage locations for user review; receipts do not establish freshness or expiration.",
         ] : ["Identify only clearly visible food ingredients in these kitchen photos."]),
-        "Return one suggestion per unique visible ingredient across all photos.",
+        ...(scanType === "receipt" ? [] : ["Return one suggestion per unique visible ingredient across all photos."]),
         "Never infer hidden items, freshness, expiration dates, or precise quantities from appearance.",
         ...(scanType === "receipt" ? [] : ["Only provide a quantity and unit when a package label or clearly countable item supports it; otherwise use null."]),
         "Use storageLocation only as a cautious proposal based on the visible item, not as a fact.",
@@ -167,10 +211,6 @@ router.post("/scan/analyze", async (req, res) => {
         `Existing inventory for duplicate awareness: ${JSON.stringify(existingIngredients)}`,
       ].join("\n"),
     },
-    ...(receiptPdf ? [
-      { type: "text", text: `Source ID: ${receiptPdf.id}` },
-      { type: "file", file: { filename: "grocery-receipt.pdf", file_data: `data:application/pdf;base64,${receiptPdf.base64}` } },
-    ] : []),
     ...photos.flatMap((photo) => [
       { type: "text", text: `Photo ID: ${photo.id}` },
       { type: "image_url", image_url: { url: `data:${photo.mimeType};base64,${photo.base64}` } },
@@ -178,47 +218,11 @@ router.post("/scan/analyze", async (req, res) => {
   ];
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), scanLimits.requestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), scanType === "receipt" ? 120_000 : scanLimits.requestTimeoutMs);
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        max_completion_tokens: 12000,
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: scanType === "receipt" ? "grocery_receipt" : "ingredient_scan", strict: true, schema: scanType === "receipt" ? {
-            ...responseSchema,
-            properties: { ...responseSchema.properties, suggestions: { ...responseSchema.properties.suggestions, items: {
-              ...responseSchema.properties.suggestions.items,
-              properties: { ...responseSchema.properties.suggestions.items.properties, itemType: { type: "string", enum: ["food", "nonfood", "adjustment"] } },
-              required: [...responseSchema.properties.suggestions.items.required, "itemType"],
-            } } },
-          } : responseSchema },
-        },
-        messages: [{ role: "user", content }],
-      }),
-    });
-
-    if (!response.ok) {
-      req.log.error({ status: response.status }, "Ingredient scan AI request failed");
-      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition is temporarily unavailable. Your existing kitchen inventory was not changed.");
-      return;
-    }
-
-    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const rawContent = payload.choices?.[0]?.message?.content;
-    if (!rawContent) {
-      sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition returned no suggestions. Your existing kitchen inventory was not changed.");
-      return;
-    }
-
-    const aiResult = (scanType === "receipt" ? receiptResponseSchema : modelResponseSchema).parse(JSON.parse(rawContent));
+    const aiResult = scanType === "receipt"
+      ? await analyzeReceipt({ photos, receiptPdf, prompt: content[0].text!, signal: controller.signal }, async (batch) => receiptResponseSchema.parse(await recognizeScan(batch, true, controller.signal)))
+      : modelResponseSchema.parse(await recognizeScan(content, false, controller.signal));
     const photoIds = new Set(receiptPdf ? [receiptPdf.id] : photos.map((photo) => photo.id));
     if (aiResult.suggestions.some((suggestion) => !photoIds.has(suggestion.sourcePhotoId))) {
       sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition returned an invalid result. Your existing kitchen inventory was not changed.");
@@ -259,10 +263,12 @@ router.post("/scan/analyze", async (req, res) => {
     });
     res.json(result);
   } catch (error) {
-    const isTimeout = error instanceof Error && error.name === "AbortError";
+    const isTimeout = controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
+    controller.abort();
     req.log.error({
       reason: isTimeout ? "timeout" : "provider_or_validation_failure",
       errorType: error instanceof Error ? error.name : typeof error,
+      ...(error instanceof ScanProviderError ? { providerStatus: error.status } : {}),
     }, "Ingredient scan processing failed");
     sendScanError(req, res, 503, "SCAN_UNAVAILABLE", "Ingredient photo recognition failed. Your existing kitchen inventory was not changed.");
   } finally {
