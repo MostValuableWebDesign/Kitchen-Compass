@@ -13,6 +13,35 @@ const MAX_PIXELS = 80_000_000;
 const require = createRequire(import.meta.url);
 const pdfRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
 
+export async function prepareReceiptImage(input: Buffer): Promise<Buffer> {
+  // Work on each bounded section, preserving positions for overlap reconciliation.
+  // Dark-mode order receipts use light lettering on a nearly black background.
+  const { data, info } = await sharp(input, { limitInputPixels: MAX_PIXELS })
+    .flatten({ background: '#ffffff' }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const histogram = new Uint32Array(256);
+  for (const value of data) histogram[value]!++;
+  const percentile = (fraction: number) => {
+    const target = Math.max(1, Math.ceil(data.length * fraction));
+    let count = 0;
+    for (let value = 0; value < 256; value++) {
+      count += histogram[value]!;
+      if (count >= target) return value;
+    }
+    return 255;
+  };
+  const invert = percentile(0.65) < 110;
+  const low = invert ? 255 - percentile(0.999) : percentile(0.001);
+  const high = invert ? 255 - percentile(0.001) : percentile(0.999);
+  // Do not stretch almost-flat sections: that would amplify compression noise.
+  const stretch = high - low >= 16;
+  for (let index = 0; index < data.length; index++) {
+    const value = invert ? 255 - data[index]! : data[index]!;
+    data[index] = stretch ? Math.round(Math.max(0, Math.min(255, (value - low) * 255 / (high - low)))) : value;
+  }
+  // Lossless output avoids introducing fresh JPEG artifacts around small letters.
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
+}
+
 export function receiptBands(height: number) {
   if (!Number.isFinite(height) || height < 1) throw new Error('Invalid receipt dimensions');
   const bands: Array<{ top: number; height: number }> = [];
@@ -53,7 +82,7 @@ async function renderPage(page: PDFPageProxy, originalId: string, signal: AbortS
     try { await task.promise; }
     finally { signal.removeEventListener('abort', cancel); }
     sources.push({ id: `${originalId}-page-${page.pageNumber}-section-${index + 1}`, originalId, page: page.pageNumber,
-      ...band, kind: 'image', base64: (await canvas.encode('jpeg', 85)).toString('base64') });
+      ...band, kind: 'image', base64: (await prepareReceiptImage(await canvas.encode('png'))).toString('base64') });
     canvas.width = 1; canvas.height = 1;
   }
   return sources;
@@ -92,12 +121,13 @@ export async function prepareReceiptPhotoSources(photos: Array<{ id: string; bas
     signal.throwIfAborted();
     const input = Buffer.from(photo.base64, 'base64');
     const image = sharp(input, { limitInputPixels: MAX_PIXELS }).rotate();
-    const { data, info } = await image.toBuffer({ resolveWithObject: true });
+    const { data, info } = await image.png().toBuffer({ resolveWithObject: true });
     const width = Math.min(1500, info.width);
-    const scaled = await sharp(data, { limitInputPixels: MAX_PIXELS }).resize({ width, withoutEnlargement: true }).toBuffer({ resolveWithObject: true });
+    const scaled = await sharp(data, { limitInputPixels: MAX_PIXELS }).resize({ width, withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
     for (const [index, band] of receiptBands(scaled.info.height).entries()) {
       signal.throwIfAborted();
-      const bytes = await sharp(scaled.data, { limitInputPixels: MAX_PIXELS }).extract({ left: 0, width: scaled.info.width, ...band }).jpeg({ quality: 85 }).toBuffer();
+      const crop = await sharp(scaled.data, { limitInputPixels: MAX_PIXELS }).extract({ left: 0, width: scaled.info.width, ...band }).png().toBuffer();
+      const bytes = await prepareReceiptImage(crop);
       sources.push({ id: `${photo.id}-section-${index + 1}`, originalId: photo.id, page: 1, ...band, kind: 'image', base64: bytes.toString('base64') });
       if (sources.length > MAX_RECEIPT_SECTIONS) throw new Error('Receipt is too long. Upload it in smaller parts.');
     }

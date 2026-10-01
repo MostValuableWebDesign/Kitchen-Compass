@@ -18,15 +18,15 @@ export function textReceiptPdf() {
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${content.length} >>\nstream\n${content}\nendstream`]);
 }
-export function receiptPhoto(height = 500) {
+export function receiptPhoto(height = 500, background = '#ffffff', lettering = '#000000') {
   const canvas = createCanvas(400, height), context = canvas.getContext('2d');
-  context.fillStyle = '#ffffff'; context.fillRect(0, 0, 400, height);
-  context.fillStyle = '#000000'; context.font = '20px sans-serif';
+  context.fillStyle = background; context.fillRect(0, 0, 400, height);
+  context.fillStyle = lettering; context.font = '20px sans-serif';
   for (let y = 80; y < height; y += 180) context.fillText('Chicken breast 1 ea $5.00', 20, y);
   return canvas.toBuffer('image/jpeg');
 }
-export function scannedReceiptPdf(height = 5000) {
-  const bytes = receiptPhoto(height), content = `q 400 0 0 ${height} 0 0 cm /Im1 Do Q`;
+export function scannedReceiptPdf(height = 5000, background = '#ffffff', lettering = '#000000') {
+  const bytes = receiptPhoto(height, background, lettering), content = `q 400 0 0 ${height} 0 0 cm /Im1 Do Q`;
   return pdf(['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 ${height}] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>`,
     Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width 400 /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`), bytes, Buffer.from('\nendstream')]),

@@ -412,6 +412,11 @@ test("scanned tall PDF sections are analyzed in bounded batches, merged without 
     const content = JSON.parse(String(init?.body)).messages[0].content;
     const images = content.filter((part: { type: string }) => part.type === 'image_url');
     assert.ok(images.length > 0 && images.length <= 3);
+    for (const image of images) {
+      assert.match(image.image_url.url, /^data:image\/png;base64,/);
+      assert.equal(image.image_url.detail, 'high');
+      assert.equal(Buffer.from(image.image_url.url.split(',')[1], 'base64').subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    }
     const suggestions = content.flatMap((part: { type: string; text?: string }) => {
       const match = /Source ID: (receipt-pdf-1-page-1-section-(\d+))/.exec(part.text ?? '');
       if (!match) return [];

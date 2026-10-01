@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import sharp from 'sharp';
 import { prepareReceiptPdfSources, prepareReceiptPhotoSources, receiptBands, type ReceiptSource } from '../src/routes/receiptDocuments';
 import { mergeReceiptLines, type ReceiptLine } from '../src/routes/receiptMerge';
 import { normalizeReceiptFoodName } from '../src/routes/receiptScan';
@@ -32,6 +33,29 @@ test('native PDF text retains receipt line order while scanned PDFs and tall pho
   const photos = await prepareReceiptPhotoSources([{ id: 'photo', base64: receiptPhoto(5000).toString('base64') }], signal);
   assert.equal(photos.length, 3);
   assert.equal(photos.at(-1)!.top + photos.at(-1)!.height, 5000);
+});
+
+test('dark and low-contrast receipt lettering becomes dark on light lossless sections for photos and PDFs', async () => {
+  const signal = new AbortController().signal;
+  for (const [background, lettering] of [['#151515', '#dddddd'], ['#555555', '#888888'], ['#cccccc', '#999999'], ['#ffffff', '#000000']]) {
+    const photos = await prepareReceiptPhotoSources([{ id: 'photo', base64: receiptPhoto(500, background, lettering).toString('base64') }], signal);
+    const pdf = await prepareReceiptPdfSources(scannedReceiptPdf(500, background, lettering).toString('base64'), 'pdf', signal);
+    for (const section of [photos[0]!, pdf[0]!]) {
+      const bytes = Buffer.from(section.base64!, 'base64');
+      assert.equal((await sharp(bytes).metadata()).format, 'png');
+      const { data, info } = await sharp(bytes).greyscale().raw().toBuffer({ resolveWithObject: true });
+      assert.ok(data[0]! > 220, 'background must be light');
+      // The fixture has lettering at x20..300, y60..80, scaled by four for PDF rendering.
+      const scale = info.width / 400;
+      let dark = 0;
+      for (let y = Math.floor(60 * scale); y < 80 * scale; y++) {
+        for (let x = Math.floor(20 * scale); x < 300 * scale; x++) {
+          if (data[y * info.width + x]! < 70) dark++;
+        }
+      }
+      assert.ok(dark > 50 * scale * scale, 'readable letter strokes must survive enhancement');
+    }
+  }
 });
 
 test('overlapping rows count once, genuine repeated purchases count separately, and unknown quantities stay unknown', () => {
