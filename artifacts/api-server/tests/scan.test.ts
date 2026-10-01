@@ -127,8 +127,9 @@ test("persistent quota increments on insert and on conflict when PostgreSQL is a
 test("scan rejects malformed requests with a sanitized structured error", async () => {
   const response = await request({ photos: [] }, await issueAccess());
   assert.equal(response.status, 400);
-  const payload = await response.json() as { error: { code: string; details?: unknown } };
+  const payload = await response.json() as { error: { code: string; message: string; details?: unknown } };
   assert.deepEqual(payload.error.code, "INVALID_REQUEST");
+  assert.equal(payload.error.message, "Include one or more photos, or a PDF receipt in receipt mode; do not combine them.");
   assert.equal("details" in payload.error, false);
 });
 

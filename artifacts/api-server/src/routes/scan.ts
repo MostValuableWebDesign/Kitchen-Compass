@@ -157,7 +157,28 @@ router.post("/scan/access", issueScanAccess);
 router.post("/scan/analyze", async (req, res) => {
   const parsedRequest = scanRequestSchema.safeParse(req.body);
   if (!parsedRequest.success) {
-    sendScanError(req, res, 400, "INVALID_REQUEST", "The scan request is invalid.");
+    const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+    req.log.warn({
+      reason: "invalid_scan_request",
+      scanType: typeof body.scanType === "string" ? body.scanType : null,
+      photoCount: Array.isArray(body.photos) ? body.photos.length : null,
+      hasReceiptPdf: Boolean(body.receiptPdf),
+      existingIngredientCount: Array.isArray(body.existingIngredients) ? body.existingIngredients.length : null,
+      issues: parsedRequest.error.issues.slice(0, 8).map((issue) => ({
+        path: issue.path.map(String).join("."),
+        code: issue.code,
+      })),
+    }, "Scan request rejected");
+    const hasPayloadModeIssue = parsedRequest.error.issues.some((issue) => issue.code === "custom" && issue.path.length === 0);
+    sendScanError(
+      req,
+      res,
+      400,
+      "INVALID_REQUEST",
+      hasPayloadModeIssue
+        ? "Include one or more photos, or a PDF receipt in receipt mode; do not combine them."
+        : "The scan request is invalid.",
+    );
     return;
   }
 
@@ -169,6 +190,11 @@ router.post("/scan/analyze", async (req, res) => {
       return;
     }
     if (bytes === null || !Buffer.from(receiptPdf.base64, "base64").subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      req.log.warn({
+        reason: bytes === null ? "invalid_receipt_pdf_encoding" : "invalid_receipt_pdf_signature",
+        encodedLength: receiptPdf.base64.length,
+        decodedBytes: bytes,
+      }, "Receipt PDF rejected");
       sendScanError(req, res, 400, "INVALID_REQUEST", "Choose a valid PDF receipt.");
       return;
     }

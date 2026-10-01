@@ -1,5 +1,6 @@
 import { File, Paths } from 'expo-file-system';
 import { prepareReceiptPdf, validateReceiptPdfFile, type ReceiptPdf } from '@/lib/receiptPdf';
+import { getScanApiErrorMessage } from '@/lib/scanApiError';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -172,16 +173,19 @@ export default function ScanScreen() {
     } catch (error) {
       setRecognitionState('unavailable');
       const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
+      const apiMessage = getScanApiErrorMessage(error);
       setRecognitionMessage(
         error instanceof Error && error.message.includes('too large to upload')
           ? error.message
           : status === 401
           ? 'Secure scan access could not be established. Try again later or use manual entry below.'
           : status === 413
-            ? 'That photo payload is too large. Choose fewer photos or use smaller images.'
+            ? apiMessage ?? (receiptPdf ? 'The PDF is too large. Choose a receipt PDF no larger than 5 MB.' : 'That photo payload is too large. Choose fewer photos or use smaller images.')
+            : status === 400
+              ? apiMessage ?? (receiptPdf ? 'The PDF receipt could not be submitted. Choose it again and retry.' : 'The scan request could not be submitted. Try again.')
             : status === 429
-              ? 'Photo recognition is temporarily rate-limited. Try again in a little while.'
-              : 'Recognition is unavailable right now. Your existing kitchen was not changed. Manual entry remains available below.',
+              ? `${receiptPdf ? 'Receipt' : 'Photo'} recognition is temporarily rate-limited. Try again in a little while.`
+              : apiMessage ?? 'Recognition is unavailable right now. Your existing kitchen was not changed. Manual entry remains available below.',
       );
     } finally {
       analysisGuard.current = false;

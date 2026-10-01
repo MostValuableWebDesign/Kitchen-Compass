@@ -71,6 +71,7 @@ app.use((error: unknown, req: express.Request, res: express.Response, next: expr
     return;
   }
   if ((req.path.startsWith("/api/scan") || req.path.startsWith("/api/recipes")) && error instanceof SyntaxError) {
+    req.log.warn({ reason: "invalid_json_request" }, "Scan request rejected");
     res.status(400).json({
       error: {
         code: "INVALID_REQUEST",
