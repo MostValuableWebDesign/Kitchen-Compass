@@ -366,12 +366,12 @@ router.post("/recipes/discover", async (req, res) => {
 
   const { inventory, preferences, filters, variationSeed, excludeRecipeVersions, excludeRecipeTitles, excludeArchivedRecipeTitles, audience, course, focusIngredients, mainRecipe } = parsed.data;
   if (course && (!focusIngredients?.length || (course === "side" && !mainRecipe))) {
-    sendScanError(req, res, 400, "INVALID_REQUEST", "Choose confirmed ingredients and a main dish before creating this recipe.");
+    sendScanError(req, res, 400, "INVALID_REQUEST", "Choose kitchen ingredients and a main dish before creating this recipe.");
     return;
   }
   const confirmedAvailableInventory = inventory.filter((item) => item.status !== "used" && item.confidence !== "uncertain" && !(item.quantityKnown && item.quantityValue === 0));
-  if (focusIngredients?.some((focus) => !confirmedAvailableInventory.some((item) => normalize(item.name) === normalize(focus)))) {
-    sendScanError(req, res, 400, "INVALID_REQUEST", "Selected recipe ingredients must be confirmed in your kitchen.");
+  if (focusIngredients?.some((focus) => !inventory.some((item) => normalize(item.name) === normalize(focus)))) {
+    sendScanError(req, res, 400, "INVALID_REQUEST", "Selected recipe ingredients must be listed in your kitchen.");
     return;
   }
   const allergenAssessableInventory = confirmedAvailableInventory.filter((item) =>
@@ -390,11 +390,11 @@ router.post("/recipes/discover", async (req, res) => {
       "Include age-appropriate cutting or texture guidance in the steps where relevant. Avoid whole grapes, whole nuts, hard rounds, and other common choking shapes; never omit standard cooking temperatures for proteins.",
     ] : []),
     ...(course === "main" ? [
-      `Create main dishes led by these selected confirmed ingredients: ${JSON.stringify(focusIngredients)}. Make each candidate a substantial main dish rather than a side, snack, or garnish.`,
+      `Create main dishes led by these selected kitchen ingredients: ${JSON.stringify(focusIngredients)}. Make each candidate a substantial main dish rather than a side, snack, or garnish.`,
       "Return exactly one main dish recipe.",
     ] : []),
     ...(course === "side" ? [
-      `Create side dishes to serve alongside this main dish: ${JSON.stringify(mainRecipe)}. Use these selected confirmed ingredients first: ${JSON.stringify(focusIngredients)}. Prefer vegetables, grains, potatoes, or other complementary ingredients; avoid making a second main dish or repeating the main dish's primary protein. Give each side its own complete cooking steps.`,
+      `Create side dishes to serve alongside this main dish: ${JSON.stringify(mainRecipe)}. Use these selected kitchen ingredients first: ${JSON.stringify(focusIngredients)}. Prefer vegetables, grains, potatoes, or other complementary ingredients; avoid making a second main dish or repeating the main dish's primary protein. Give each side its own complete cooking steps.`,
       "Return exactly one side dish recipe.",
     ] : []),
     "Every submitted ingredient is eligible as a recipe ingredient. Prefer confirmed available items when deciding what the user already has, and include only a small number of clearly identified extra ingredients so the app can label the recipe Almost ready or Check quantities.",

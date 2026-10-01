@@ -121,14 +121,14 @@ test('published recipe search excludes seasonings and ranks useful ingredients b
     { id: 'chicken', name: 'Chicken', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const, quantityKnown: false, source: 'scan' as const },
     { id: 'used', name: 'Beans', location: 'Pantry' as const, status: 'used' as const, confidence: 'confirmed' as const, quantityKnown: true, source: 'manual' as const },
   ];
-  assert.deepEqual(rankPublishedSearchIngredients(ingredients).map((item) => item.name), ['Rice', 'Chicken']);
+  assert.deepEqual(rankPublishedSearchIngredients(ingredients).map((item) => item.name), ['Chicken', 'Beans', 'Rice']);
   assert.deepEqual(buildPublishedRecipeSearch(ingredients, ['chicken']), {
-    anchors: ['Chicken', 'Rice'],
-    ingredients: ['Chicken', 'Rice', 'Salt'],
+    anchors: ['Chicken', 'Beans', 'Rice'],
+    ingredients: ['Chicken', 'Beans', 'Rice', 'Salt'],
   });
   assert.deepEqual(buildPublishedRecipeSearch(ingredients, ['chicken'], { manualSelection: true }), {
     anchors: ['Chicken'],
-    ingredients: ['Chicken', 'Salt', 'Rice'],
+    ingredients: ['Chicken', 'Salt', 'Rice', 'Beans'],
   });
   assert.equal(publishedIngredientCategory('chicken breast'), 'Meat & seafood');
   assert.equal(publishedIngredientCategory('green apple'), 'Fruits');
@@ -146,7 +146,7 @@ test('automatic ranking selects useful, varied ingredients within 30 and changes
   ];
   const inventory = [...meats, ...vegetables];
   const general = rankPublishedSearchIngredients(inventory, 'general', [], new Date('2026-09-26T12:00:00'));
-  assert.equal(general[0]?.name, 'Broccoli');
+  assert.equal(general[0]?.name, 'Chicken cut 0');
   assert.equal(general.slice(0, 30).some((item) => item.name === 'Carrot'), true);
   assert.equal(general.slice(0, 30).some((item) => item.name === 'Rice'), true);
   const main = rankPublishedSearchIngredients(inventory, 'main', [], new Date('2026-09-26T12:00:00'));
@@ -293,4 +293,24 @@ test('published recipes can be archived and restored from a saved snapshot', () 
   assert.equal(isArchivedPublished(published, archived), true);
   assert.equal(parseArchivedRecipes(JSON.parse(JSON.stringify(archived)))[0]?.externalRecipe?.sourceUrl, published.sourceUrl);
   assert.equal(isArchivedPublished(published, restoreArchivedRecipe(archived, archived[0]!.key)), false);
+});
+
+test('only common staples are excluded and stock metadata cannot affect ranking', () => {
+  const base = [
+    { id: 'chicken', name: 'Chicken', location: 'Refrigerator' as const, status: 'fresh' as const, confidence: 'confirmed' as const },
+    { id: 'rice', name: 'Rice', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const },
+    { id: 'onion', name: 'Onion', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const },
+    { id: 'salt', name: 'Salt', location: 'Pantry' as const, status: 'fresh' as const, confidence: 'confirmed' as const },
+  ];
+  const changed = base.map((item, index) => ({ ...item, status: index % 2 ? 'used' as const : 'low' as const, confidence: 'uncertain' as const,
+    quantityKnown: true, quantityValue: 0, expires: '2020-01-01', dateConfirmed: true, source: 'scan' as const }));
+  const names = (items: typeof base | typeof changed) => rankPublishedSearchIngredients(items).map((item) => item.name);
+  assert.deepEqual(names(changed), names(base));
+  assert.deepEqual(new Set(names(changed)), new Set(['Chicken', 'Rice', 'Onion']));
+  const searched = buildPublishedRecipeSearch(changed);
+  assert.equal(searched.anchors.length, 3);
+  assert.equal(searched.ingredients.includes('Salt'), true);
+  const side = rankPublishedSearchIngredients(changed, 'side', ['Onion', 'Rice']);
+  assert.deepEqual(side.map((item) => item.id), rankPublishedSearchIngredients(changed, 'side').map((item) => item.id));
+  assert.equal(side.some((item) => item.name === 'Onion'), true);
 });

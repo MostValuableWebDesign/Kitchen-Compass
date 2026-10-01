@@ -540,3 +540,10 @@ test("partial cache requests only missing slots, combines new ideas, and full ca
     assert.equal((await reused.json()).recipes.length, 5);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("complete-meal AI accepts selected kitchen ingredients regardless of stock metadata", async () => {
+  const body = { ...requestBody(), inventory: [{ ...requestBody().inventory[0]!, status: "used", confidence: "uncertain", quantityValue: 0 }], course: "main", focusIngredients: ["eggs"] };
+  const response = await discoverModelRecipe(validModelRecipe(), body as ReturnType<typeof requestBody>);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).recipes.length, 1);
+});

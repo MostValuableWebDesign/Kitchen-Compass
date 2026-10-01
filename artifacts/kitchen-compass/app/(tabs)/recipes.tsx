@@ -269,7 +269,7 @@ export default function RecipesScreen() {
     const selectedSearch = course ? buildPublishedRecipeSearch(ingredients, selectedIds, { manualSelection: true, focus: course, mainIngredientNames }) : null;
     const focusedNames = selectedSearch?.anchors ?? [];
     if (course && (!focusedNames.length || (course === 'side' && !mealMain))) {
-      setDiscoveryWarning('Choose confirmed ingredients and a main dish before creating a side.');
+      setDiscoveryWarning('Choose kitchen ingredients and a main dish before creating a side.');
       if (existingController) finishSearch(existingController, false);
       return;
     }
@@ -332,7 +332,7 @@ export default function RecipesScreen() {
     const mainRecipe = mealMain ? { title: mealMain.title.slice(0, 160), ingredientNames: mainIngredientNames.slice(0, 40).map((name) => name.slice(0, 120)) } : undefined;
     const searchInput = buildPublishedRecipeSearch(ingredients, selectedIds, { manualSelection: true, focus: course, mainIngredientNames });
     if (!searchInput.anchors.length || (course === 'side' && !mainRecipe?.ingredientNames.length)) {
-      setMealMessage('Choose confirmed ingredients and a main dish before finding a side.');
+      setMealMessage('Choose kitchen ingredients and a main dish before finding a side.');
       return;
     }
     const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
@@ -397,8 +397,8 @@ export default function RecipesScreen() {
   const findPublished = async (audience: RecipeSection) => {
     const searchInput = buildPublishedRecipeSearch(ingredients, publishedDriverIds, { manualSelection: publishedSelectionMode === 'manual' });
     if (!searchInput.anchors.length) {
-      if (audience === 'kids') setKidMessage('Add at least one eligible confirmed ingredient first.');
-      else setExternalMessage('Add at least one eligible confirmed ingredient first.');
+      if (audience === 'kids') setKidMessage('Add at least one kitchen ingredient other than a common staple first.');
+      else setExternalMessage('Add at least one kitchen ingredient other than a common staple first.');
       return;
     }
     const allergies = [...new Set((Array.isArray(preferences.allergies) ? preferences.allergies : [])
@@ -494,9 +494,7 @@ export default function RecipesScreen() {
   };
 
   const chooseAutomaticPublishedSearch = () => {
-    const automatic = pickerTarget === 'side'
-      ? rankedPublishedIngredients.filter((ingredient) => !mainIngredientNames.some((name) => name.toLowerCase().trim() === ingredient.name.toLowerCase().trim()))
-      : rankedPublishedIngredients;
+    const automatic = rankedPublishedIngredients;
     setPublishedDriverIds(automatic.slice(0, MAX_PUBLISHED_SEARCH_ANCHORS).map((ingredient) => ingredient.id));
     setPublishedSelectionMode('automatic');
     setPublishedSearchStep('confirm');
@@ -517,7 +515,7 @@ export default function RecipesScreen() {
       const course = pickerTarget;
       Alert.alert(
         course === 'main' ? 'Create a main dish?' : 'Create a side dish?',
-        `Search published recipes using the ${publishedDriverIds.length} selected confirmed ingredients first. If no suitable ${course} is found, AI will create one using your saved preferences${course === 'side' && mealMain ? ` and “${mealMain.title}” as the main dish` : ''}.`,
+        `Search published recipes using the ${publishedDriverIds.length} selected kitchen ingredients first. If no suitable ${course} is found, AI will create one using your saved preferences${course === 'side' && mealMain ? ` and “${mealMain.title}” as the main dish` : ''}.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Find dish', onPress: () => { setPublishedPickerOpen(false); void findCompleteMealDish(course, publishedDriverIds); } },
@@ -527,7 +525,7 @@ export default function RecipesScreen() {
     }
     Alert.alert(
       'Find recipes now?',
-      'Your selected confirmed ingredients will be sent to the online recipe search service.',
+      'Your selected kitchen ingredients will be sent to the online recipe search service.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -644,7 +642,7 @@ export default function RecipesScreen() {
         <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
           <View style={{ flex: 1, gap: 10 }}>
             <Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Build a complete meal</Text>
-            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find a published main dish, then a complementary side. If no suitable online recipe is found, AI creates one. Review up to 30 confirmed ingredients for each search.</Text>
+            <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Find a published main dish, then a complementary side. If no suitable online recipe is found, AI creates one. Review up to 30 kitchen ingredients for each search.</Text>
             <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
               <Pressable testID="find-main-dish" disabled={Boolean(activeSearch) || !hydrated} onPress={() => openMealPicker('main')} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: colors.secondary }]}><Text style={[styles.outlineButtonText, { color: colors.primary }]}>Find main dish</Text></Pressable>
               <Pressable testID="find-side-dish" disabled={Boolean(activeSearch) || !hydrated || !mealMain} onPress={() => openMealPicker('side')} style={[styles.outlineButton, { borderColor: colors.border, backgroundColor: mealMain ? colors.secondary : colors.muted }, !mealMain && styles.disabled]}><Text style={[styles.outlineButtonText, { color: mealMain ? colors.primary : colors.mutedForeground }]}>Find side dish</Text></Pressable>
@@ -662,7 +660,7 @@ export default function RecipesScreen() {
         {section === 'kids' ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="info" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>Familiar foods are a starting point; each child’s likes vary. Adjust size and texture for your child’s age and supervise meals. Review every ingredient and allergy.</Text></View> : null}
         {statusMessage ? <View style={[styles.serviceMessage, { borderColor: discoveryError ? colors.destructive : colors.border, backgroundColor: colors.card }]}><Feather name={discoveryError ? 'wifi-off' : 'info'} size={16} color={discoveryError ? colors.destructive : colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{statusMessage}</Text></View> : null}
         {imageMessage ? <View style={[styles.serviceMessage, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="image" size={16} color={colors.primary} /><Text style={[styles.serviceText, { color: colors.mutedForeground }]}>{imageMessage}</Text>{!imageBusy && savedRecipes.some((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)) ? <Pressable testID="retry-recipe-images" onPress={() => void prepareImages(savedRecipes.filter((recipe) => recipe.source === 'server-ai' && !recipe.image && !isArchivedRecipe(recipe, archivedRecipes)).slice(0, 8))}><Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>Retry</Text></Pressable> : null}</View> : null}
-        {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search published recipes using your confirmed ingredients. General results need at least 3 ingredients besides the search anchor. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
+        {section === 'general' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Recipes from published sources</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search published recipes using your kitchen ingredients. General results need at least 3 ingredients besides the search anchor. Choose automatic or manual search anchors after pressing Find online.</Text></View><Pressable testID="find-published-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {section === 'kids' ? <View style={[styles.discoveryCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={{ flex: 1 }}><Text style={[styles.discoveryTitle, { color: colors.foreground }]}>Kid-friendly recipes online</Text><Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>Search published recipes. Choose automatic or manual ingredient anchors.</Text></View><Pressable testID="find-kids-recipes" disabled={Boolean(activeSearch) || !hydrated} onPress={openPublishedSearch} style={[styles.discoverButton, { backgroundColor: colors.primary }]}><Text style={[styles.discoverButtonText, { color: colors.primaryForeground }]}>{externalBusy ? 'Finding' : 'Find online'}</Text></Pressable></View> : null}
         {(section === 'kids' ? kidSourceResults : externalSourceResults).length ? <View style={[styles.sourceStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.sourceStatusTitle, { color: colors.foreground }]}>Online source results</Text><Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>Counts are eligible recipes per provider; up to 50 are returned per search.</Text>{(section === 'kids' ? kidSourceResults : externalSourceResults).map((source) => <Text key={source.provider} style={[styles.sourceStatusRow, { color: source.status === 'found' ? colors.primary : source.status === 'unavailable' ? colors.destructive : colors.mutedForeground }]}>{source.provider}: {onlineSourceDescription(source)}</Text>)}</View> : null}
         {currentResultCounts ? <Text style={[styles.sourceStatusRow, { color: colors.mutedForeground }]}>{currentResultCounts.eligible} eligible · {currentResultCounts.duplicates} duplicate links removed · {currentResultCounts.capped} beyond the {currentResultCounts.limit} limit · {currentResultCounts.returned} returned</Text> : null}
@@ -696,7 +694,7 @@ export default function RecipesScreen() {
               <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{item.provider} · {item.matchedIngredients.length} matching · {item.missingIngredients.length} missing</Text>
               {(item.provider === 'Spoonacular') && item.sourceName ? <Pressable onPress={() => void Linking.openURL(item.sourceUrl)}><Text style={[styles.discoveryBody, { color: colors.primary }]}>Recipe by {item.sourceName} ↗</Text></Pressable> : null}
               <Text style={[styles.resultIngredientText, { color: colors.primary }]}>Have: {item.matchedIngredients.join(', ') || 'No matched ingredients listed'}</Text>
-              <Text style={[styles.resultIngredientText, { color: item.missingIngredients.length ? colors.destructive : colors.primary }]}>{item.missingIngredients.length ? `Missing: ${item.missingIngredients.join(', ')}` : 'All required ingredients are in your confirmed kitchen.'}</Text>
+              <Text style={[styles.resultIngredientText, { color: item.missingIngredients.length ? colors.destructive : colors.primary }]}>{item.missingIngredients.length ? `Missing: ${item.missingIngredients.join(', ')}` : 'All required ingredient names match your kitchen.'}</Text>
               {item.possibleSubstitutions?.length ? <Text style={[styles.resultIngredientText, { color: colors.mutedForeground }]}>Possible substitutes (check recipe): {item.possibleSubstitutions.map((entry) => `${entry.pantryIngredient} for ${entry.recipeIngredient}`).join(', ')}</Text> : null}
               <Text style={[styles.discoveryBody, { color: colors.accentForeground }]}>Allergens, quantities, nutrition, and cooking safety are unverified.</Text>
               {!item.sourceUrl ? <OnlineRecipeDetails recipe={item} /> : null}
@@ -756,7 +754,7 @@ export default function RecipesScreen() {
             <View style={styles.pickerHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.progressTitle, { color: colors.foreground }]}>{publishedSearchStep === 'choice' ? pickerTarget === 'online' ? 'Choose how to search' : `Choose ${pickerTarget} ingredients` : publishedSearchStep === 'manual' ? 'Choose ingredients' : 'Confirm ingredients'}</Text>
-                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses food role, freshness, quantity, and category variety to pick up to 30 confirmed ingredients.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} · ${publishedDriverIds.length} ingredients`}</Text>
+                <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{publishedSearchStep === 'choice' ? 'Automatic ranking uses food role and category variety to pick up to 30 kitchen ingredients. Only common staples are excluded.' : publishedSearchStep === 'manual' ? `${publishedDriverIds.length} of ${MAX_PUBLISHED_SEARCH_ANCHORS} selected` : `${publishedSelectionMode === 'automatic' ? 'Automatically selected' : 'Manually selected'} · ${publishedDriverIds.length} ingredients`}</Text>
               </View>
               <Pressable testID="close-published-ingredients" onPress={() => setPublishedPickerOpen(false)} style={[styles.outlineButton, { borderColor: colors.border }]}>
                 <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Close</Text>
@@ -777,10 +775,10 @@ export default function RecipesScreen() {
                   </Pressable>;
                 })}</View>;
               })}
-              {!rankedPublishedIngredients.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>No eligible confirmed ingredients are available. Common seasonings and used ingredients are excluded from anchors.</Text> : null}
+              {!rankedPublishedIngredients.length ? <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>No kitchen ingredients are available to select. Common staples are excluded from anchors.</Text> : null}
             </ScrollView> : null}
             {publishedSearchStep === 'confirm' ? <ScrollView style={styles.pickerList} contentContainerStyle={{ gap: 14 }}>
-              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{pickerTarget === 'online' ? 'These ingredients will drive the published recipe search. Up to 30 confirmed kitchen ingredients are sent for matching.' : `These ingredients will search published ${pickerTarget} recipes first. AI is used only when no suitable online recipe is found. ${pickerTarget === 'side' && mealMain ? `The side will be paired with ${mealMain.title}.` : ''}`}</Text>
+              <Text style={[styles.discoveryBody, { color: colors.mutedForeground }]}>{pickerTarget === 'online' ? 'These ingredients will drive the published recipe search. Up to 30 search anchors and 64 kitchen ingredient names are sent for matching.' : `These ingredients will search published ${pickerTarget} recipes first. AI is used only when no suitable online recipe is found. ${pickerTarget === 'side' && mealMain ? `The side will be paired with ${mealMain.title}.` : ''}`}</Text>
               <Text style={[styles.discoveryBody, { color: colors.foreground }]}>{prioritySearchFoods.length ? `Top search foods: ${prioritySearchFoods.join(', ')}` : 'Selected ingredients will be used for recipe matching.'}</Text>
               {groupedPublishedIngredients.map((group) => {
                 const selected = group.ingredients.filter((ingredient) => publishedDriverIds.includes(ingredient.id));
