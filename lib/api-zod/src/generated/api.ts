@@ -22,6 +22,7 @@ export const HealthCheckResponse = zod.object({
  */
 export const analyzeIngredientPhotosBodyScanTypeDefault = `kitchen`;
 
+export const analyzeIngredientPhotosBodyPhotosMin = 0;
 export const analyzeIngredientPhotosBodyPhotosMax = 10;
 
 
@@ -33,7 +34,12 @@ export const AnalyzeIngredientPhotosBody = zod.object({
   "id": zod.string().min(1),
   "mimeType": zod.enum(['image/jpeg', 'image/png', 'image/webp']),
   "base64": zod.string().min(1)
-})).min(1).max(analyzeIngredientPhotosBodyPhotosMax),
+})).min(analyzeIngredientPhotosBodyPhotosMin).max(analyzeIngredientPhotosBodyPhotosMax).optional(),
+  "receiptPdf": zod.object({
+  "id": zod.string(),
+  "mimeType": zod.enum(['application/pdf']),
+  "base64": zod.string()
+}).optional().describe('One PDF receipt, at most 5 MB decoded. Requires scanType receipt and no photos. Supply photos or receiptPdf.'),
   "existingIngredients": zod.array(zod.object({
   "name": zod.string().min(1),
   "location": zod.enum(['Refrigerator', 'Freezer', 'Pantry'])

@@ -336,3 +336,70 @@ test("receipt scan rejects unsupported modes and invalid receipt classifications
   try { assert.equal((await request({ ...validRequest(), scanType: "receipt" }, await issueAccess())).status, 503); }
   finally { globalThis.fetch = original; }
 });
+
+test("PDF receipts use an inline file input and return reviewable purchases with stable import identity", async () => {
+  const pdf = Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF").toString("base64");
+  const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: pdf }, existingIngredients: [{ name: "eggs", location: "Refrigerator" }] };
+  let calls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (!String(input).includes("api.openai.com")) return originalFetch(input, init);
+    calls++;
+    const upstream = JSON.parse(String(init?.body));
+    const content = upstream.messages[0].content;
+    assert.deepEqual(content.find((part: { type: string }) => part.type === "file"), {
+      type: "file", file: { filename: "grocery-receipt.pdf", file_data: `data:application/pdf;base64,${pdf}` },
+    });
+    assert.equal(content.some((part: { type: string }) => part.type === "image_url"), false);
+    assert.match(content[0].text, /including every page/);
+    assert.equal(content[1].text, "Source ID: receipt-pdf-1");
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      suggestions: [{ itemType: "food", sourcePhotoId: "receipt-pdf-1", normalizedName: "eggs", displayName: "Eggs", storageLocation: "Refrigerator", quantity: 12, unit: "ea", confidence: 0.95, uncertaintyReasons: [] }], warnings: [],
+    }) } }] }));
+  };
+  try {
+    const first = await request(body, await issueAccess());
+    assert.equal(first.status, 200);
+    const result = await first.json();
+    assert.equal(result.suggestions[0].sourcePhotoId, "receipt-pdf-1");
+    assert.equal(result.suggestions[0].existingInventoryMatch, "egg");
+    assert.equal(result.suggestions[0].quantity, 12);
+    assert.equal(result.suggestions[0].quantityKnown, true);
+    const second = await request(body, await issueAccess());
+    assert.equal((await second.json()).scanId, result.scanId);
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("invalid, oversized, mixed and non-receipt PDF submissions are rejected before provider calls", async () => {
+  const pdf = { id: "receipt-pdf-1", mimeType: "application/pdf", base64: Buffer.from("%PDF-1.4\n%%EOF").toString("base64") };
+  const cases = [
+    { body: { scanType: "receipt", receiptPdf: { ...pdf, base64: "aGVsbG8=" } }, status: 400 },
+    { body: { scanType: "receipt", receiptPdf: { ...pdf, base64: "invalid!" } }, status: 400 },
+    { body: { scanType: "receipt", receiptPdf: { ...pdf, mimeType: "text/plain" } }, status: 400 },
+    { body: { receiptPdf: pdf }, status: 400 },
+    { body: { ...validRequest(), scanType: "receipt", receiptPdf: pdf }, status: 400 },
+    { body: { scanType: "receipt", photos: [] }, status: 400 },
+    { body: { scanType: "receipt", receiptPdf: { ...pdf, base64: Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(5 * 1024 * 1024)]).toString("base64") } }, status: 413 },
+  ];
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("api.openai.com")) throw new Error("Invalid PDF must never reach AI");
+    return originalFetch(input, init);
+  };
+  try {
+    for (const entry of cases) {
+      resetScanRateLimiter();
+      const response = await request(entry.body, await issueAccess());
+      assert.equal(response.status, entry.status);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("PDF recognition rejects fabricated source IDs and surfaces unreadable document failures", async () => {
+  const body = { scanType: "receipt", receiptPdf: { id: "receipt-pdf-1", mimeType: "application/pdf", base64: Buffer.from("%PDF-1.4\n%%EOF").toString("base64") } };
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ itemType: "food", sourcePhotoId: "photo-1", normalizedName: "rice", displayName: "Rice", storageLocation: "Pantry", quantity: 1, unit: "ea", confidence: 0.9, uncertaintyReasons: [] }], warnings: [] }) } }] }));
+  try {
+    assert.equal((await request(body, await issueAccess())).status, 503);
+    globalThis.fetch = async () => new Response("Unreadable/encrypted PDF", { status: 400 });
+    assert.equal((await request(body, await issueAccess())).status, 503);
+  } finally { globalThis.fetch = originalFetch; }
+});

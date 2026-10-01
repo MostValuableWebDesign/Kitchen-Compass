@@ -52,14 +52,32 @@ export const ScanAnalysisRequestScanType = {
   receipt: 'receipt',
 } as const;
 
+export type ScanAnalysisRequestReceiptPdfMimeType = typeof ScanAnalysisRequestReceiptPdfMimeType[keyof typeof ScanAnalysisRequestReceiptPdfMimeType];
+
+
+export const ScanAnalysisRequestReceiptPdfMimeType = {
+  'application/pdf': 'application/pdf',
+} as const;
+
+/**
+ * One PDF receipt, at most 5 MB decoded. Requires scanType receipt and no photos. Supply photos or receiptPdf.
+ */
+export type ScanAnalysisRequestReceiptPdf = {
+  id: string;
+  mimeType: ScanAnalysisRequestReceiptPdfMimeType;
+  base64: string;
+};
+
 export interface ScanAnalysisRequest {
   /** Recognize visible kitchen foods or purchased foods on an itemized grocery receipt. */
   scanType?: ScanAnalysisRequestScanType;
   /**
-     * @minItems 1
+     * @minItems 0
      * @maxItems 10
      */
-  photos: ScanPhoto[];
+  photos?: ScanPhoto[];
+  /** One PDF receipt, at most 5 MB decoded. Requires scanType receipt and no photos. Supply photos or receiptPdf. */
+  receiptPdf?: ScanAnalysisRequestReceiptPdf;
   existingIngredients?: ExistingIngredient[];
 }
 

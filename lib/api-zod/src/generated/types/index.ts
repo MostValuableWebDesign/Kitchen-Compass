@@ -52,6 +52,8 @@ export * from './resolveRecipeImages200ImagesItem';
 export * from './resolveRecipeImages200ImagesItemSource';
 export * from './scanAccessResponse';
 export * from './scanAnalysisRequest';
+export * from './scanAnalysisRequestReceiptPdf';
+export * from './scanAnalysisRequestReceiptPdfMimeType';
 export * from './scanAnalysisRequestScanType';
 export * from './scanAnalysisResponse';
 export * from './scanError';

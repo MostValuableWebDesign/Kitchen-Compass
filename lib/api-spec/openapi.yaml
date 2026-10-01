@@ -186,15 +186,26 @@ components:
           description: Recognize visible kitchen foods or purchased foods on an itemized grocery receipt.
         photos:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 10
           items:
             $ref: "#/components/schemas/ScanPhoto"
+        receiptPdf:
+          type: object
+          description: One PDF receipt, at most 5 MB decoded. Requires scanType receipt and no photos. Supply photos or receiptPdf.
+          properties:
+            id:
+              type: string
+            mimeType:
+              type: string
+              enum: [application/pdf]
+            base64:
+              type: string
+          required: [id, mimeType, base64]
         existingIngredients:
           type: array
           items:
             $ref: "#/components/schemas/ExistingIngredient"
-      required: [photos]
     ScanError:
       type: object
       properties:

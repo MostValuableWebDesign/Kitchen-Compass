@@ -1,3 +1,5 @@
+import { File, Paths } from 'expo-file-system';
+import { prepareReceiptPdf, validateReceiptPdfFile, type ReceiptPdf } from '@/lib/receiptPdf';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -88,6 +90,8 @@ export default function ScanScreen() {
   const [scanType, setScanType] = useState<'kitchen' | 'receipt'>('kitchen');
   const [receiptOptionsOpen, setReceiptOptionsOpen] = useState(false);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
+  const [receiptPdfName, setReceiptPdfName] = useState<string | null>(null);
+  const [pdfPickerBusy, setPdfPickerBusy] = useState(false);
   const [keepPhotos, setKeepPhotos] = useState(false);
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const [analysisProgressClock, setAnalysisProgressClock] = useState(Date.now());
@@ -103,7 +107,7 @@ export default function ScanScreen() {
     ? Math.min(95, Math.floor(((analysisProgressClock - analysisStartedAt) / analysisProgressLimitMs) * 95))
     : recognitionState === 'ready' ? 100 : 0;
   const analysisStage = analysisProgressPercent < 25
-    ? 'Preparing your photos…'
+    ? receiptPdfName ? 'Preparing your PDF…' : 'Preparing your photos…'
     : analysisProgressPercent < 85
       ? 'Uploading and recognizing ingredients…'
       : 'Finishing your scan…';
@@ -113,10 +117,12 @@ export default function ScanScreen() {
   }, [pendingModelUri]);
 
   const openSettings = () => { if (Platform.OS !== 'web') Linking.openSettings().catch(() => undefined); };
-  const reviewPhotos = async (assets: ScanPhotoAsset[], scanLocation?: StorageLocation, reviewType = scanType) => {
-    if (analysisGuard.current || !assets.length || assets.length > MAX_SCAN_PHOTOS) return;
+  const reviewPhotos = async (assets: ScanPhotoAsset[], scanLocation?: StorageLocation, reviewType = scanType, receiptPdf?: ReceiptPdf) => {
+    if (analysisGuard.current || (!assets.length && !receiptPdf) || assets.length > MAX_SCAN_PHOTOS) return;
     analysisGuard.current = true;
     setScanType(reviewType);
+    setReceiptPdfName(receiptPdf?.name ?? null);
+    setKeepPhotos(false);
     setPhotoUris(assets.map((asset) => asset.uri));
     setSuggestions([]);
     setScanId(null);
@@ -146,6 +152,7 @@ export default function ScanScreen() {
       const result = await analyzeIngredientPhotos({
         scanType: reviewType,
         photos,
+        ...(receiptPdf ? { receiptPdf: { id: 'receipt-pdf-1', mimeType: 'application/pdf' as const, base64: receiptPdf.base64 } } : {}),
         existingIngredients: ingredients.map((item) => ({ name: item.name, location: item.location })),
       });
       setScanId(result.scanId);
@@ -177,6 +184,30 @@ export default function ScanScreen() {
       );
     } finally {
       analysisGuard.current = false;
+    }
+  };
+  const pickReceiptPdf = async () => {
+    if (pdfPickerBusy || analysisGuard.current || pendingPhotos.length) return;
+    setPdfPickerBusy(true);
+    let cachedUri: string | undefined;
+    try {
+      const DocumentPicker = await import('expo-document-picker');
+      const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true, multiple: false, base64: true });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      if (Platform.OS !== 'web') cachedUri = asset.uri;
+      validateReceiptPdfFile(asset);
+      const encoded = Platform.OS === 'web' ? asset.base64 : await new File(asset.uri).base64();
+      if (!encoded) throw new Error('The PDF could not be read. Download it to Files and try again.');
+      await reviewPhotos([], undefined, 'receipt', prepareReceiptPdf(asset.name, encoded));
+    } catch (error) {
+      Alert.alert('PDF receipt unavailable', error instanceof Error ? error.message.includes('Cannot find native module') ? 'PDF import requires an updated Kitchen Compass app build. Update the app and try again.' : error.message : 'The PDF could not be opened. Try downloading it to Files again.');
+    } finally {
+      // Delete only the picker copy inside the app cache, never the original in Files.
+      if (cachedUri?.startsWith(`${Paths.cache.uri.replace(/\/$/, '')}/`)) {
+        try { const file = new File(cachedUri); if (file.exists) file.delete(); } catch { /* The OS also clears cache files. */ }
+      }
+      setPdfPickerBusy(false);
     }
   };
   const scanSpace = async (targetLocation: StorageLocation) => {
@@ -404,6 +435,7 @@ export default function ScanScreen() {
   const resetScan = () => {
     setScanType('kitchen');
     setReceiptOptionsOpen(false);
+    setReceiptPdfName(null);
     setScanWarnings([]);
     saveGuard.current = false;
     setSpaceOptionsOpen(false);
@@ -631,13 +663,14 @@ export default function ScanScreen() {
               <Text style={[styles.introBody, { color: colors.mutedForeground }]}>Photograph a shelf or an ingredient. You’ll always review names and quantities before anything is saved.</Text>
             </View>
             <SectionTitle title="Choose how to add" />
-            <Pressable testID="take-photo" disabled={pendingPhotos.length > 0 && scanType === 'receipt'} onPress={() => { setScanType('kitchen'); void takePhoto(); }} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
-            <Pressable testID="choose-photo" disabled={pendingPhotos.length > 0 && scanType === 'receipt'} onPress={() => { setScanType('kitchen'); void pickPhoto(); }} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
-            <Pressable testID="upload-grocery-receipt" accessibilityRole="button" accessibilityState={{ expanded: receiptOptionsOpen }} disabled={scanBusy || barcodeBusy || pendingPhotos.length > 0} onPress={() => setReceiptOptionsOpen((open) => !open)} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="receipt-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Upload grocery receipt</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Read itemized foods, then review before adding</Text></View><Feather name={receiptOptionsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable>
+            <Pressable testID="take-photo" disabled={pdfPickerBusy || (pendingPhotos.length > 0 && scanType === 'receipt')} onPress={() => { setScanType('kitchen'); void takePhoto(); }} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.primary }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.primaryForeground }]}><Ionicons name="camera-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.primaryForeground }]}>Take a photo</Text><Text style={[styles.actionBody, { color: colors.primaryForeground }]}>Use your iPhone camera</Text></View><Feather name="chevron-right" size={18} color={colors.primaryForeground} /></Pressable>
+            <Pressable testID="choose-photo" disabled={pdfPickerBusy || (pendingPhotos.length > 0 && scanType === 'receipt')} onPress={() => { setScanType('kitchen'); void pickPhoto(); }} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="images-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Choose from photos</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Use an existing kitchen photo</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
+            <Pressable testID="upload-grocery-receipt" accessibilityRole="button" accessibilityState={{ expanded: receiptOptionsOpen }} disabled={scanBusy || barcodeBusy || pdfPickerBusy || pendingPhotos.length > 0} onPress={() => setReceiptOptionsOpen((open) => !open)} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="receipt-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Upload grocery receipt</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Read itemized foods, then review before adding</Text></View><Feather name={receiptOptionsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable>
             {receiptOptionsOpen ? <View style={[styles.spaceSetup, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Use clear photos or screenshots of the receipt. Include the item names and quantities. Add up to 10 images for a long receipt; totals, payments, and non-food purchases are ignored.</Text>
-              <Pressable testID="receipt-choose-photos" onPress={() => { setScanType('receipt'); void pickPhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.primary }]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Choose receipt photos</Text></Pressable>
-              <Pressable testID="receipt-take-photo" onPress={() => { setScanType('receipt'); void takePhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Photograph receipt</Text></Pressable>
+              <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Choose a PDF from Files, or use clear photos or screenshots of the receipt. PDFs can include multiple pages and must be 5 MB or smaller. Include the item names and quantities. Add up to 10 images for a long receipt; totals, payments, and non-food purchases are ignored.</Text>
+              <Pressable testID="receipt-choose-pdf" disabled={pdfPickerBusy} onPress={() => void pickReceiptPdf()} style={[styles.sessionButton, { backgroundColor: colors.primary, marginBottom: 10 }]}>{pdfPickerBusy ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Choose PDF from Files</Text>}</Pressable>
+              <Pressable testID="receipt-choose-photos" disabled={pdfPickerBusy} onPress={() => { setScanType('receipt'); void pickPhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.primary }]}><Text style={[styles.sessionButtonText, { color: colors.primaryForeground }]}>Choose receipt photos</Text></Pressable>
+              <Pressable testID="receipt-take-photo" disabled={pdfPickerBusy} onPress={() => { setScanType('receipt'); void takePhoto(); }} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginTop: 10 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Photograph receipt</Text></Pressable>
             </View> : null}
             <Pressable testID="scan-barcode" disabled={barcodeBusy || pendingPhotos.length > 0 || scanBusy} onPress={() => void openBarcodeCamera()} style={({ pressed }) => [styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }, pressed && styles.pressed, (barcodeBusy || pendingPhotos.length > 0 || scanBusy) && styles.disabled]}><View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}><Ionicons name="barcode-outline" size={22} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.foreground }]}>Scan food barcode</Text><Text style={[styles.actionBody, { color: colors.mutedForeground }]}>Find the exact packaged product name</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>
             {barcodeBusy ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><ActivityIndicator color={colors.primary} /><Text style={[styles.stateText, { color: colors.foreground }]}>Looking up food product…</Text></View> : null}
@@ -659,16 +692,16 @@ export default function ScanScreen() {
              </View> : null}
              <View style={[styles.barcodeNote, { backgroundColor: colors.muted }]}><Ionicons name="barcode-outline" size={18} color={colors.mutedForeground} /><Text style={[styles.barcodeText, { color: colors.mutedForeground }]}>Barcode names come from Open Food Facts. Check the package label before saving; package size does not tell us how many you own.</Text></View>
               {spaceScans.length ? <><SectionTitle title="Saved 3D spaces" />{spaceScans.slice().reverse().map((scan) => <View key={scan.id} style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{scan.location} · {new Date(scan.createdAt).toLocaleDateString()}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>{scan.ingredientNames.length ? scan.ingredientNames.join(', ') : 'No ingredients confirmed'}</Text><View style={styles.sessionActions}><Pressable onPress={() => void viewModel(scan.modelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View 3D model</Text></Pressable><Pressable onPress={() => Alert.alert('Delete 3D scan?', 'This removes the saved model. Kitchen ingredients remain.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteSpaceScan(scan.id) }])} style={[styles.sessionButton, { backgroundColor: colors.muted }]}><Text style={[styles.sessionButtonText, { color: colors.destructive }]}>Delete</Text></Pressable></View></View>)}</> : null}
-              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Photo recognition sends photos to the Kitchen Compass server and an external AI service. Barcode lookup sends only the barcode to Open Food Facts. Ingredients are added only after review. Photo copies are optional; a saved 3D surface model stays on this device until you delete it.</Text></View>
+              <View style={[styles.privacyNote, { backgroundColor: colors.muted }]}><Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} /><Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Receipt and photo recognition sends the selected PDF or photos to the Kitchen Compass server and an external AI service. Barcode lookup sends only the barcode to Open Food Facts. Ingredients are added only after review. Photo copies are optional; a saved 3D surface model stays on this device until you delete it.</Text></View>
           </>
         ) : (
           <>
-            {photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
+            {receiptPdfName ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name="document-text-outline" size={28} color={colors.primary} /><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{receiptPdfName}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>PDF receipt · Review extracted foods below. The PDF is not saved in your kitchen.</Text></View> : photoUris.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>{photoUris.map((uri) => <Image key={uri} source={{ uri }} style={styles.thumbnail} />)}</ScrollView> : <View style={[styles.manualPreview, { backgroundColor: colors.secondary }]}><Feather name="edit-3" size={28} color={colors.primary} /></View>}
             {pendingModelUri ? <Pressable onPress={() => void viewModel(pendingModelUri)} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 16 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>View rotatable 3D model</Text></Pressable> : null}
              {scannedBarcode ? <View style={[styles.cameraSession, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.cameraSessionTitle, { color: colors.foreground }]}>{barcodeProduct ? 'Found on Open Food Facts' : 'Barcode scanned'}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>{barcodeProduct ? `${barcodeProduct.name}${barcodeProduct.packageSize ? ` · Package: ${barcodeProduct.packageSize}` : ''}` : barcodeMessage}</Text><Text style={[styles.cameraSessionBody, { color: colors.mutedForeground }]}>Barcode {scannedBarcode}. Confirm the food name and storage location below. A repeated product adds one to its existing quantity; package size is not an inventory quantity.</Text></View> : null}
-            <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length ? scanType === 'receipt' ? 'Review purchased foods' : 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
-            {scanType === 'receipt' && recognitionState === 'ready' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Confirm the foods you purchased, their quantities, and where to store them. Existing foods default to additional stock. An identical previously imported receipt defaults to skipping its items.</Text>{scanWarnings.map((warning, index) => <Text key={index} style={[styles.reviewBody, { color: colors.mutedForeground }]}>{warning}</Text>)}{!suggestions.length ? <Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>No purchased foods could be read. Try a clearer receipt photo or add items manually below.</Text> : null}</View> : null}
-            {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}…</Text></View> : null}
+            <View style={styles.reviewHeading}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>{photoUris.length || receiptPdfName ? scanType === 'receipt' ? 'Review purchased foods' : 'Review recognized items' : 'Add an ingredient'}</Text><Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>{photoUris.length || receiptPdfName ? 'Recognition is a starting point. Edit, remove, or confirm every item before saving.' : 'Only confirmed information is added to your kitchen.'}</Text></View>
+            {scanType === 'receipt' && recognitionState === 'ready' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>Confirm the foods you purchased, their quantities, and where to store them. Existing foods default to additional stock. An identical previously imported receipt defaults to skipping its items.</Text>{scanWarnings.map((warning, index) => <Text key={index} style={[styles.reviewBody, { color: colors.mutedForeground }]}>{warning}</Text>)}{!suggestions.length ? <Text style={[styles.reviewBody, { color: colors.mutedForeground }]}>No purchased foods could be read. Try a clearer receipt or add items manually below.</Text> : null}</View> : null}
+            {recognitionState === 'analyzing' ? <View style={[styles.stateNote, { backgroundColor: colors.secondary }]}><Text style={[styles.stateText, { color: colors.foreground }]}>{receiptPdfName ? 'Analyzing your PDF receipt…' : `Analyzing ${photoUris.length} photo${photoUris.length === 1 ? '' : 's'}…`}</Text></View> : null}
              {recognitionState === 'unavailable' ? <><View style={[styles.stateNote, { backgroundColor: colors.accent }]}><Ionicons name="cloud-offline-outline" size={18} color={colors.accentForeground} /><Text style={[styles.stateText, { color: colors.accentForeground }]}>{recognitionMessage}</Text></View>{pendingPhotos.length ? <Pressable onPress={() => setMode('choose')} style={[styles.sessionButton, { backgroundColor: colors.secondary, marginBottom: 12 }]}><Text style={[styles.sessionButtonText, { color: colors.primary }]}>Review photos and try again</Text></Pressable> : null}</> : null}
              {suggestions.map((suggestion) => {
                const matchingRows = ingredients.filter((item) => (item.normalizedName ?? normalizeIngredientName(item.name)) === suggestion.existingInventoryMatch);
@@ -678,7 +711,7 @@ export default function ScanScreen() {
                const sourcePhotoUri = photoUris[sourcePhotoIndex];
                return <View key={suggestion.suggestionId} style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                  <View style={styles.suggestionHeader}><Text style={[styles.suggestionLabel, { color: colors.mutedForeground }]}>REVIEW SUGGESTION</Text><Pressable accessibilityLabel={`Remove ${suggestion.displayName}`} onPress={() => removeSuggestion(suggestion.suggestionId)}><Feather name="trash-2" size={18} color={colors.destructive} /></Pressable></View>
-                 {sourcePhotoUri ? <View style={styles.sourcePhotoRow}><Image source={{ uri: sourcePhotoUri }} style={styles.sourceThumbnail} /><Text style={[styles.sourcePhotoLabel, { color: colors.mutedForeground }]}>From photo {sourcePhotoIndex + 1}</Text></View> : null}
+                 {receiptPdfName ? <Text style={[styles.sourcePhotoLabel, { color: colors.mutedForeground }]}>From PDF receipt</Text> : sourcePhotoUri ? <View style={styles.sourcePhotoRow}><Image source={{ uri: sourcePhotoUri }} style={styles.sourceThumbnail} /><Text style={[styles.sourcePhotoLabel, { color: colors.mutedForeground }]}>From photo {sourcePhotoIndex + 1}</Text></View> : null}
                   <View style={styles.nameInputRow}>
                     <FoodIdentityIcon name={suggestion.displayName} size={42} />
                     <TextInput value={suggestion.displayName} onChangeText={(value) => updateSuggestion(suggestion.suggestionId, { displayName: value, normalizedName: value.trim().toLowerCase() })} placeholder="Ingredient name" placeholderTextColor={colors.mutedForeground} style={[styles.input, styles.nameInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
@@ -716,7 +749,7 @@ export default function ScanScreen() {
             <View style={styles.chips}>{(['Refrigerator', 'Freezer', 'Pantry'] as StorageLocation[]).map((item) => <Chip key={item} label={item} selected={location === item} onPress={() => setLocation(item)} />)}</View>
              <Pressable testID="add-manual-to-batch" onPress={stageManualIngredient} style={({ pressed }) => [styles.stageButton, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}><Feather name="plus" size={17} color={colors.primary} /><Text style={[styles.stageButtonText, { color: colors.primary }]}>Add to batch</Text></Pressable>
             {scannedBarcode && ingredients.some((item) => item.status !== 'used' && item.location === location && (item.barcode === scannedBarcode || normalizeIngredientName(item.name) === normalizeIngredientName(name))) ? <Text style={[styles.cameraSessionBody, { color: colors.mutedForeground, marginTop: 12 }]}>This food is already in your kitchen at this location. Saving will attach its barcode without adding duplicate stock. Edit the existing item to change its quantity.</Text> : null}
-              {photoUris.length ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>{scanType === 'receipt' ? 'Receipt quantities can be misread. Check amounts and units before saving; unreadable quantities default to 1 ea.' : 'Photos do not determine quantities. New items default to 1 ea, and additional stock uses the existing item’s unit; review or edit these values before saving.'}</Text></View><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable></> : null}
+              {photoUris.length || receiptPdfName ? <><View style={[styles.uncertainNote, { backgroundColor: colors.accent }]}><Ionicons name="alert-circle-outline" size={18} color={colors.accentForeground} /><Text style={[styles.uncertainText, { color: colors.accentForeground }]}>{scanType === 'receipt' ? 'Receipt quantities can be misread. Check amounts and units before saving; unreadable quantities default to 1 ea.' : 'Photos do not determine quantities. New items default to 1 ea, and additional stock uses the existing item’s unit; review or edit these values before saving.'}</Text></View>{!receiptPdfName ? <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: keepPhotos }} onPress={() => setKeepPhotos((value) => !value)} style={[styles.keepPhotoToggle, { backgroundColor: colors.muted }]}><Ionicons name={keepPhotos ? 'checkbox' : 'square-outline'} size={20} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.keepPhotoTitle, { color: colors.foreground }]}>Keep scan photo copies in this app</Text><Text style={[styles.keepPhotoBody, { color: colors.mutedForeground }]}>Off by default. Ingredient names and quantities are kept either way.</Text></View></Pressable> : null}</> : null}
             <Pressable testID="save-ingredient" disabled={recognitionState === 'analyzing'} onPress={saveIngredient} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, recognitionState === 'analyzing' && styles.disabled]}><Text style={[styles.saveText, { color: colors.primaryForeground }]}>{manualEntries.length > 0 ? 'Save all to My Kitchen' : 'Save to My Kitchen'}</Text></Pressable>
           </>
         )}
