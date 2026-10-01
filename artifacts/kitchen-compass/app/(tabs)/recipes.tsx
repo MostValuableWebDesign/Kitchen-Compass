@@ -739,6 +739,10 @@ export default function RecipesScreen() {
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.progressTitle, { color: colors.foreground }]}>{activeSearch?.kind === 'published' ? 'Finding online recipes' : activeSearch?.kind === 'kids-online' ? 'Finding kid-friendly recipes online' : activeSearch?.kind === 'main-online' ? 'Finding a main dish online' : activeSearch?.kind === 'side-online' ? 'Finding a side dish online' : activeSearch?.kind === 'main-ai' ? 'Creating a main dish with AI' : activeSearch?.kind === 'side-ai' ? 'Creating a side dish with AI' : activeSearch?.kind === 'kids-ai' ? 'Creating kid-friendly recipes' : 'Finding recipes from your kitchen'}</Text>
+            {!activeSearch?.complete ? <>
+              <Text testID="recipe-time-estimate" style={[styles.progressNote, { color: colors.mutedForeground }]}>Rough estimate: {progressLimitMs === 30_000 ? '10–30 seconds for this online search.' : '30 seconds–3 minutes to generate recipes.'}</Text>
+              <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>Elapsed: {Math.max(0, Math.floor((progressClock - (activeSearch?.startedAt ?? progressClock)) / 1000))} seconds · Times vary. Recipe images may arrive afterward.</Text>
+            </> : null}
             <Text style={[styles.progressPercent, { color: colors.primary }]}>{progressPercent}%</Text>
             <View testID="recipe-search-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated recipe search progress" accessibilityValue={{ min: 0, max: 100, now: progressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
               <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${progressPercent}%` }]} />

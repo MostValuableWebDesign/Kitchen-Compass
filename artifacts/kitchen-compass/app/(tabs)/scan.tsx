@@ -762,7 +762,9 @@ export default function ScanScreen() {
       <Modal visible={recognitionState === 'analyzing'} transparent animationType="fade" onRequestClose={() => undefined}>
         <View style={styles.progressBackdrop}>
           <View style={[styles.progressCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.progressTitle, { color: colors.foreground }]}>Analyzing {photoUris.length} photo{photoUris.length === 1 ? '' : 's'}</Text>
+            <Text style={[styles.progressTitle, { color: colors.foreground }]}>{receiptPdfName ? 'Analyzing your PDF receipt' : scanType === 'receipt' ? 'Analyzing your receipt' : `Analyzing ${photoUris.length} photo${photoUris.length === 1 ? '' : 's'}`}</Text>
+            <Text testID="analysis-time-estimate" style={[styles.progressNote, { color: colors.mutedForeground }]}>Rough estimate: {scanType === 'receipt' ? '30 seconds–2 minutes. Long receipts may take longer.' : '15–60 seconds.'}</Text>
+            <Text style={[styles.progressSubnote, { color: colors.mutedForeground }]}>Elapsed: {Math.max(0, Math.floor((analysisProgressClock - (analysisStartedAt ?? analysisProgressClock)) / 1000))} seconds · Times vary with upload speed and processing.</Text>
             <Text style={[styles.progressPercent, { color: colors.primary }]}>{analysisProgressPercent}%</Text>
             <View testID="photo-analysis-progress" accessibilityRole="progressbar" accessibilityLabel="Estimated photo analysis progress" accessibilityValue={{ min: 0, max: 100, now: analysisProgressPercent }} style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
               <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${analysisProgressPercent}%` }]} />
