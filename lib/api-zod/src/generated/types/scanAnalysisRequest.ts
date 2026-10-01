@@ -6,12 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ExistingIngredient } from './existingIngredient';
+import type { ScanAnalysisRequestScanType } from './scanAnalysisRequestScanType';
 import type { ScanPhoto } from './scanPhoto';
 
 export interface ScanAnalysisRequest {
+  /** Recognize visible kitchen foods or purchased foods on an itemized grocery receipt. */
+  scanType?: ScanAnalysisRequestScanType;
   /**
      * @minItems 1
-     * @maxItems 8
+     * @maxItems 10
      */
   photos: ScanPhoto[];
   existingIngredients?: ExistingIngredient[];

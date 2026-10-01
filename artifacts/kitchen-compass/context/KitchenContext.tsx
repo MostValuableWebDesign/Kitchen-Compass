@@ -66,7 +66,7 @@ export interface Ingredient {
   photoUri?: string;
   barcode?: string;
   brand?: string;
-  source?: 'manual' | 'scan' | 'purchase' | 'barcode';
+  source?: 'manual' | 'scan' | 'purchase' | 'barcode' | 'receipt';
   sourceScanId?: string;
   sourcePhotoId?: string;
   reviewedAt?: string;

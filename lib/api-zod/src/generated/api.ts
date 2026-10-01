@@ -20,14 +20,15 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Analyze kitchen photos for reviewable ingredient suggestions
  */
+export const analyzeIngredientPhotosBodyScanTypeDefault = `kitchen`;
 
-
-export const analyzeIngredientPhotosBodyPhotosMax = 8;
+export const analyzeIngredientPhotosBodyPhotosMax = 10;
 
 
 
 
 export const AnalyzeIngredientPhotosBody = zod.object({
+  "scanType": zod.enum(['kitchen', 'receipt']).default(analyzeIngredientPhotosBodyScanTypeDefault).describe('Recognize visible kitchen foods or purchased foods on an itemized grocery receipt.'),
   "photos": zod.array(zod.object({
   "id": zod.string().min(1),
   "mimeType": zod.enum(['image/jpeg', 'image/png', 'image/webp']),

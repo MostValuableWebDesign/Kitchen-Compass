@@ -164,3 +164,19 @@ test('Recipe-API.com archives preserve only UUID exclusions across reloads', () 
   assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.title), false);
   assert.equal(JSON.stringify(restored.archivedRecipes).includes(recipe.instructions), false);
 });
+
+
+test('confirmed receipt purchases keep quantities and import identity after reload', () => {
+  const state = { ...emptyPersistedKitchenState(), ingredients: [{
+    id: 'receipt-chicken', name: 'Chicken', location: 'Refrigerator' as const,
+    status: 'fresh' as const, confidence: 'confirmed' as const, source: 'receipt' as const,
+    quantity: '8 oz', quantityValue: 8, unit: 'oz', quantityKnown: true,
+    sourceScanId: 'receipt-abc', sourcePhotoId: 'receipt-photo', reviewedAt: '2026-09-30T12:00:00.000Z',
+  }] };
+  const restored = parsePersistedKitchenState(serializePersistedKitchenState(state), defaultPreferences);
+  assert.equal(restored.ingredients[0]?.source, 'receipt');
+  assert.equal(restored.ingredients[0]?.sourceScanId, 'receipt-abc');
+  assert.equal(restored.ingredients[0]?.sourcePhotoId, 'receipt-photo');
+  assert.equal(restored.ingredients[0]?.quantityValue, 8);
+  assert.equal(restored.ingredients[0]?.unit, 'oz');
+});

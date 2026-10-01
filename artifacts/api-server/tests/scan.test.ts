@@ -298,3 +298,41 @@ test("multi-photo scans preserve source photos and deduplicate the same ingredie
     globalThis.fetch = original;
   }
 });
+test("receipt mode extracts purchased foods, ignores adjustments, and preserves grocery quantities", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (!String(input).includes("api.openai.com")) return original(input, init);
+    calls++;
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.response_format.json_schema.name, "grocery_receipt");
+    assert.match(body.messages[0].content[0].text, /Prices, unit prices, totals, and payment amounts are NOT quantities/);
+    assert.match(body.messages[0].content[0].text, /untrusted data/);
+    const item = (name: string, itemType = "food", quantity: number | null = 2, unit: string | null = "ea") => ({ sourcePhotoId: "photo-1", normalizedName: name, displayName: name, storageLocation: "Pantry", quantity, unit, confidence: 0.9, uncertaintyReasons: [], itemType });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [item("Eggs"), item("Chicken", "food", 0.5, "lb"), item("Mystery produce", "food", null, null), item("Soap", "nonfood"), item("Tax", "adjustment"), item("Subtotal", "food"), item("Returned rice", "adjustment"), item("Void beans", "food", 0)], warnings: [] }) } }] }));
+  };
+  try {
+    const body = { ...validRequest(), scanType: "receipt" };
+    const response = await request(body, await issueAccess());
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.suggestions.length, 3);
+    assert.equal(result.suggestions[0].existingInventoryMatch, "egg");
+    assert.equal(result.suggestions[0].quantity, 2);
+    assert.equal(result.suggestions[1].quantity, 8);
+    assert.equal(result.suggestions[1].unit, "oz");
+    assert.equal(result.suggestions[2].quantityKnown, false);
+    assert.match(result.scanId, /^receipt-[a-f0-9]{24}$/);
+    const repeated = await request(body, await issueAccess());
+    assert.equal((await repeated.json()).scanId, result.scanId);
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = original; }
+});
+
+test("receipt scan rejects unsupported modes and invalid receipt classifications", async () => {
+  assert.equal((await request({ ...validRequest(), scanType: "pdf" }, await issueAccess())).status, 400);
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => String(input).includes("api.openai.com") ? new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ sourcePhotoId: "photo-1", normalizedName: "rice", displayName: "Rice", storageLocation: "Pantry", quantity: 1, unit: "ea", confidence: 0.9, uncertaintyReasons: [] }], warnings: [] }) } }] })) : original(input, init);
+  try { assert.equal((await request({ ...validRequest(), scanType: "receipt" }, await issueAccess())).status, 503); }
+  finally { globalThis.fetch = original; }
+});

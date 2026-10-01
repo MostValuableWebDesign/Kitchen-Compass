@@ -41,10 +41,23 @@ export interface ExistingIngredient {
   location: ExistingIngredientLocation;
 }
 
+/**
+ * Recognize visible kitchen foods or purchased foods on an itemized grocery receipt.
+ */
+export type ScanAnalysisRequestScanType = typeof ScanAnalysisRequestScanType[keyof typeof ScanAnalysisRequestScanType];
+
+
+export const ScanAnalysisRequestScanType = {
+  kitchen: 'kitchen',
+  receipt: 'receipt',
+} as const;
+
 export interface ScanAnalysisRequest {
+  /** Recognize visible kitchen foods or purchased foods on an itemized grocery receipt. */
+  scanType?: ScanAnalysisRequestScanType;
   /**
      * @minItems 1
-     * @maxItems 8
+     * @maxItems 10
      */
   photos: ScanPhoto[];
   existingIngredients?: ExistingIngredient[];
