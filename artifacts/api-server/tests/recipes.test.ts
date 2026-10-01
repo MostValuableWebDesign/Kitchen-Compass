@@ -476,7 +476,7 @@ test("recipe discovery removes a substitution that fails the same allergen check
   assert.deepEqual(payload.recipes[0]!.substitutions, []);
 });
 
-test("file cache reuses recipes across pantry additions and variation seeds without AI", async () => {
+test("partial cache keeps reusable recipes when additional generation fails", async () => {
   const first = await discoverModelRecipe(validModelRecipe());
   assert.equal(first.status, 200);
   const generated = await first.json();
@@ -489,7 +489,8 @@ test("file cache reuses recipes across pantry additions and variation seeds with
     const response = await send(body);
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).recipes, generated.recipes);
-    assert.equal(calls, 0);
+    assert.equal(calls, 1);
+    calls = 0;
     assert.equal((await send({ ...body, excludeRecipeVersions: [generated.recipes[0].recipeVersion] })).status, 503);
     assert.equal(calls, 1);
     calls = 0;
@@ -508,4 +509,34 @@ test("cached recipes work without an AI key but require available ingredients", 
     const body = requestBody(); body.inventory[0]!.status = "used";
     assert.equal((await send(body)).status, 503);
   } finally { process.env.OPENAI_API_KEY = key; }
+});
+
+test("partial cache requests only missing slots, combines new ideas, and full cache skips AI", async () => {
+  const first = await discoverModelRecipe(validModelRecipe());
+  assert.equal(first.status, 200);
+  const initial = (await first.json()).recipes[0];
+  const body = requestBody(); body.variationSeed = "new-variation";
+  const send = () => originalFetch(`${baseUrl}/recipes/discover`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${createScanAccessToken()}` }, body: JSON.stringify(body) });
+  let calls = 0;
+  globalThis.fetch = async (_target, init) => {
+    calls++;
+    const prompt = JSON.parse(String(init?.body));
+    assert.equal(prompt.response_format.json_schema.schema.properties.recipes.maxItems, 4);
+    assert.match(prompt.messages[0].content, /Return at most 4 NEW recipes/);
+    assert.match(prompt.messages[0].content, /Egg and greens bowl/);
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ recipes: ["Egg breakfast", "Egg skillet", "Egg plate", "Egg scramble"].map((title) => ({ ...validModelRecipe(), title })) }) } }] }));
+  };
+  try {
+    const supplemented = await send();
+    assert.equal(supplemented.status, 200);
+    const combined = (await supplemented.json()).recipes;
+    assert.equal(combined.length, 5);
+    assert.equal(combined[0].recipeVersion, initial.recipeVersion);
+    assert.equal(new Set(combined.map((recipe: { title: string }) => recipe.title)).size, 5);
+    assert.equal(calls, 1);
+    globalThis.fetch = async () => { assert.fail("Full recipe cache must not call AI"); };
+    const reused = await send();
+    assert.equal(reused.status, 200);
+    assert.equal((await reused.json()).recipes.length, 5);
+  } finally { globalThis.fetch = originalFetch; }
 });
